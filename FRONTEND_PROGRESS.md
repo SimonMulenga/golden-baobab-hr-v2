@@ -4,7 +4,7 @@ Last updated: 28 October 2026
 
 ## Scope and constraints
 
-- Frontend-only prototype with synthetic data. No backend, database, Supabase, authentication, external services, real payroll processing, or deployment.
+- Synthetic frontend with Supabase email/password authentication available only in explicitly selected LIVE mode. Business data remains mock-only; no database schema, domain backend, tenant authorization, real payroll processing, or deployment is included.
 - Mock records are shared through typed feature contexts; company, organization, and employee demo records persist in this browser's local storage for continuity.
 - Local browser storage is demo persistence only and is not a secure or durable data service.
 - Access and payroll status workflows are visual simulations, not enforced security or financial workflows.
@@ -46,12 +46,16 @@ Last updated: 28 October 2026
 - `/audit`: synthetic event filters and event details dialog.
 - `/notifications`: mock categories, unread filters, mark read/unread and mark-all-read.
 - `/settings`: workspace/company preferences and HR/payroll preview sections; settings save is local page state only.
-- `/auth/login`, `/auth/forgot`, `/auth/reset`, `/auth/unauthorized`, `/auth/expired`, `/auth/invitation`: authentication design prototypes with all actions explicitly inactive.
+- `/auth/login`, `/auth/forgot`, `/auth/reset`, `/auth/callback`, `/auth/unauthorized`, `/auth/expired`, `/auth/invitation`: visual prototypes in MOCK; LIVE supports email/password sign-in, password recovery/reset, callback handling, safe error states, protected-route redirects, and logout. Public signup is absent.
+- LIVE session state is centralized in `AuthProvider`, restored on page refresh, observed through a cleaned-up Supabase auth subscription, and sourced from Supabase Auth. Company, organization, employee, and payroll views remain synthetic and are marked as demo data.
 
 ## Verification performed
 
-- `npm run typecheck` passed after the standalone auth shell adjustment.
-- `npm run build` passed after the standalone auth shell adjustment. Main entry chunk remains above Vite's 500 kB advisory threshold; feature routes are split into chunks.
+- Auth automated tests: 15 passed across configuration validation, service, provider, screens, and route-gate behavior using mocked Supabase responses. No real test accounts or emails were used.
+- `npm run typecheck` passed after authentication changes.
+- `npm run build` passed after authentication changes. Main entry chunk remains above Vite's 500 kB advisory threshold; feature routes are split into chunks.
+- Oxlint completed. Existing warnings remain in `App.tsx` and People Ops / Payroll components; auth code introduced no lint warnings.
+- Supabase dashboard configuration, remote sign-in, and email delivery have not been tested or changed.
 - No browser automation was run in this stage. Earlier CUA browser inventory was unavailable.
 
 ## Known limitations and next implementation tasks
@@ -67,6 +71,7 @@ Last updated: 28 October 2026
 - Settings currently cover only selected workspace/company preferences and do not share persisted settings state.
 - Import supports CSV only; XLSX parsing, duplicate resolution, and rollback are not implemented.
 - Import is linked from the employee directory and imports valid mapped CSV rows into the local demo employee store only.
-- Authentication prototypes are standalone pages, but do not provide real account or session behavior.
+- Authentication requires an explicitly configured V2 Supabase URL and publishable key in LIVE mode; no credentials are present in the repository and no remote project was contacted for verification.
+- Authentication establishes identity only; tenant/company permissions and all business data services remain unimplemented.
 - Automated tests and browser interaction/responsive/theme verification remain outstanding. No claim of browser verification is made.
 - The dashboard retains its original fixed synthetic figures, which do not yet derive from the new 120-record employee dataset.
