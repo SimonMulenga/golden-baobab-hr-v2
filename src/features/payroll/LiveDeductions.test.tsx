@@ -79,3 +79,4 @@ describe('LIVE deductions screen', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })
+

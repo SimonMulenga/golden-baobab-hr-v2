@@ -207,3 +207,4 @@ select extensions.is((select count(*) from public.audit_logs where record_id = '
 select * from extensions.finish();
 rollback;
 
+

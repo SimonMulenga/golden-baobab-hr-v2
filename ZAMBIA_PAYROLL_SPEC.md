@@ -49,3 +49,4 @@ These formulas are proposals for a future effective-dated rule catalog, not acti
 3. Test boundary values just below/at/above every band and cap, allowance categories, partial periods, unpaid/paid leave, overtime, and termination cases.
 4. Independently reconcile representative calculations with regulator guidance and parallel payroll review.
 5. Only trusted server-side payroll code may mark an approved rule as production-verified or finalize a live run.
+

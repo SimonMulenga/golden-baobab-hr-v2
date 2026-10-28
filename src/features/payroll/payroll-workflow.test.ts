@@ -47,3 +47,4 @@ describe('payroll approval workflow rules', () => {
     expect(() => reversePayrollRun(reversed, hrReviewer, 'second reversal', 'again')).toThrow(/Only finalized payroll/)
   })
 })
+

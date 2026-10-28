@@ -58,6 +58,40 @@ export type DeductionInstallmentRecord = {
   scheduled_amount: number;
 };
 
+export type AttendancePeriodRecord = {
+  id: string; portfolio_id: string; company_id: string; branch_id: string;
+  period_start: string; period_end: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'RETURNED_FOR_CORRECTION' | 'LOCKED';
+  created_by: string; reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null;
+};
+export type AttendanceEntryRecord = {
+  id: string; attendance_period_id: string; employee_id: string;
+  scheduled_working_days: number; actual_days_worked: number; paid_leave_days: number;
+  unpaid_leave_days: number; other_payable_absence_days: number; contract_type: string;
+  correction_note: string | null;
+};
+export type AttendanceEntryInput = {
+  portfolioId: string; companyId: string; branchId: string; periodStart: string; periodEnd: string;
+  employeeId: string; scheduledDays: number; workedDays: number; paidLeaveDays: number;
+  unpaidLeaveDays: number; payableAbsenceDays: number; contractType: string; correctionNote?: string;
+};
+export type LeaveRequestRecord = {
+  id: string; portfolio_id: string; company_id: string; branch_id: string; employee_id: string;
+  leave_type: string; pay_classification: 'PAID' | 'UNPAID'; start_date: string; end_date: string;
+  leave_days: number; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELED';
+  requested_by: string; reviewed_by: string | null; reviewed_at: string | null; reason: string | null;
+};
+export type LeavePolicyRecord = {
+  id: string; portfolio_id: string; company_id: string; leave_type: string;
+  pay_classification: 'PAID' | 'UNPAID'; accrual_days_per_month: number; maximum_balance_days: number | null;
+  effective_from: string; effective_to: string | null; enabled: boolean;
+};
+export type LeaveBalanceRecord = {
+  portfolio_id: string; company_id: string; branch_id: string; employee_id: string; leave_policy_id: string;
+  leave_type: string; pay_classification: 'PAID' | 'UNPAID'; accrual_days_per_month: number;
+  available_days: number;
+};
+
 export type EmployeeReviewDecision = 'APPROVE' | 'REJECT' | 'RETURN';
 export type PayrollReviewAction = 'START_REVIEW' | 'APPROVE' | 'RETURN' | 'REJECT';
 export type EmployeeApprovalFilter = EmployeeDirectoryRecord['approval_status'];
@@ -93,6 +127,22 @@ export interface LiveBusinessServices {
     installments(deductionId: string): Promise<DeductionInstallmentRecord[]>;
     createRequest(input: DeductionRequestInput): Promise<string>;
     reviewRequest(deductionId: string, decision: 'APPROVE' | 'REJECT', reason?: string): Promise<string>;
+  };
+  attendance: {
+    periods(request?: PageRequest & { periodStart?: string }): Promise<PageResult<AttendancePeriodRecord>>;
+    entries(periodId: string): Promise<AttendanceEntryRecord[]>;
+    saveEntry(input: AttendanceEntryInput): Promise<string>;
+    submitPeriod(periodId: string): Promise<string>;
+    reviewPeriod(periodId: string, decision: 'APPROVE' | 'RETURN', reason?: string): Promise<string>;
+  };
+  leave: {
+    requests(request?: PageRequest): Promise<PageResult<LeaveRequestRecord>>;
+    policies(companyId: string): Promise<LeavePolicyRecord[]>;
+    balances(companyId: string): Promise<LeaveBalanceRecord[]>;
+    savePolicy(input: Omit<LeavePolicyRecord, 'id' | 'portfolio_id' | 'company_id' | 'enabled'> & { portfolioId: string; companyId: string }): Promise<string>;
+    accrueMonth(policyId: string, periodStart: string): Promise<number>;
+    createRequest(input: { portfolioId: string; companyId: string; branchId: string; employeeId: string; leaveType: string; payClassification: 'PAID' | 'UNPAID'; startDate: string; endDate: string; days: number; reason: string; idempotencyKey: string }): Promise<string>;
+    reviewRequest(requestId: string, decision: 'APPROVE' | 'REJECT', reason?: string): Promise<string>;
   };
   payroll: {
     list(request?: PageRequest): Promise<PageResult<PayrollRunRecord>>;
@@ -197,6 +247,92 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         }));
       },
     },
+    attendance: {
+      async periods(request = {}) {
+        const page = Math.max(0, (request.page ?? 1) - 1);
+        const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
+        let query = client.from('attendance_periods')
+          .select('id,portfolio_id,company_id,branch_id,period_start,period_end,status,created_by,reviewed_by,reviewed_at,review_reason', { count: 'exact' })
+          .order('period_start', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1);
+        if (request.companyId) query = query.eq('company_id', request.companyId);
+        if (request.branchId) query = query.eq('branch_id', request.branchId);
+        if (request.periodStart) query = query.eq('period_start', request.periodStart);
+        const result = await query;
+        if (result.error) throw result.error;
+        return { items: (result.data ?? []) as AttendancePeriodRecord[], total: result.count ?? 0 };
+      },
+      async entries(periodId) {
+        const result = await client.from('attendance_entries')
+          .select('id,attendance_period_id,employee_id,scheduled_working_days,actual_days_worked,paid_leave_days,unpaid_leave_days,other_payable_absence_days,contract_type,correction_note')
+          .eq('attendance_period_id', periodId);
+        if (result.error) throw result.error;
+        return (result.data ?? []) as AttendanceEntryRecord[];
+      },
+      async saveEntry(input) {
+        return unwrap(await client.rpc('attendance_save_entry', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_branch_id: input.branchId,
+          p_period_start: input.periodStart, p_period_end: input.periodEnd, p_employee_id: input.employeeId,
+          p_scheduled_days: input.scheduledDays, p_worked_days: input.workedDays,
+          p_paid_leave_days: input.paidLeaveDays, p_unpaid_leave_days: input.unpaidLeaveDays,
+          p_payable_absence_days: input.payableAbsenceDays, p_contract_type: input.contractType,
+          p_correction_note: input.correctionNote ?? null,
+        }));
+      },
+      async submitPeriod(periodId) { return unwrap(await client.rpc('attendance_submit_period', { p_period_id: periodId })); },
+      async reviewPeriod(periodId, decision, reason) {
+        return unwrap(await client.rpc('attendance_review_period', { p_period_id: periodId, p_decision: decision, p_reason: reason ?? null }));
+      },
+    },
+    leave: {
+      async requests(request = {}) {
+        const page = Math.max(0, (request.page ?? 1) - 1);
+        const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
+        let query = client.from('leave_requests')
+          .select('id,portfolio_id,company_id,branch_id,employee_id,leave_type,pay_classification,start_date,end_date,leave_days,status,requested_by,reviewed_by,reviewed_at,reason', { count: 'exact' })
+          .order('created_at', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1);
+        if (request.companyId) query = query.eq('company_id', request.companyId);
+        if (request.branchId) query = query.eq('branch_id', request.branchId);
+        const result = await query;
+        if (result.error) throw result.error;
+        return { items: (result.data ?? []) as LeaveRequestRecord[], total: result.count ?? 0 };
+      },
+      async policies(companyId) {
+        const result = await client.from('leave_policies')
+          .select('id,portfolio_id,company_id,leave_type,pay_classification,accrual_days_per_month,maximum_balance_days,effective_from,effective_to,enabled')
+          .eq('company_id', companyId).eq('enabled', true).order('effective_from', { ascending: false });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as LeavePolicyRecord[];
+      },
+      async balances(companyId) {
+        const result = await client.from('leave_balances')
+          .select('portfolio_id,company_id,branch_id,employee_id,leave_policy_id,leave_type,pay_classification,accrual_days_per_month,available_days')
+          .eq('company_id', companyId);
+        if (result.error) throw result.error;
+        return (result.data ?? []) as LeaveBalanceRecord[];
+      },
+      async savePolicy(input) {
+        return unwrap(await client.rpc('leave_policy_save', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_leave_type: input.leave_type,
+          p_pay_classification: input.pay_classification, p_accrual_days_per_month: input.accrual_days_per_month,
+          p_maximum_balance_days: input.maximum_balance_days, p_effective_from: input.effective_from,
+          p_effective_to: input.effective_to,
+        }));
+      },
+      async accrueMonth(policyId, periodStart) {
+        return unwrap(await client.rpc('leave_accrue_month', { p_policy_id: policyId, p_period_start: periodStart }));
+      },
+      async createRequest(input) {
+        return unwrap(await client.rpc('leave_create_request', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_branch_id: input.branchId,
+          p_employee_id: input.employeeId, p_leave_type: input.leaveType, p_pay_classification: input.payClassification,
+          p_start_date: input.startDate, p_end_date: input.endDate, p_leave_days: input.days,
+          p_reason: input.reason, p_idempotency_key: input.idempotencyKey,
+        }));
+      },
+      async reviewRequest(requestId, decision, reason) {
+        return unwrap(await client.rpc('leave_review_request', { p_leave_request_id: requestId, p_decision: decision, p_reason: reason ?? null }));
+      },
+    },
     payroll: {
       async list(request = {}) {
         const page = Math.max(0, (request.page ?? 1) - 1);
@@ -225,4 +361,5 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
     },
   };
 }
+
 

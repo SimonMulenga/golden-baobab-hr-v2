@@ -49,3 +49,4 @@ describe('synthetic employee approval workflow', () => {
     expect(getRetirementEligibility('1961-10-28', undefined, '2026-10-28')).toBe('NOT_CONFIGURED')
   })
 })
+

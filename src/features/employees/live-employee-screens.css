@@ -4,3 +4,4 @@
 @media(max-width:760px){.employee-welcome{align-items:flex-start;flex-direction:column}.employee-toolbar{align-items:stretch;flex-direction:column}.employee-search{max-width:none;width:100%}.employee-table{min-width:760px}.approval-actions{min-width:230px}}
 @media(max-width:760px){.live-onboarding-form{padding:15px}.live-onboarding-grid{grid-template-columns:1fr}.live-onboarding-footer{align-items:stretch;flex-direction:column}.live-onboarding-footer button{width:100%}}
 @media(max-width:760px){.live-employee-actions{width:100%;justify-content:flex-end}}
+

@@ -507,3 +507,4 @@ grant execute on function public.payroll_finalize(uuid) to authenticated;
 
 comment on function public.payroll_finalize(uuid) is 'Atomic, idempotent finalization with one-time repayment posting; requires verified effective statutory rules.';
 
+

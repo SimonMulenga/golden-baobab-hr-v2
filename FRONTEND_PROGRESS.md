@@ -147,3 +147,4 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 - Supabase Management API rollback tests exercised company/branch writes, tenant scoping, private-detail denial, membership assignment/revocation, employee approval RPCs, and a K6,000/six-month schedule. This is hosted PostgreSQL role simulation, not full Supabase Auth/PostgREST integration.
 - The Vercel project was located through the connected Vercel integration. Encrypted LIVE environment values are scoped only to Preview for `feature/supabase-auth`. Its last failed deployment reported invalid `vercel.json`; the local UTF-8 BOM was removed and JSON validated, but no preview redeployment occurred because current changes are not pushed.
 - Git remains blocked by the execution sandbox's read-only `.git` mount; no commit or push was made. No deployment occurred.
+

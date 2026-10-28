@@ -157,3 +157,4 @@ create policy branch_assignments_read_self_or_manager on public.branch_assignmen
 
 comment on function app_private.has_permission(text, uuid, uuid, uuid)
   is 'Validates active stored roles and relationships. Branch roles require an explicit active assignment; request IDs are never authority.';
+

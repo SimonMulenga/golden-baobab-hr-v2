@@ -36,3 +36,4 @@ export type Company = {
 
 export type CompanyInput = Omit<Company, 'id' | 'createdAt' | 'employeeCount' | 'branches'>
 export type BranchInput = Omit<Branch, 'id' | 'employeeCount'>
+

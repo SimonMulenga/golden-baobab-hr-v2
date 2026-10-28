@@ -78,3 +78,4 @@ function isDate(value: string) {
 function isMoney(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0
 }
+

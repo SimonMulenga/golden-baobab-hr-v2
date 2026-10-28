@@ -101,3 +101,4 @@ export function IntegratedPayrollScreen() {
     <div className="synthetic-stamp"><span>ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³</span> HR approval and finalization are local UI simulations. No frontend permission check provides real authorization.</div>{notice && <div className="payroll-toast" role="status">{notice}</div>}
   </div>
 }
+

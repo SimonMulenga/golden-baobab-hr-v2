@@ -28,3 +28,4 @@ export function usePayroll() {
   if (!context) throw new Error('Payroll demo state is not available')
   return context
 }
+

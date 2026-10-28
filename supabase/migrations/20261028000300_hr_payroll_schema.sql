@@ -470,3 +470,4 @@ comment on table public.employee_private_details is 'Restricted personal identif
 comment on table public.employee_compensation is 'Effective-dated compensation. Statutory treatment is per allowance and must be verified before production payroll.';
 comment on table public.deduction_transactions is 'Append-only ledger. Finalization RPC is the only intended payment-posting path.';
 comment on table public.statutory_rule_versions is 'Inactive/unverified rules cannot support production payroll finalization.';
+

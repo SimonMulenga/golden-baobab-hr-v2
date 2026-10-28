@@ -60,3 +60,4 @@ export type Employee = {
   retirementStatus?: 'NOT_RETIRED' | 'RETIRED'
   contributionTreatment?: 'STANDARD' | 'EXEMPT' | 'UNVERIFIED'
 }
+

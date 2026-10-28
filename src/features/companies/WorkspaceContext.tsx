@@ -18,3 +18,4 @@ export function useWorkspace() {
   if (!context) throw new Error('Workspace provider is missing')
   return context
 }
+

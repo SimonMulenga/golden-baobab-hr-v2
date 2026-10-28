@@ -107,3 +107,4 @@ export function AuthCallbackScreen() {
 export function AuthLoading() {
   return <main className="auth-prototype" aria-live="polite"><div className="route-loading"><span className="route-loading-mark">GB</span><span>Securing your session…</span></div></main>
 }
+

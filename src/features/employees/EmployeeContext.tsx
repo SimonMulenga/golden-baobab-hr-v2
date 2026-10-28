@@ -8,3 +8,4 @@ export function useEmployees() {
   if (!state) throw new Error('Employee state is not available')
   return state
 }
+

@@ -58,3 +58,4 @@ describe('integrated mock payroll workflow', () => {
     vi.unstubAllGlobals()
   })
 })
+

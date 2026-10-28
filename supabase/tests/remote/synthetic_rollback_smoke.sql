@@ -156,6 +156,110 @@ begin
   perform public.deduction_review_request(v_deduction_id, 'APPROVE', null);
 end $$;
 
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+do $$
+declare v_employee_id uuid; v_period_id uuid;
+begin
+  select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
+  perform public.attendance_save_entry('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', v_employee_id, 22, 20, 2, 0, 0, 'PERMANENT', null);
+  select id into strict v_period_id from public.attendance_periods where company_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' and period_start = '2026-10-01';
+  perform public.attendance_submit_period(v_period_id);
+  if (select status from public.attendance_periods where id = v_period_id) <> 'SUBMITTED' then
+    raise exception 'Attendance period did not move to submitted.';
+  end if;
+  if (select count(*) from public.attendance_periods where branch_id = '12121212-1212-4212-8212-121212121212') <> 0 then
+    raise exception 'Branch manager can read an unassigned branch attendance period.';
+  end if;
+  begin
+    perform public.attendance_review_period(v_period_id, 'APPROVE', null);
+    raise exception 'Attendance creator unexpectedly reviewed their own submission.';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('test.attendance_period', v_period_id::text, true);
+end $$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+select public.attendance_review_period(current_setting('test.attendance_period')::uuid, 'RETURN', 'Correct the worked-day entry');
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+do $$
+declare v_employee_id uuid; v_period_id uuid;
+begin
+  select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
+  v_period_id := current_setting('test.attendance_period')::uuid;
+  perform public.attendance_save_entry('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', v_employee_id, 22, 19, 2, 1, 0,
+    'PERMANENT', 'Synthetic correction after HR return');
+  if (select status from public.attendance_periods where id = v_period_id) <> 'DRAFT' then
+    raise exception 'Attendance correction did not reopen the returned period as draft.';
+  end if;
+  perform public.attendance_submit_period(v_period_id);
+end $$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+select public.attendance_review_period(current_setting('test.attendance_period')::uuid, 'APPROVE', null);
+do $$
+begin
+  if (select status from public.attendance_periods where id = current_setting('test.attendance_period')::uuid) <> 'APPROVED' then
+    raise exception 'Attendance period was not approved.';
+  end if;
+  if not exists (select 1 from public.audit_logs where action = 'ATTENDANCE_ENTRY_SAVED'
+    and (details #>> '{previous,worked_days}')::numeric = 20
+    and (details #>> '{new,worked_days}')::numeric = 19) then
+    raise exception 'Attendance correction did not record old and new values.';
+  end if;
+end $$;
+
+select set_config('test.leave_policy', public.leave_policy_save('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'Annual leave', 'PAID', 2.0, 30, '2026-01-01', null)::text, true);
+select public.leave_accrue_month(current_setting('test.leave_policy')::uuid, '2026-10-01');
+do $$
+begin
+  if public.leave_accrue_month(current_setting('test.leave_policy')::uuid, '2026-10-01') <> 0 then
+    raise exception 'Repeating leave accrual duplicated monthly balance entries.';
+  end if;
+end $$;
+
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+do $$
+declare v_employee_id uuid; v_leave_id uuid;
+begin
+  begin
+    perform public.leave_policy_save('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'Annual leave', 'PAID', 2.0, 30, '2026-01-01', null);
+    raise exception 'Branch manager unexpectedly changed a company-wide leave policy.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.leave_accrue_month(current_setting('test.leave_policy')::uuid, '2026-10-01');
+    raise exception 'Branch manager unexpectedly ran portfolio-wide leave accrual.';
+  exception when insufficient_privilege then null;
+  end;
+  select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
+  v_leave_id := public.leave_create_request('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'ffffffff-ffff-4fff-8fff-ffffffffffff', v_employee_id,
+    'Annual leave', 'PAID', '2026-11-02', '2026-11-03', 1.5, 'Synthetic leave request', 'remote-smoke-leave-1');
+  if public.leave_create_request('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', v_employee_id, 'Annual leave', 'PAID', '2026-11-02', '2026-11-03',
+    1.5, 'Synthetic leave request', 'remote-smoke-leave-1') <> v_leave_id then
+    raise exception 'Leave request idempotent retry returned a different record.';
+  end if;
+  perform set_config('test.leave_request', v_leave_id::text, true);
+end $$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+select public.leave_review_request(current_setting('test.leave_request')::uuid, 'APPROVE', null);
+do $$
+begin
+  if (select sum(amount_delta) from public.leave_balance_ledger where employee_id =
+    (select id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1') and leave_policy_id = current_setting('test.leave_policy')::uuid) <> 0.5 then
+    raise exception 'Approved paid leave was not charged against accrued balance.';
+  end if;
+  if (select status from public.leave_requests where id = current_setting('test.leave_request')::uuid) <> 'APPROVED' then
+    raise exception 'Leave request was not approved.';
+  end if;
+end $$;
+
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
 select public.revoke_portfolio_membership('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   '33333333-3333-4333-8333-333333333333', 'BRANCH_MANAGER', 'Synthetic rollback revocation test');
@@ -169,3 +273,4 @@ end $$;
 
 reset role;
 rollback;
+

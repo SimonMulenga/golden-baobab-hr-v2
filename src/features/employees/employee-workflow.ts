@@ -72,3 +72,4 @@ export function resubmitEmployee(employee: Employee, actor: string, at = new Dat
   }
   return { ...employee, approvalStatus: 'SUBMITTED_FOR_HR_APPROVAL', approvalHistory: [...(employee.approvalHistory ?? []), event], submittedAt: at, reviewedBy: undefined, reviewedAt: undefined, rejectionReason: '' }
 }
+

@@ -133,3 +133,4 @@ revoke all on function public.assign_portfolio_membership(uuid, uuid, text, uuid
 revoke all on function public.revoke_portfolio_membership(uuid, uuid, text, text) from public, anon;
 grant execute on function public.assign_portfolio_membership(uuid, uuid, text, uuid[]) to authenticated;
 grant execute on function public.revoke_portfolio_membership(uuid, uuid, text, text) to authenticated;
+

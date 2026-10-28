@@ -41,3 +41,4 @@ describe('live company data services', () => {
     await expect(createLiveCompanyServices(client, 'session-user-id').list()).rejects.toThrow('RLS denied')
   })
 })
+

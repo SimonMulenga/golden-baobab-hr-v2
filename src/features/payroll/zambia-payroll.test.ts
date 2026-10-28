@@ -16,3 +16,4 @@ describe('illustrative Zambia payroll bands', () => {
     expect(result.warnings[0]).toContain('Confirm')
   })
 })
+

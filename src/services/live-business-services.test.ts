@@ -19,6 +19,16 @@ describe('live Supabase business service adapter', () => {
       schedule: [],
     })).resolves.toBe('synthetic-record-id');
     await expect(services.deductions.reviewRequest('deduction-1', 'APPROVE')).resolves.toBe('synthetic-record-id');
+    await expect(services.attendance.saveEntry({ portfolioId: 'portfolio-1', companyId: 'company-1', branchId: 'branch-1',
+      periodStart: '2026-10-01', periodEnd: '2026-10-31', employeeId: 'employee-1', scheduledDays: 22,
+      workedDays: 20, paidLeaveDays: 1, unpaidLeaveDays: 1, payableAbsenceDays: 0, contractType: 'MONTHLY' })).resolves.toBe('synthetic-record-id');
+    await expect(services.attendance.submitPeriod('attendance-period-1')).resolves.toBe('synthetic-record-id');
+    await expect(services.attendance.reviewPeriod('attendance-period-1', 'APPROVE')).resolves.toBe('synthetic-record-id');
+    await expect(services.leave.createRequest({ portfolioId: 'portfolio-1', companyId: 'company-1', branchId: 'branch-1',
+      employeeId: 'employee-1', leaveType: 'Annual leave', payClassification: 'PAID', startDate: '2026-11-02',
+      endDate: '2026-11-03', days: 2, reason: 'Synthetic request', idempotencyKey: 'leave-key-1' })).resolves.toBe('synthetic-record-id');
+    await expect(services.leave.reviewRequest('leave-1', 'APPROVE')).resolves.toBe('synthetic-record-id');
+    await expect(services.leave.accrueMonth('leave-policy-1', '2026-10-01')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.submitForApproval('run-1')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.reviewSubmission('run-1', 'APPROVE', 4)).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.finalize('run-1')).resolves.toBe('synthetic-record-id');
@@ -28,6 +38,12 @@ describe('live Supabase business service adapter', () => {
       'employee_submit_for_hr_approval',
       'deduction_create_request',
       'deduction_review_request',
+      'attendance_save_entry',
+      'attendance_submit_period',
+      'attendance_review_period',
+      'leave_create_request',
+      'leave_review_request',
+      'leave_accrue_month',
       'payroll_submit_for_approval',
       'payroll_review_submission',
       'payroll_finalize',
@@ -55,4 +71,5 @@ describe('live Supabase business service adapter', () => {
     expect(inFilter).toHaveBeenCalledWith('id', ['employee-1']);
   });
 });
+
 

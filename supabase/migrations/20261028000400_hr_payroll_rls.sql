@@ -180,3 +180,4 @@ revoke execute on function app_private.has_portfolio_role(uuid, text) from publi
 grant execute on function app_private.has_portfolio_role(uuid, text) to authenticated;
 grant execute on function app_private.has_permission(text, uuid, uuid, uuid) to authenticated;
 
+

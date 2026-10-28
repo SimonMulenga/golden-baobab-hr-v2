@@ -86,3 +86,4 @@ select extensions.is((select count(*) from public.companies), 0::bigint, 'revoke
 
 select * from extensions.finish();
 rollback;
+

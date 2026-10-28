@@ -134,3 +134,4 @@ For an approved preview only: add the three variables to Vercel's Preview enviro
 - Payroll run creation/calculation, attendance and leave write workflows, deduction pause/resume/reversal, payslips, documents, storage, email, and reports are not live.
 - Production finalization remains blocked until verified, effective PAYE, NAPSA and NHIMA rule versions are provisioned and a trusted payroll calculation service exists.
 - Email delivery and remote session refresh require approved dashboard configuration and an approved non-production test account.
+

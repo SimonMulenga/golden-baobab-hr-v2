@@ -48,3 +48,4 @@ describe('payroll calculation preview', () => {
     expect(() => calculatePayroll({ periodStart: '2026-01-01', earnings: [{ code: 'BASIC', label: 'Basic pay', amountCents: -1 }], voluntaryDeductions: [] })).toThrow('non-negative integer cents')
   })
 })
+

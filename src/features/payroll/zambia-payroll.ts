@@ -54,3 +54,4 @@ export const zambiaPayrollFormulaNotes = {
   overtime: 'Proposed statutory reference: 1.5× hourly basic rate for qualifying hours above ordinary limits; 2× for qualifying public holiday/rest-day work. Confirm employee coverage, normal hours, divisor, and contract terms.',
   annualLeave: 'Illustrative Employment Code formula: full pay × accrued leave days ÷ 26; confirm applicability and payroll treatment for each leave/payment case.',
 } as const
+

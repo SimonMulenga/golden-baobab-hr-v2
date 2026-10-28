@@ -53,3 +53,4 @@ describe('decimal-safe deduction schedules', () => {
     expect(postFinalizedDeductionPayment(posted.ledger, payment)).toMatchObject({ appliedCents: 0, alreadyPosted: true, ledger: { balanceCents: 0 } })
   })
 })
+

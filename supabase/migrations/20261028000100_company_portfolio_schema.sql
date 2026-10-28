@@ -121,3 +121,4 @@ revoke all on table public.profiles, public.client_portfolios, public.portfolio_
 comment on table public.client_portfolios is 'Internal customer/account boundary; companies remain the highest business entity exposed in product UI.';
 comment on table public.platform_administrators is 'Explicit platform-wide grants. No client role or user metadata can create these grants.';
 comment on table public.branch_assignments is 'Explicit branch-scoped roles. A portfolio role alone does not grant branch-manager/payroll-processor access.';
+

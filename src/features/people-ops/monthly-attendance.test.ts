@@ -40,3 +40,4 @@ describe('monthly attendance payable-day preview', () => {
     expect(() => summarizeMonthlyAttendance({ contract: 'MONTHLY_SALARIED', scheduledDates, monthlyBaseCents: 100000, entries: [{ date: '2026-10-03', status: 'UNPAID_LEAVE' }] })).toThrow(/scheduled work date/)
   })
 })
+

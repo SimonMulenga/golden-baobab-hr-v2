@@ -15,3 +15,4 @@ describe('synthetic employee import mapping', () => {
     expect(employee.approvalHistory?.[0]).toMatchObject({ to: 'SUBMITTED_FOR_HR_APPROVAL', actor: 'Demo importer' })
   })
 })
+
