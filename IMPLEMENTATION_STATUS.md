@@ -85,9 +85,17 @@ This is a development integration slice, not an operational payroll system. No e
 7. Verify NAPSA/NHIMA bases, rates, ceilings, and exemptions against authoritative sources before allowing real payroll finalization.
 8. Implement private documents/payslips, PDF generation, authorized email, reports/exports, audit UI, and settings.
 9. Run authenticated RLS/PostgREST integration, browser acceptance, and performance testing above 2,500 employees.
-10. The current Preview is READY but predates this attendance/leave increment. Preserve these changes through the GitHub connector, then deploy and verify Preview.
+10. READY Preview for commit `f1dee366d45474c57d109c1f82d656c63b807053` has HTTP login-route smoke verification; authenticated browser testing remains outstanding.
 
 ## Git and deployment
 
-The workspace through the previous checkpoint was preserved on `feature/supabase-auth` via the authorized GitHub connector as commit `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`. Local `.git` remains read-only; no lock bypass or direct local Git write was attempted. Attendance/leave changes from this increment still need to be preserved through the connector. No force push, merge, production deployment, or production database operation was attempted.
+The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`. Attendance/leave source changes were preserved through the authorized GitHub connector as `781c2a39c4a07ef089cfab790d93a79c0521ad42`; the Vercel source-transfer truncation defect was corrected with `f1dee366d45474c57d109c1f82d656c63b807053`. Local `.git` remains read-only; no lock bypass or direct local Git write was attempted. No force push, merge, production deployment, or production database operation was attempted.
 
+## 28 October 2026 connector repair checkpoint
+
+- The existing local source changes were preserved on `feature/supabase-auth` through the authorized GitHub connector. Commit `781c2a39c4a07ef089cfab790d93a79c0521ad42` contains the verified 74-test attendance/leave increment. No local Git writes, lock bypass, force update, or production action was used.
+- The first automatic Preview for that commit failed because source transfer inserted output-truncation text into `src/features/employees/EmployeeScreens.tsx`. Replaced only that remote file with the exact complete local bytes through the GitHub blob/tree APIs; repair commit `f1dee366d45474c57d109c1f82d656c63b807053` advanced the feature branch normally.
+- Vercel Preview deployment `dpl_BAEF3wb5NDDUg42k6ETmKaWw2Y4U` is READY at `https://golden-baobab-hr-v2-rdndub5yv-simon-mulengas-projects.vercel.app`. The protected `/auth/login` request returned HTTP 200 and the Golden Baobab HR document title. This is an HTTP smoke check, not authenticated browser/CRUD verification.
+- Re-ran TypeScript via `npm.cmd run build` (includes `tsc -b`) successfully; `npm.cmd test -- --run --maxWorkers=1 --reporter=dot` passed all 74 tests across 23 files. Vite still reports the ~909 kB main chunk warning. Authenticated Playwright testing remains blocked by unavailable browser tooling and the earlier Auth test-account schema-query failure.
+- The live attendance/leave database workflows remain persistent and hosted rollback tests pass. Payroll still has no trusted run-creation/calculation operation; attendance and leave are not yet payroll inputs, and statutory verification/finalization remain blocked.
+- No credentials, local environment files, Supabase linkage metadata, local Git metadata, or browser artifacts were added to the connector commits.
