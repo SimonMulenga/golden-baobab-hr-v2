@@ -1,6 +1,28 @@
 # Golden Baobab HR V2 backend foundation
 
-This repository uses Supabase Auth for email/password authentication when `VITE_DATA_MODE=LIVE`. Six company-first schema/RLS/workflow migrations have been applied to the authorized V2 development project and passed hosted SQL role/RLS smoke tests. LIVE company/branch CRUD and employee directory/onboarding/review paths use Supabase services; other business modules remain gated until connected.
+## Current development checkpoint (28 October 2026)
+
+- The reviewed forward-only migration set now aligns through `20261028001400` on development project ref `jssuaebiizjcoqmngxzk`. Migration 014 adds the scoped portfolio membership directory, invitation authorization check, and atomic branch-role assignment replacement. The previous migrations add company-scoped Company Administrator membership and employee employment status/history. Hosted rollback-only smoke passed; baseline Auth/company records were preserved.
+- LIVE Users & Permissions now supports company admins and portfolio/branch roles; the invitation Edge Function and account activation UI are implemented. Invitation email delivery has not been tested and the `/auth/activate` Auth redirect URL is not verified.
+
+- Linked development project ref: `jssuaebiizjcoqmngxzk`. Migrations `20261028000100` through `20261028001400` are applied and aligned. The existing single Auth user was preserved.
+- Migration 012 adds audited creator-scoped employee correction/detail RPCs. A hosted rollback-only synthetic workflow passed correction, resubmission, HR approval, and cross-portfolio denial. No employee/private/compensation test rows remain.
+- Database-role/RPC smoke is not Auth HTTP/PostgREST or authenticated browser proof. Invitations, role assignment and import are implemented but have not been run with a dedicated synthetic authenticated browser account; no invitation email was sent.
+- Latest local verification: 89 Vitest tests passed across 26 files; TypeScript and production build passed; Oxlint passed on changed feature files. No production database or Vercel deployment was touched.
+
+This repository uses Supabase Auth for email/password authentication when `VITE_DATA_MODE=LIVE`. Fourteen company-first schema/RLS/workflow migrations have been applied to the authorized V2 development project and passed rollback-only hosted SQL role/RLS workflow smoke tests. LIVE companies/branches, employee onboarding/review/correction/profile history, deductions, attendance, leave, payroll input previews, persistent draft creation, and membership-role administration are connected. Payroll calculation and persisted payroll items are not implemented; approval and finalization are therefore not operational from the UI. Details later in this document include older snapshots and must be read with the latest checkpoint in `IMPLEMENTATION_STATUS.md`.
+
+### Invitations and branch-scoped roles (28 October 2026)
+
+- Migration `20261028001400_membership_directory_and_branch_roles.sql` adds a permission-scoped membership directory and atomic branch-role assignment replacement. It is applied to the authorized development project and `supabase migration list --linked` confirmed local/remote history through 014.
+- `supabase/functions/invite-user/index.ts` is deployed as `invite-user` with platform JWT verification left on. The Edge Function independently validates the caller session, checks `authorize_member_invitation`, restricts redirect origins, creates an Auth invitation using the server-side service key, and applies the authorized membership through existing database RPCs.
+- The Edge Function's `APPROVED_APP_ORIGINS` server secret currently permits only `http://localhost:5173`. The Supabase Auth allowed redirect URL for `http://localhost:5173/auth/activate` was not changed or verified. Do not send invitations until that redirect is confirmed in Auth URL Configuration. No invitation or recovery email was sent by this work.
+- The LIVE user interface supports account activation, membership listing, branch assignment/replacement/revocation, and company administrator access. Automated tests cover screen behavior and service RPC routing; hosted rollback smoke covers invitation authorization and branch assignment logic. Real Auth email delivery and authenticated browser role tests have not run.
+
+### Employee spreadsheet import (28 October 2026)
+
+- LIVE employee import parses CSV/XLSX on the browser, provides flexible column mapping and local validation, and submits valid records in 20-row bounded request batches through the existing employee draft and HR submission RPCs. Files are not uploaded to Supabase Storage. Row-level outcomes distinguish submission, draft-save, and failure.
+- No authenticated import has been performed against persistent employee records. Browser preview and unit tests do not establish successful hosted CRUD or role enforcement for a real import. Import authorization continues to be enforced by the trusted employee RPCs.
 
 ## Architecture
 
@@ -8,13 +30,13 @@ This repository uses Supabase Auth for email/password authentication when `VITE_
 - `src/lib/data-mode.ts` selects `MOCK` or `LIVE`; the default is `MOCK`.
 - `src/lib/supabase/client.ts` exposes a typed Supabase client only in `LIVE` mode, after validating browser-safe configuration. It does not create a client in `MOCK` mode.
 - `src/features/auth/auth-service.ts` wraps Supabase Auth email/password, session, recovery, and password-update APIs. `AuthProvider` restores and observes the Supabase session and cleans up its listener.
-- `src/services/contracts.ts` defines feature contracts. `src/services/live-company-services.ts` loads and persists companies/branches. `src/services/live-business-services.ts` provides typed employee/deduction/payroll reads and RPC calls. Employee directory/onboarding/review use these services; deductions and payroll screens remain gated. A failed LIVE request never silently switches to mock data.
+- `src/services/contracts.ts` defines feature contracts. `src/services/live-company-services.ts` loads and persists companies/branches. `src/services/live-business-services.ts` provides typed employee, deduction, attendance, leave, and payroll input operations. LIVE employee directory/onboarding/review/correction/profile history and connected HR modules use these services. A failed LIVE request never silently switches to mock data.
 - LIVE routes use Supabase Auth as the session source. Authentication does not grant company authorization.
 - Live requests must surface errors to the caller. Do not add implicit fallback to mock data when a live request fails.
-- `20261028000100`–`20261028000200` establish portfolio/company/branch membership, roles, grants and tenant policies.
+- `20261028000100`â€“`20261028000200` establish portfolio/company/branch membership, roles, grants and tenant policies.
 - `20261028000300` defines employees, separately protected private details, effective-dated compensation, attendance, leave, advances/installments/transactions, payroll periods/runs/items, statutory rule references, approvals and audit logs.
 - `20261028000400` adds tenant- and branch-filtered read policies and keeps domain-table writes closed to browser table operations.
-- `20261028000500` adds trusted RPCs for draft employee creation, employee submission/review, deduction request creation/review, payroll submission/review, and atomic finalization. Finalization requires active, verified, effective PAYE, NAPSA, and NHIMA rule versions. Payroll item/run creation and calculation are not implemented, so the payroll RPCs are not yet a usable end-to-end live UI flow.
+- `20261028000500` adds trusted RPCs for draft employee creation, employee submission/review, deduction request creation/review, payroll submission/review, and atomic finalization. `20261028000900`â€“`01100` add approved input preview and persistent draft creation. Finalization requires active, verified, effective PAYE, NAPSA, and NHIMA rule versions. A trusted persistent calculation operation and approved rule versions are still absent, so payroll calculation, submission, approval, and finalization are not an operational live UI flow.
 - `20261028000600` adds profile creation on Auth user insert plus audited portfolio membership assignment/revocation RPCs. Direct membership table writes remain closed to browser clients.
 
 ## Company-first roles and tenancy
@@ -63,7 +85,9 @@ For a development preview, configure `VITE_DATA_MODE=LIVE`, `VITE_SUPABASE_URL`,
 
 The earlier Phase 4A review used an organization-first draft in its dependency notes. The approved Phase 4B direction removes that layer; companies are the top-level business entities, with an internal portfolio boundary for customer isolation.
 
-## Migration workflow and current status
+## Initial database migration checkpoint (historical)
+
+The details below document the original six-migration setup. The current remote migration state is thirteen migrations through `20261028001300`; see the checkpoint at the start of this file and `IMPLEMENTATION_STATUS.md` for current live workflows and test results.
 
 The user confirmed that the named V2 project is the development database and authorized non-destructive migrations and synthetic data. After confirming project reference `jssuaebiizjcoqmngxzk`, zero remote migration entries, zero existing application tables/rows, and one Auth user/identity, migrations `20261028000100` through `20261028000600` were applied in order. A preflight dry run listed exactly the six reviewed migrations. `--skip-vault` was used; no Vault settings were changed.
 
@@ -100,16 +124,16 @@ Keep database changes backward compatible where possible. Prefer additive migrat
 
 In the Supabase project selected by the project administrator:
 
-1. **Authentication → URL Configuration:** set Site URL to the approved app origin. Add exact Allowed Redirect URLs for local development (`http://localhost:5173/auth/reset?flow=recovery`, `http://localhost:5173/auth/callback`) and each approved preview origin's corresponding paths. Add only origins actually in use; avoid broad wildcard preview rules where possible.
-2. **Authentication → Sign In / Providers → Email:** keep email/password enabled. Do not enable public sign-ups. The UI contains no signup operation. Apply the approved email-confirmation policy for admin-created accounts; unconfirmed users cannot sign in when confirmation is required.
-3. **Authentication → Email Templates:** use the built-in password recovery template/link and verify it returns to the configured same-origin reset path. Do not weaken token expiry or email security settings for convenience.
-4. **Authentication → Sessions:** retain the project's secure default access-token and refresh-token lifecycle. The browser SDK restores/refreshes sessions; do not store tokens in application localStorage manually or log them.
+1. **Authentication â†’ URL Configuration:** set Site URL to the approved app origin. Add exact Allowed Redirect URLs for local development (`http://localhost:5173/auth/reset?flow=recovery`, `http://localhost:5173/auth/callback`) and each approved preview origin's corresponding paths. Add only origins actually in use; avoid broad wildcard preview rules where possible.
+2. **Authentication â†’ Sign In / Providers â†’ Email:** keep email/password enabled. Do not enable public sign-ups. The UI contains no signup operation. Apply the approved email-confirmation policy for admin-created accounts; unconfirmed users cannot sign in when confirmation is required.
+3. **Authentication â†’ Email Templates:** use the built-in password recovery template/link and verify it returns to the configured same-origin reset path. Do not weaken token expiry or email security settings for convenience.
+4. **Authentication â†’ Sessions:** retain the project's secure default access-token and refresh-token lifecycle. The browser SDK restores/refreshes sessions; do not store tokens in application localStorage manually or log them.
 
 Remote dashboard settings are outside this repository and were not modified.
 
 ## Creating a test account safely
 
-An authorized project administrator can create a dedicated test user under Authentication → Users using the dashboard's add/invite-user workflow. Use a mailbox controlled by the tester, a unique non-production account, and a strong unique password delivered through an approved password manager or the provider's invitation flow. Confirm the account according to the chosen email-confirmation setting. Do not use employee email addresses, production user credentials, shared default passwords, or a service-role key in the frontend. Do not create test users or send invitation/recovery email without the account owner's explicit approval.
+An authorized project administrator can create a dedicated test user under Authentication â†’ Users using the dashboard's add/invite-user workflow. Use a mailbox controlled by the tester, a unique non-production account, and a strong unique password delivered through an approved password manager or the provider's invitation flow. Confirm the account according to the chosen email-confirmation setting. Do not use employee email addresses, production user credentials, shared default passwords, or a service-role key in the frontend. Do not create test users or send invitation/recovery email without the account owner's explicit approval.
 
 ## Local auth testing
 
@@ -134,4 +158,5 @@ For an approved preview only: add the three variables to Vercel's Preview enviro
 - Payroll run creation/calculation, attendance and leave write workflows, deduction pause/resume/reversal, payslips, documents, storage, email, and reports are not live.
 - Production finalization remains blocked until verified, effective PAYE, NAPSA and NHIMA rule versions are provisioned and a trusted payroll calculation service exists.
 - Email delivery and remote session refresh require approved dashboard configuration and an approved non-production test account.
+
 

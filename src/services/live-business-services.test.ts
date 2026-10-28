@@ -3,6 +3,30 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createLiveBusinessServices } from './live-business-services';
 
 describe('live Supabase business service adapter', () => {
+  it('routes company administrator changes and employee status transitions through scoped RPCs', async () => {
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
+    await services.companyAdmins.assign('portfolio-1', 'company-1', 'user-2');
+    await services.companyAdmins.revoke('portfolio-1', 'company-1', 'user-2', 'Synthetic review');
+    await services.companyAdmins.list('portfolio-1', 'company-1');
+    await services.employees.setEmploymentStatus('employee-1', 'SUSPENDED', 'Synthetic review');
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'assign_company_admin', 'revoke_company_admin', 'company_admin_members', 'employee_set_employment_status',
+    ]);
+  });
+
+  it('routes branch-role assignment and replacement through trusted portfolio RPCs', async () => {
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
+    await services.portfolioUsers.list('portfolio-1');
+    await services.portfolioUsers.assign('portfolio-1', 'user-2', 'BRANCH_MANAGER', ['branch-1']);
+    await services.portfolioUsers.replaceBranchAssignments('portfolio-1', 'company-1', 'user-2', 'BRANCH_MANAGER', ['branch-2']);
+    await services.portfolioUsers.revoke('portfolio-1', 'user-2', 'BRANCH_MANAGER', 'Synthetic scope update');
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'portfolio_membership_directory', 'assign_portfolio_membership', 'replace_branch_role_assignments', 'revoke_portfolio_membership',
+    ]);
+  });
+
   it('routes privileged workflows through named database RPCs', async () => {
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: 'synthetic-record-id', error: null }));
     const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
@@ -74,5 +98,26 @@ describe('live Supabase business service adapter', () => {
     expect(select.mock.calls[0][0]).not.toMatch(/date_of_birth|nrc|account_number|basic_pay|salary/i);
     expect(inFilter).toHaveBeenCalledWith('id', ['employee-1']);
   });
+
+  it('reads a non-private employee profile and caps its approval history to fifty events', async () => {
+    const profile = { id: 'employee-1', first_name: 'Demo', last_name: 'Employee' };
+    const history = [{ id: 1, action: 'SUBMITTED', reason: null, occurred_at: '2026-10-28T07:00:00Z', actor_id: 'actor-1' }];
+    const profileMaybeSingle = vi.fn(async () => ({ data: profile, error: null }));
+    const profileEq = vi.fn(() => ({ maybeSingle: profileMaybeSingle }));
+    const profileSelect = vi.fn((_columns: string) => ({ eq: profileEq }));
+    const range = vi.fn(async () => ({ data: history, error: null }));
+    const order = vi.fn(() => ({ range }));
+    const historyEq = vi.fn(() => ({ order }));
+    const historySelect = vi.fn((_columns: string) => ({ eq: historyEq }));
+    const from = vi.fn((table: string) => ({ select: table === 'employees' ? profileSelect : historySelect }));
+    const services = createLiveBusinessServices({ from } as unknown as SupabaseClient);
+
+    await expect(services.employees.byId('employee-1')).resolves.toEqual(profile);
+    await expect(services.employees.history('employee-1')).resolves.toEqual(history);
+    expect(profileSelect.mock.calls[0][0]).not.toMatch(/date_of_birth|nrc|account_number|basic_pay|salary/i);
+    expect(historySelect.mock.calls[0][0]).toBe('id,action,reason,occurred_at,actor_id');
+    expect(range).toHaveBeenCalledWith(0, 49);
+  });
 });
+
 

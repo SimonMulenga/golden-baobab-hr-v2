@@ -9,7 +9,8 @@ begin
     '11111111-1111-4111-8111-111111111111',
     '22222222-2222-4222-8222-222222222222',
     '33333333-3333-4333-8333-333333333333',
-    '44444444-4444-4444-8444-444444444444'
+    '44444444-4444-4444-8444-444444444444',
+    '55555555-5555-4555-8555-555555555555'
   )) or exists (select 1 from public.companies where registration_number like 'REMOTE-SMOKE-%') then
     raise exception 'Remote smoke-test fixture identifiers already exist; refusing to modify them.';
   end if;
@@ -21,13 +22,15 @@ values
   ('11111111-1111-4111-8111-111111111111', 'authenticated', 'authenticated', 'portfolio-admin@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false),
   ('22222222-2222-4222-8222-222222222222', 'authenticated', 'authenticated', 'overall-hr@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false),
   ('33333333-3333-4333-8333-333333333333', 'authenticated', 'authenticated', 'branch-manager@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false),
-  ('44444444-4444-4444-8444-444444444444', 'authenticated', 'authenticated', 'other-portfolio@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false);
+  ('44444444-4444-4444-8444-444444444444', 'authenticated', 'authenticated', 'other-portfolio@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false),
+  ('55555555-5555-4555-8555-555555555555', 'authenticated', 'authenticated', 'company-admin@remote-smoke.example.invalid', now(), '{}', '{}', now(), now(), false, false);
 
 insert into public.profiles (id, display_name) values
   ('11111111-1111-4111-8111-111111111111', 'Synthetic Portfolio Admin'),
   ('22222222-2222-4222-8222-222222222222', 'Synthetic Overall HR'),
   ('33333333-3333-4333-8333-333333333333', 'Synthetic Branch Manager'),
-  ('44444444-4444-4444-8444-444444444444', 'Synthetic Other Portfolio Admin')
+  ('44444444-4444-4444-8444-444444444444', 'Synthetic Other Portfolio Admin'),
+  ('55555555-5555-4555-8555-555555555555', 'Synthetic Company Admin')
 on conflict (id) do nothing;
 
 insert into public.client_portfolios (id, name) values
@@ -70,10 +73,68 @@ select public.assign_portfolio_membership(
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '33333333-3333-4333-8333-333333333333',
   'BRANCH_MANAGER', array['ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid]
 );
+select public.assign_company_admin(
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  '55555555-5555-4555-8555-555555555555'
+);
+select public.authorize_member_invitation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'COMPANY_ADMIN', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+select public.authorize_member_invitation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'PORTFOLIO_ADMIN', null);
+select public.replace_branch_role_assignments('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  '33333333-3333-4333-8333-333333333333', 'BRANCH_MANAGER',
+  array['ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid, '12121212-1212-4212-8212-121212121212'::uuid]);
+do $$
+declare v_count integer; v_branches uuid[];
+begin
+  select count(*) into v_count from public.portfolio_membership_directory('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  if v_count <> 3 then raise exception 'Portfolio membership directory expected 3 members, got %.', v_count; end if;
+  select branch_ids into v_branches from public.portfolio_membership_directory('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    where user_id = '33333333-3333-4333-8333-333333333333' and role = 'BRANCH_MANAGER';
+  if cardinality(v_branches) <> 2 then raise exception 'Branch assignments were not replaced atomically.'; end if;
+end $$;
+select public.replace_branch_role_assignments('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  '33333333-3333-4333-8333-333333333333', 'BRANCH_MANAGER', array['ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid]);
+select set_config('request.jwt.claim.sub', '55555555-5555-4555-8555-555555555555', true);
+do $$
+declare v_count integer;
+begin
+  if not app_private.has_permission('users.manage', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', null)
+    or app_private.has_permission('users.manage', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, null)
+    or app_private.has_permission('payroll.prepare', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'ffffffff-ffff-4fff-8fff-ffffffffffff')
+    or app_private.has_permission('employee.private.view', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', null) then
+    raise exception 'Company administrator received an unscoped or excluded permission.';
+  end if;
+  select count(*) into v_count from public.companies where portfolio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  if v_count <> 1 then raise exception 'Company administrator read outside its company scope.'; end if;
+  select count(*) into v_count from public.branches where portfolio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  if v_count <> 2 then raise exception 'Company administrator branch scope mismatch: expected 2, got %.', v_count; end if;
+  select count(*) into v_count from public.company_admin_members('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  if v_count <> 1 then raise exception 'Company admin directory did not return its single scoped membership.'; end if;
+  begin
+    perform public.assign_portfolio_membership('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '22222222-2222-4222-8222-222222222222', 'OVERALL_HR_MANAGER', '{}'::uuid[]);
+    raise exception 'Company administrator escalated a user to a portfolio role.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.assign_company_admin('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', '55555555-5555-4555-8555-555555555555');
+    raise exception 'Company administrator assigned company role to itself.';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+do $$
+begin
+  begin
+    perform public.authorize_member_invitation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'PORTFOLIO_ADMIN', null);
+    raise exception 'Overall HR was allowed to invite a portfolio administrator.';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
 select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
 
 do $$
-declare v_employee_id uuid; v_count integer;
+declare v_employee_id uuid; v_correction_employee_id uuid; v_count integer;
 begin
   select count(*) into v_count from public.companies;
   if v_count <> 1 then raise exception 'Branch manager company RLS mismatch: expected 1, got %', v_count; end if;
@@ -116,6 +177,15 @@ begin
     '{"effective_from":"2026-01-01","salary_frequency":"MONTHLY","basic_pay":6000,"payment_method":"CASH"}'::jsonb
   );
   perform public.employee_submit_for_hr_approval(v_employee_id);
+  v_correction_employee_id := public.employee_create_draft(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    '{"employee_number":"REMOTE-SMOKE-CORRECTION-1","first_name":"Synthetic","last_name":"Correction","date_of_birth":"1991-02-03","nationality":"Zambian","job_title":"Demo Clerk","department":"Operations","employment_type":"PERMANENT","contract_type":"PERMANENT","contract_start_date":"2026-01-01","retirement_age":65}'::jsonb,
+    '{"identity_document_type":"NRC","identity_document_number":"SYNTHETIC-NRC-CORR-1","residential_address":"Synthetic Correction Address","phone":"+260000000012","email_unavailable_reason":"Synthetic test record","emergency_contact_name":"Synthetic Contact","emergency_contact_relationship":"Friend","emergency_contact_phone":"+260000000013","payment_method":"CASH"}'::jsonb,
+    '{"effective_from":"2026-01-01","salary_frequency":"MONTHLY","basic_pay":4800,"payment_method":"CASH"}'::jsonb
+  );
+  perform public.employee_submit_for_hr_approval(v_correction_employee_id);
+  perform set_config('test.correction_employee', v_correction_employee_id::text, true);
 end $$;
 
 select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
@@ -128,8 +198,54 @@ begin
   if v_count <> 0 then raise exception 'Overall HR crossed portfolio boundary.'; end if;
   select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
   perform public.employee_review_submission(v_employee_id, 'APPROVE', null);
+  perform public.employee_review_submission(current_setting('test.correction_employee')::uuid, 'RETURN', 'Correct the synthetic contact details');
   select count(*) into v_count from public.employee_private_details;
-  if v_count <> 1 then raise exception 'Overall HR private details scope mismatch.'; end if;
+  if v_count <> 2 then raise exception 'Overall HR private details scope mismatch: expected both synthetic portfolio records, got %.', v_count; end if;
+end $$;
+
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-8444-444444444444', true);
+do $$
+begin
+  begin
+    perform public.employee_correction_details(current_setting('test.correction_employee')::uuid);
+    raise exception 'Other portfolio user unexpectedly read private correction details.';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+do $$
+declare v_details jsonb; v_employee_id uuid;
+begin
+  v_employee_id := current_setting('test.correction_employee')::uuid;
+  v_details := public.employee_correction_details(v_employee_id);
+  if v_details #>> '{private_details,identity_document_number}' is distinct from 'SYNTHETIC-NRC-CORR-1'
+    or (v_details #>> '{compensation,basic_pay}')::numeric <> 4800 then
+    raise exception 'Creator-authorized correction details omitted expected synthetic values.';
+  end if;
+  perform public.employee_update_draft(v_employee_id,
+    '{"employee_number":"REMOTE-SMOKE-CORRECTION-1","first_name":"Synthetic","last_name":"Correction","date_of_birth":"1991-02-03","nationality":"Zambian","job_title":"Demo Clerk","department":"Operations","employment_type":"PERMANENT","contract_type":"PERMANENT","contract_start_date":"2026-01-01","retirement_age":65}'::jsonb,
+    '{"identity_document_type":"NRC","identity_document_number":"SYNTHETIC-NRC-CORR-1","residential_address":"Synthetic Correction Address","phone":"+260000000012","email_unavailable_reason":"Synthetic test record","emergency_contact_name":"Synthetic Contact","emergency_contact_relationship":"Friend","emergency_contact_phone":"+260000000013","payment_method":"CASH"}'::jsonb,
+    '{"effective_from":"2026-01-01","salary_frequency":"MONTHLY","basic_pay":5000,"payment_method":"CASH"}'::jsonb);
+  if (select approval_status from public.employees where id = v_employee_id) <> 'RETURNED_FOR_CORRECTION' then
+    raise exception 'Correction unexpectedly changed the employee approval status.';
+  end if;
+  if (select basic_pay from public.employee_compensation where employee_id = v_employee_id) <> 5000 then
+    raise exception 'Correction did not persist the revised compensation.';
+  end if;
+  perform public.employee_submit_for_hr_approval(v_employee_id);
+end $$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+select public.employee_review_submission(current_setting('test.correction_employee')::uuid, 'APPROVE', null);
+do $$
+begin
+  if (select approval_status from public.employees where id = current_setting('test.correction_employee')::uuid) <> 'APPROVED'
+    or (select count(*) from public.employee_approval_history where employee_id = current_setting('test.correction_employee')::uuid and action = 'CORRECTED') <> 1
+    or (select count(*) from public.employee_approval_history where employee_id = current_setting('test.correction_employee')::uuid and action = 'RESUBMITTED') <> 1
+    or (select count(*) from public.audit_logs where record_id = current_setting('test.correction_employee') and action = 'EMPLOYEE_CORRECTED') <> 1 then
+    raise exception 'Employee correction, resubmission, approval, or audit history was incomplete.';
+  end if;
 end $$;
 
 select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
@@ -224,6 +340,27 @@ begin
   if v_inputs->>'attendance_period_id' is null or v_item->'approved_leave_requests' is null
     or v_item->'due_approved_deductions' is null then
     raise exception 'Payroll preview is missing its approved HR input references.';
+  end if;
+end $$;
+
+do $$
+declare v_employee_id uuid; v_inputs jsonb;
+begin
+  select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
+  perform public.employee_set_employment_status(v_employee_id, 'SUSPENDED', 'Synthetic status workflow verification');
+  if (select employment_status from public.employees where id = v_employee_id) <> 'SUSPENDED'
+    or (select count(*) from public.employee_employment_history where employee_id = v_employee_id and previous_status = 'ACTIVE' and new_status = 'SUSPENDED') <> 1 then
+    raise exception 'Employment status change or history was not recorded.';
+  end if;
+  v_inputs := public.payroll_preview_inputs('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31');
+  if exists (select 1 from jsonb_array_elements(v_inputs->'items') item where item->>'employee_number' = 'REMOTE-SMOKE-EMP-1') then
+    raise exception 'Suspended employee remained eligible in the payroll input preview.';
+  end if;
+  perform public.employee_set_employment_status(v_employee_id, 'ACTIVE', 'Synthetic return to active status');
+  if (select employment_status from public.employees where id = v_employee_id) <> 'ACTIVE'
+    or (select count(*) from public.employee_employment_history where employee_id = v_employee_id) <> 2 then
+    raise exception 'Allowed reactivation from suspended status did not retain both history events.';
   end if;
 end $$;
 
@@ -325,3 +462,4 @@ end $$;
 
 reset role;
 rollback;
+

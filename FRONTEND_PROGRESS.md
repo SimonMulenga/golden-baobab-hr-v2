@@ -2,18 +2,49 @@
 
 Last updated: 28 October 2026
 
+## Statutory/payroll review (28 October 2026)
+
+- Added `ZAMBIA_STATUTORY_RULES_2026.md` with official-source findings and unresolved NAPSA/NHIMA blockers.
+- The illustrative PAYE helper now uses integer cents/basis points and includes band checkpoint and cent-rounding tests. It remains browser-side preview logic, not the payroll authority.
+- LIVE payroll remains input preview and persistent draft creation only. No calculation, approval, finalization, or payslip delivery is represented as operational.
+
+## Latest LIVE admin and import increment (28 October 2026)
+
+- LIVE Users & Permissions adds scoped portfolio membership listing and audited branch-role assignment/replacement/revocation. The `invite-user` Supabase Edge Function is deployed with JWT checks and a server origin allowlist restricted to `http://localhost:5173`; no invitation email was sent. Confirm `/auth/activate` in Supabase Auth's allowed redirect URLs before sending invitations.
+- Invitation activation now requires an authenticated invite session and sets the password through Supabase Auth. CSV and XLSX imports are parsed in-browser, support flexible mappings and full-file validation, and submit valid records in bounded batches to Supabase for HR review.
+- Full Vitest passed: 89 tests / 26 files. TypeScript and production build passed. Authenticated browser validation remains blocked by unavailable browser automation and lack of an approved synthetic test account; no account credentials were inspected.
+- Payroll is still not an operational LIVE workflow: input preview and draft persistence are connected, but trusted calculation and persisted payroll items are missing. Submit/review/finalization database primitives exist, but cannot run correctly without the calculation step. Finalization stays gated on verified effective statutory rules.
+- The latest hosted Vercel Preview still points to a prior commit. These new local changes have not been published or deployed.
+
+## Latest LIVE admin and employment-status increment (28 October 2026)
+
+- Migration `20261028001300` is applied to the authorized development project and migration history aligns through 013. Hosted rollback-only checks passed for company administrator scope/escalation denials and employment status history/payroll preview exclusion; baseline records were preserved.
+- LIVE Users & Permissions now manages existing, activated Company Administrator accounts via company-scoped audited RPCs. Email invitations/account activation and branch-manager assignment are not included in this screen.
+- LIVE employee profiles show employment status and status history with reason-required suspend/reactivate/terminate actions. Termination cannot be reversed through the current workflow.
+- Full Vitest passed: 84 tests / 25 files; focused regression: 15 / 15; typecheck and build passed. New LIVE files lint clean. Existing legacy lint warnings and main bundle size warning remain.
+- Browser verification was attempted but blocked by missing WSL `/bin/bash` for the Playwright wrapper and a timeout from the native browser bridge. Authenticated browser checks are not claimed.
+
+## Latest LIVE employee correction slice (28 October 2026)
+
+- Correction route now loads authorized DRAFT/RETURNED_FOR_CORRECTION records through the creator-scoped Supabase RPC, displays protected private fields only after authorization, preserves company/branch assignment, and writes changes through the trusted update RPC before resubmission.
+- Employee directory exposes edit/resubmit links for drafts and returned submissions. A failed reload hides the correction form; a failed resubmission does not claim success or discard the saved correction.
+- Focused correction/profile tests and the full 80-test Vitest suite pass. TypeScript and production build pass. Existing Oxlint warnings and the main-bundle size advisory remain.
+- Hosted synthetic correction/resubmission/approval RLS smoke passed transactionally. Employee and private-data tables remain empty after rollback. Authenticated browser testing remains outstanding.
+- LIVE employee profiles and approval timelines now use RLS-scoped, paginated backend reads. The view intentionally does not request NRC, bank, salary, or compensation data.
+- LIVE-mode shell, login note and dashboard labels now describe connected persistent modules accurately and state that payroll is draft-only while calculations, approvals/finalization and reports remain unavailable.
+
 ## Backend transition note (28 October 2026)
 
-- The frontend continues to use synthetic business state in both MOCK mode and the current LIVE-auth shell. A typed Supabase service adapter now covers employee directory reads/draft creation/review, deduction reads/request creation/review, and payroll reads/submission/review/finalization RPCs. The existing screens are not yet connected; failures in this adapter propagate and never silently return mock data.
-- Employee, compensation, attendance, leave, deduction, payroll, approval, and audit schema/RLS migrations plus trusted workflow RPCs are local source only. Local PostgreSQL/RLS tests passed; no hosted migration or business record has been applied.
-- See `BACKEND_SETUP.md` and `IMPLEMENTATION_STATUS.md` for target verification, SQL test scope, and remaining integration work.
+- MOCK mode remains synthetic. LIVE mode is connected for companies/branches, employee directory/onboarding/review/corrections/profile history, deductions, attendance and leave workflows, plus payroll input previews and persistent draft creation. Payroll calculation, approval/finalization and other gated modules remain unavailable.
+- Fourteen forward-only company-first/domain migrations are applied to the authorized development project. Recent hosted SQL workflow tests are rollback-only; no employee or payroll fixtures persist.
+- This file retains historical mock-mode implementation notes below. For current LIVE scope and verification, see the latest checkpoint in `IMPLEMENTATION_STATUS.md` and `BACKEND_SETUP.md`.
 
 ## Scope and constraints
 
-- Synthetic frontend with Supabase email/password authentication available only in explicitly selected LIVE mode. Business data remains mock-only; no database schema, domain backend, tenant authorization, real payroll processing, or deployment is included.
+- MOCK mode uses synthetic frontend data. Explicit LIVE mode uses Supabase Auth and only the business services documented in the current backend checkpoint; unconnected modules remain unavailable rather than falling back to mock data.
 - Mock records are shared through typed feature contexts; company and employee demo records persist in this browser's local storage for continuity. Old `gbhr-organizations` localStorage data is no longer read or written and may remain inert in existing browsers.
 - Local browser storage is demo persistence only and is not a secure or durable data service.
-- Access and payroll status workflows are visual simulations, not enforced security or financial workflows.
+- Mock-mode access and payroll status workflows are visual simulations. LIVE workflow authorization uses database RLS/trusted RPCs where implemented; payroll calculation and finalization remain disabled.
 
 ## Completed routes and useful interactions
 
@@ -138,7 +169,7 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 
 ## Current LIVE integration update (28 October 2026)
 
-- Six migrations (`20261028000100`–`20261028000600`) are applied to the authorized V2 development Supabase project; see `IMPLEMENTATION_STATUS.md` for the remote preflight, migration history, data counts, and hosted rollback-only RLS results.
+- Six migrations (`20261028000100`â€“`20261028000600`) are applied to the authorized V2 development Supabase project; see `IMPLEMENTATION_STATUS.md` for the remote preflight, migration history, data counts, and hosted rollback-only RLS results.
 - The existing Auth test user was preserved and provisioned as Portfolio Administrator for a synthetic development portfolio. That portfolio contains one clearly synthetic company and branch; no employee or payroll rows exist.
 - Added a live company/branch Supabase service and test coverage. LIVE App state no longer loads mock company/employee records from localStorage. The LIVE dashboard shows the real visible company count and marks unconnected metrics unavailable.
 - LIVE company/branch routes display database records. Employee directory reads, onboarding draft/submit, and HR review decisions now call the live Supabase service/RPCs; sensitive fields are excluded from directory reads. Other unconnected HR/payroll routes remain gated instead of presenting mock data as real. MOCK workflows remain intact.
@@ -147,4 +178,5 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 - Supabase Management API rollback tests exercised company/branch writes, tenant scoping, private-detail denial, membership assignment/revocation, employee approval RPCs, and a K6,000/six-month schedule. This is hosted PostgreSQL role simulation, not full Supabase Auth/PostgREST integration.
 - The Vercel project was located through the connected Vercel integration. Encrypted LIVE environment values are scoped only to Preview for `feature/supabase-auth`. Its last failed deployment reported invalid `vercel.json`; the local UTF-8 BOM was removed and JSON validated, but no preview redeployment occurred because current changes are not pushed.
 - Git remains blocked by the execution sandbox's read-only `.git` mount; no commit or push was made. No deployment occurred.
+
 

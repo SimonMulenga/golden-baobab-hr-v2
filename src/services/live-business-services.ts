@@ -19,6 +19,7 @@ export type EmployeeDirectoryRecord = {
   retirement_age: number;
   retirement_status: 'NOT_RETIRED' | 'RETIRED';
   approval_status: 'DRAFT' | 'SUBMITTED_FOR_HR_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RETURNED_FOR_CORRECTION';
+  employment_status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
   submitted_at: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -139,6 +140,28 @@ export type EmployeeDraftInput = {
   privateDetails: JsonObject;
   compensation: JsonObject;
 };
+export type EmployeeCorrectionDetails = {
+  employee: Record<string, string | number | null>;
+  private_details: Record<string, string | null>;
+  compensation: Record<string, string | number | boolean | null>;
+  company_id: string;
+  branch_id: string;
+  portfolio_id: string;
+  approval_status: EmployeeDirectoryRecord['approval_status'];
+};
+export type EmployeeHistoryRecord = {
+  id: number;
+  action: string;
+  reason: string | null;
+  occurred_at: string;
+  actor_id: string;
+};
+export type EmploymentHistoryRecord = {
+  id: number; previous_status: EmployeeDirectoryRecord['employment_status'];
+  new_status: EmployeeDirectoryRecord['employment_status']; reason: string; occurred_at: string; actor_id: string;
+};
+export type CompanyAdminRecord = { user_id: string; email: string; display_name: string | null; role: 'COMPANY_ADMIN'; created_at: string; revoked_at: string | null };
+export type PortfolioMemberRecord = { user_id: string; email: string; display_name: string | null; role: 'PORTFOLIO_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; created_at: string; revoked_at: string | null; branch_ids: string[] };
 export type DeductionRequestInput = {
   portfolioId: string;
   companyId: string;
@@ -153,9 +176,26 @@ export interface LiveBusinessServices {
   employees: {
     list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter }): Promise<PageResult<EmployeeDirectoryRecord>>;
     byIds(ids: string[]): Promise<EmployeeDirectoryRecord[]>;
+    byId(employeeId: string): Promise<EmployeeDirectoryRecord>;
+    history(employeeId: string): Promise<EmployeeHistoryRecord[]>;
+    employmentHistory(employeeId: string): Promise<EmploymentHistoryRecord[]>;
+    setEmploymentStatus(employeeId: string, status: EmployeeDirectoryRecord['employment_status'], reason: string): Promise<void>;
     createDraft(input: EmployeeDraftInput): Promise<string>;
+    correctionDetails(employeeId: string): Promise<EmployeeCorrectionDetails>;
+    updateDraft(employeeId: string, input: Pick<EmployeeDraftInput, 'employee' | 'privateDetails' | 'compensation'>): Promise<string>;
     submitForHrApproval(employeeId: string): Promise<string>;
     reviewSubmission(employeeId: string, decision: EmployeeReviewDecision, reason?: string): Promise<string>;
+  };
+  companyAdmins: {
+    list(portfolioId: string, companyId: string): Promise<CompanyAdminRecord[]>;
+    assign(portfolioId: string, companyId: string, userId: string): Promise<void>;
+    revoke(portfolioId: string, companyId: string, userId: string, reason: string): Promise<void>;
+  };
+  portfolioUsers: {
+    list(portfolioId: string): Promise<PortfolioMemberRecord[]>;
+    assign(portfolioId: string, userId: string, role: PortfolioMemberRecord['role'], branchIds?: string[]): Promise<void>;
+    replaceBranchAssignments(portfolioId: string, companyId: string, userId: string, role: 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR', branchIds: string[]): Promise<void>;
+    revoke(portfolioId: string, userId: string, role: PortfolioMemberRecord['role'], reason: string): Promise<void>;
   };
   deductions: {
     list(request?: PageRequest): Promise<PageResult<DeductionRecord>>;
@@ -207,7 +247,7 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const page = Math.max(0, (request.page ?? 1) - 1);
         const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
         let query = client.from('employees')
-          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,submitted_at,reviewed_at,created_at', { count: 'exact' })
+          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at', { count: 'exact' })
           .order('last_name', { ascending: true })
           .range(page * pageSize, page * pageSize + pageSize - 1);
         if (request.companyId) query = query.eq('company_id', request.companyId);
@@ -221,16 +261,55 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
       async byIds(ids) {
         if (ids.length === 0) return [];
         const result = await client.from('employees')
-          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,submitted_at,reviewed_at,created_at')
+          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at')
           .in('id', [...new Set(ids)]);
         if (result.error) throw result.error;
         return (result.data ?? []) as EmployeeDirectoryRecord[];
+      },
+      async byId(employeeId) {
+        const result = await client.from('employees')
+          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at')
+          .eq('id', employeeId).maybeSingle();
+        if (result.error) throw result.error;
+        if (!result.data) throw new Error('Employee record is unavailable under the current access scope.');
+        return result.data as EmployeeDirectoryRecord;
+      },
+      async history(employeeId) {
+        const result = await client.from('employee_approval_history')
+          .select('id,action,reason,occurred_at,actor_id')
+          .eq('employee_id', employeeId)
+          .order('occurred_at', { ascending: false })
+          .range(0, 49);
+        if (result.error) throw result.error;
+        return (result.data ?? []) as EmployeeHistoryRecord[];
+      },
+      async employmentHistory(employeeId) {
+        const result = await client.from('employee_employment_history')
+          .select('id,previous_status,new_status,reason,occurred_at,actor_id').eq('employee_id', employeeId)
+          .order('occurred_at', { ascending: false }).range(0, 49);
+        if (result.error) throw result.error;
+        return (result.data ?? []) as EmploymentHistoryRecord[];
+      },
+      async setEmploymentStatus(employeeId, status, reason) {
+        const result = await client.rpc('employee_set_employment_status', { p_employee_id: employeeId, p_status: status, p_reason: reason });
+        if (result.error) throw result.error;
       },
       async createDraft(input) {
         return unwrap(await client.rpc('employee_create_draft', {
           p_portfolio_id: input.portfolioId,
           p_company_id: input.companyId,
           p_branch_id: input.branchId,
+          p_employee: input.employee,
+          p_private_details: input.privateDetails,
+          p_compensation: input.compensation,
+        }));
+      },
+      async correctionDetails(employeeId) {
+        return unwrap(await client.rpc('employee_correction_details', { p_employee_id: employeeId })) as EmployeeCorrectionDetails;
+      },
+      async updateDraft(employeeId, input) {
+        return unwrap(await client.rpc('employee_update_draft', {
+          p_employee_id: employeeId,
           p_employee: input.employee,
           p_private_details: input.privateDetails,
           p_compensation: input.compensation,
@@ -243,6 +322,40 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         return unwrap(await client.rpc('employee_review_submission', {
           p_employee_id: employeeId, p_decision: decision, p_reason: reason ?? null,
         }));
+      },
+    },
+    companyAdmins: {
+      async list(portfolioId, companyId) {
+        const result = await client.rpc('company_admin_members', { p_portfolio_id: portfolioId, p_company_id: companyId });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as CompanyAdminRecord[];
+      },
+      async assign(portfolioId, companyId, userId) {
+        const result = await client.rpc('assign_company_admin', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId });
+        if (result.error) throw result.error;
+      },
+      async revoke(portfolioId, companyId, userId, reason) {
+        const result = await client.rpc('revoke_company_admin', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_reason: reason });
+        if (result.error) throw result.error;
+      },
+    },
+    portfolioUsers: {
+      async list(portfolioId) {
+        const result = await client.rpc('portfolio_membership_directory', { p_portfolio_id: portfolioId });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as PortfolioMemberRecord[];
+      },
+      async assign(portfolioId, userId, role, branchIds = []) {
+        const result = await client.rpc('assign_portfolio_membership', { p_portfolio_id: portfolioId, p_user_id: userId, p_role: role, p_branch_ids: branchIds });
+        if (result.error) throw result.error;
+      },
+      async replaceBranchAssignments(portfolioId, companyId, userId, role, branchIds) {
+        const result = await client.rpc('replace_branch_role_assignments', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_role: role, p_branch_ids: branchIds });
+        if (result.error) throw result.error;
+      },
+      async revoke(portfolioId, userId, role, reason) {
+        const result = await client.rpc('revoke_portfolio_membership', { p_portfolio_id: portfolioId, p_user_id: userId, p_role: role, p_reason: reason });
+        if (result.error) throw result.error;
       },
     },
     deductions: {
@@ -411,4 +524,5 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
     },
   };
 }
+
 

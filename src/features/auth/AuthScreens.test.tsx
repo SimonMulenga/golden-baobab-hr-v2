@@ -3,14 +3,14 @@ import '@testing-library/jest-dom/vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { ForgotPasswordScreen, LiveLoginScreen, ResetPasswordScreen } from './AuthScreens'
+import { ActivateAccountScreen, ForgotPasswordScreen, LiveLoginScreen, ResetPasswordScreen } from './AuthScreens'
 import { useAuth } from './auth-context'
 
 vi.mock('./auth-context', () => ({ useAuth: vi.fn() }))
 const useAuthMock = vi.mocked(useAuth)
 
 function renderAt(path: string, routeElement: ReactNode) {
-  return render(<MemoryRouter initialEntries={[path]}><Routes><Route path="/auth/login" element={<LiveLoginScreen/>}/><Route path="/auth/forgot" element={<ForgotPasswordScreen/>}/><Route path="/auth/reset" element={<ResetPasswordScreen/>}/><Route path="/" element={<div>Workspace route</div>}/><Route path="*" element={routeElement}/></Routes></MemoryRouter>)
+  return render(<MemoryRouter initialEntries={[path]}><Routes><Route path="/auth/login" element={<LiveLoginScreen/>}/><Route path="/auth/forgot" element={<ForgotPasswordScreen/>}/><Route path="/auth/reset" element={<ResetPasswordScreen/>}/><Route path="/auth/activate" element={<ActivateAccountScreen/>}/><Route path="/" element={<div>Workspace route</div>}/><Route path="*" element={routeElement}/></Routes></MemoryRouter>)
 }
 
 describe('live authentication screens', () => {
@@ -64,4 +64,26 @@ describe('live authentication screens', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update password' }))
     await waitFor(() => expect(updatePassword).toHaveBeenCalledWith('long-enough-password'))
   })
+
+  it('requires an invitation session and activates an invited account through Supabase password update', async () => {
+    useAuthMock.mockReturnValue({ loading: false, isAuthenticated: false } as unknown as ReturnType<typeof useAuth>)
+    const { unmount } = renderAt('/auth/activate', <div />)
+    expect(screen.getByText('Invitation link unavailable')).toBeInTheDocument()
+    unmount()
+
+    const updatePassword = vi.fn().mockImplementation(async () => {
+      useAuthMock.mockReturnValue({ loading: false, isAuthenticated: false, recoveryRequired: false, signIn: vi.fn() } as unknown as ReturnType<typeof useAuth>)
+    })
+    useAuthMock.mockReturnValue({ loading: false, isAuthenticated: true, updatePassword } as unknown as ReturnType<typeof useAuth>)
+    renderAt('/auth/activate', <div />)
+    fireEvent.change(screen.getByLabelText('New password'), { target: { value: 'long-enough-password' } })
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'different-password' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set password and activate' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The passwords do not match.')
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'long-enough-password' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set password and activate' }))
+    await waitFor(() => expect(updatePassword).toHaveBeenCalledWith('long-enough-password'))
+    expect(await screen.findByText('Your account is active. Sign in to continue.')).toBeInTheDocument()
+  })
 })
+

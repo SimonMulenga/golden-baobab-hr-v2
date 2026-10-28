@@ -1,17 +1,68 @@
 # Golden Baobab HR V2 implementation status
 
+## 28 October 2026 statutory/payroll review increment
+
+- Created `ZAMBIA_STATUTORY_RULES_2026.md` with official source links and an explicit verification state. ZRA's 2026 ordinary PAYE bands, taxable-emoluments guidance, pension-contribution treatment and K15,000 example are confirmed from ZRA. NAPSA publishes 5% employee + 5% employer and a K28,920.30 ceiling, but Act 72/SI 62 of 2026 changed the legal framework during the year and the current published ceiling/threshold/basis was not reconciled against the new instruments. NHIMA publishes 1% per side but its official FAQ conflicts on employee/employer contribution bases. These unresolved rules remain blockers for production payroll finalization.
+- Updated `ZAMBIA_PAYROLL_SPEC.md` and `BACKEND_SETUP.md` to reflect the verification and to avoid describing the existing illustrative client helper as an authoritative or live payroll calculator.
+- Changed the existing illustrative PAYE helper to use integer-cent and basis-point arithmetic (no floating-point percentage arithmetic). Added ordinary band checkpoints and rounding tests. This helper remains client-side, configurable/illustrative, and always prohibits production finalization; it does **not** satisfy the trusted server calculation requirement.
+- Validation started: typecheck, full Vitest, and production build are running. No migration was added or applied, no remote schema/data was changed, and no finalization gate was altered.
+- Statutory verification still needs direct regulator/legal confirmation for the NAPSA post-reform contribution base, threshold/cap and covered categories; NHIMA base, ceiling and exceptions; detailed joiner/leaver PAYE and rounding instructions. Browser-authenticated and Vercel Preview checks are not completed in this increment.
+
+Updated: 28 October 2026
+
+## Latest checkpoint - invitations, branch-role administration, and spreadsheet import (28 October 2026)
+
+- Added and applied forward-only migration `20261028001400_membership_directory_and_branch_roles.sql` to the authorized development project. A fresh `supabase migration list --linked` confirmed local and hosted history align through 014.
+- Deployed the `invite-user` Supabase Edge Function with JWT verification enabled. It verifies the caller, checks the scoped invitation authorization RPC, uses a fixed same-origin `/auth/activate` redirect, and assigns only the requested authorized role. The server origin allowlist is currently restricted to `http://localhost:5173`. No invitation email was sent; Supabase Auth's allowed redirect URL for `/auth/activate` still needs confirmation before sending invitations.
+- LIVE Users & Permissions now lists authorized portfolio memberships and supports invitations plus assignment, branch-scope replacement, and revocation for Portfolio Administrator, Overall HR Manager, Branch Manager, and Payroll Processor. Company Administrator management remains available. Database RPCs enforce role/scope restrictions and audit assignment changes.
+- Added an authenticated invitation activation screen that requires a valid Supabase invitation session, validates password confirmation, updates the password through Supabase Auth, and signs out to the login screen.
+- Added browser-local CSV/XLSX parsing, flexible header mapping, local validation/preview, company/workplace-branch selection, and bounded 20-row persistence submissions through employee draft and HR submission RPCs. Spreadsheet files are not uploaded. Row outcomes distinguish HR-submitted records, saved drafts, and failures.
+- Added activation and role-administration tests and import mapping tests. Full Vitest: 89 tests across 26 files passed. TypeScript check and production build passed. Build retains the existing large-entry-chunk advisory. Targeted live user/import/service tests passed (11/11); auth-screen tests passed (5/5).
+- Browser automation could not be completed: the Playwright wrapper depends on WSL bash unavailable in this Windows host; Node browser runtime discovery timed out; CUA browser surface timed out. No authenticated browser test is claimed. The existing test-account password was not accessed, and no synthetic account or invitation email was created.
+- Payroll remains preview/draft only. The hosted schema has submission/review/finalization transition RPCs but has no trusted calculation operation that persists payroll line items. No calculated payroll or approval workflow was executed. Finalization remains blocked pending complete server-side rule computation and effective-dated statutory configuration verification.
+- Latest Vercel Preview still serves the previous remote commit and does not contain these uncommitted local changes. No commit, push, Vercel deployment, production change, or email delivery was performed.
+
 Updated: 28 October 2026  
-Branch: `feature/supabase-auth`
+Branch: `feature/supabase-auth-synced` (tracks `feature/supabase-auth`; local Git metadata is read-only in this session)
+
+## Latest checkpoint - company admin access and employee employment status
+
+- Reviewed and applied forward-only migration `20261028001300_company_admin_and_employment_status.sql` to the authorized development project `jssuaebiizjcoqmngxzk`. Migration history is aligned through 013.
+- Hosted rollback-only smoke passed with company-admin isolation, scoped `users.manage`, denial of self-assignment and portfolio-role escalation, employment status transitions/history, and exclusion of suspended employees from payroll input previews. Post-test counts remain 1 Auth user, 1 synthetic company, 0 company-admin memberships, 0 employees, and 0 employment-history events. Existing user and company were preserved.
+- LIVE `/users` now lists and assigns/revokes company-scoped `COMPANY_ADMIN` memberships through audited RPCs. The target account must already be activated. This UI does not send invitations and cannot grant portfolio, HR, payroll, or platform roles; branch-manager assignment remains separate.
+- LIVE employee profiles now show employment status and status history. Authorized status changes require a reason and call `employee_set_employment_status`; termination is terminal in this workflow. The payroll input RPC excludes suspended and terminated employees.
+- Full Vitest: 84 tests across 25 files passed; focused regression rerun: 15/15 passed. `npm.cmd run typecheck` passed. Updated LIVE files pass Oxlint. Production build passed with the existing ~910 kB entry-chunk advisory.
+- Browser automation could not run in this Windows session: the prescribed Playwright wrapper cannot launch because WSL has no `/bin/bash`, and the native browser bridge timed out. Direct installed headless-browser attempts did not return rendered DOM. No authenticated browser test is claimed; hosted rollback SQL is PostgreSQL/JWT-role simulation, not HTTP Auth/PostgREST proof.
+- No invitation email, database reset, production change, commit, push, or deployment was performed. Local `.git` remains read-only.
+
+## Latest verified increment - employee corrections and profile history
+
+- Added migration `20261028001200_employee_corrections.sql`, reviewed and applied to the authorized development project `jssuaebiizjcoqmngxzk`. It adds creator-scoped, audited RPCs to retrieve and update only DRAFT or HR-returned employee records and allows a `CORRECTED` approval-history event. It does not modify company assignment or approval state.
+- Hosted preflight verified the project ref, migration history through 011, one existing Auth user, and zero employee, private-detail, compensation, attendance, leave, deduction, or payroll records. Migration 012 is now aligned locally/remotely. Post-smoke counts remain at the same baseline; no persistent synthetic fixtures remain.
+- LIVE employee directory links authorized users to an RLS-filtered profile and approval timeline, and links creators to edit drafts or correct/resubmit returned submissions. The correction form fetches private details only through the creator-authorized audited RPC, keeps branch/company assignment fixed, saves through a transaction-backed RPC, then invokes the existing submit workflow. If resubmission fails after save, the UI explicitly says corrections were saved but not resubmitted. Unauthorized load errors hide the sensitive form. Profile queries exclude private identifiers, bank fields, salary and compensation.
+- Added correction service methods and UI tests for private-field hydration, compensation correction, trusted resubmission and denied access; added profile/timeline RLS-scoped tests and verification that sensitive fields are not selected. The hosted rollback-only synthetic RLS workflow now covers other-portfolio denial, creator-scoped private data, correction, audit/history, resubmission and HR approval.
+- `npm.cmd run typecheck` passed. Full Vitest: 80 tests across 24 files passed. Production build passed. Oxlint completed before the profile effect was refined; that newly identified set-state-in-effect warning has since been removed. Six existing legacy warnings remain. Existing ~910 kB entry-chunk advisory remains.
+- Hosted `synthetic_rollback_smoke.sql` passed through linked Supabase Management SQL query; all fixtures rolled back. This is database-role/JWT-claim simulation, not HTTP Auth/PostgREST or authenticated-browser proof. Authenticated browser login, invitations, company/branch role administration and persistence after browser refresh remain unverified.
+- LIVE global notices and dashboard labels now accurately distinguish connected HR services and payroll draft-only support from gated payroll calculation/finalization and reports.
+- No commit, push, merge, Vercel deployment, production operation or email was performed. Existing backup branch and stash were not touched.
+
+### Stage 1 gaps still open
+
+- Company-scoped `COMPANY_ADMIN` membership and audited assignment/revocation are implemented in migration 013. Migration 014 and the local LIVE UI now cover invitations, account activation, portfolio membership directory, and branch-role assignment/replacement/revocation; hosted email delivery and authenticated browser validation remain unverified.
+- Employment status is separate from onboarding approval and is now persisted with audited transitions. Retirement eligibility is still an independent configured field; no statutory contribution exemption is inferred from age.
+- CSV/XLSX import is implemented locally in the LIVE route, but no authenticated import run has been executed against persistent employee records. Employee document storage and authenticated Auth/PostgREST/browser CRUD remain incomplete. Browser execution is unavailable in the current host; a dedicated synthetic test account/mailbox is needed for authenticated session and email-flow verification.
+- Attendance and leave persistence/approval are hosted-smoke-tested, but the Stage 1 integration did not perform an authenticated browser reload check. Payroll remains input preview/draft only; calculation, review, approval and finalization are disabled.
 
 ## Current state
 
-Eight company-first and HR/payroll migrations are applied to the explicitly authorized development Supabase project `golden-baobab-hr-v2` (ref `jssuaebiizjcoqmngxzk`). The latest rollback-only hosted smoke test covers company/branch isolation, employee onboarding review, K6,000 deduction scheduling and approval, attendance submission/return/correction/reapproval, paid-leave accrual/idempotency/balance debit, policy scope, and revoked-access behavior. Every fixture rolled back. The existing Auth user remains present. Company/branch CRUD, employee directory/onboarding/review, deduction workflows, monthly attendance, and leave request/policy workflows now use LIVE Supabase services; unconnected modules remain unavailable in LIVE mode rather than showing synthetic business records.
+Fourteen company-first and HR/payroll migrations are applied to the explicitly authorized development Supabase project `golden-baobab-hr-v2` (ref `jssuaebiizjcoqmngxzk`). The latest rollback-only hosted smoke test also covers company/branch isolation, employee onboarding review/correction/resubmission, K6,000 deduction scheduling and approval, attendance submission/return/correction/reapproval, paid-leave accrual/idempotency/balance debit, policy scope, revoked access, branch-role replacement, and invitation authorization. Every fixture rolled back. The existing Auth user remains present. Company/branch CRUD, employee directory/onboarding/review/corrections/profile history, deduction workflows, monthly attendance, leave request/policy workflows, membership administration, and payroll input/draft creation use LIVE Supabase services; unconnected modules remain unavailable in LIVE mode rather than showing synthetic business records.
 
 This is a development integration slice, not an operational payroll system. No employee, deduction, or payroll data is persisted after the smoke tests.
 
 ## Database completed
 
-- Migrations `20261028000100` through `20261028000800` are applied and match remote history.
+- Migrations `20261028000100` through `20261028001300` are applied and match remote history.
+- Migration `20261028001200` adds creator-scoped audited RPCs for returned/draft employee corrections and private-field hydration, plus the `CORRECTED` approval-history action.
 - Added company-first portfolio, company, branch, membership, and explicit platform-admin tables.
 - Added employee/private-detail/compensation, attendance/leave, deduction/installment/ledger, payroll period/run/item, statutory-version, approval, and audit tables with composite tenant foreign keys and indexes.
 - RLS is enabled on all 27 public business tables. Direct HR business writes are closed; attendance and leave mutations use SECURITY DEFINER RPCs with tenant, role, branch, transition, and review checks. `leave_balances` is a security-invoker aggregate over the RLS-protected leave ledger.
@@ -79,7 +130,7 @@ This is a development integration slice, not an operational payroll system. No e
 1. Diagnose Auth provisioning and run authenticated PostgREST/browser tests; the temporary SQL-created accounts hit an Auth schema-query error and were removed.
 2. Connect approved attendance and leave to trusted payroll inputs and the calculation/finalization workflow.
 3. Complete employee correction/resubmission, profiles, compensation, and CSV/XLSX imports.
-4. Complete live company/branch browser CRUD, role/branch assignment UI, trusted invitations, and role administration.
+4. Complete authorized browser validation for live company/branch CRUD, invitations, activation, branch-role assignment, and employee import.
 5. Implement deduction pause/resume/settlement/reversal and ledger correction workflows.
 6. Build trusted payroll calculation, version-bound approvals, finalization, payslips, and duplicate-posting tests; draft creation is already persistent.
 7. Verify NAPSA/NHIMA bases, rates, ceilings, and exemptions against authoritative sources before allowing real payroll finalization.
@@ -97,7 +148,7 @@ The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`
 - The first automatic Preview for that commit failed because source transfer inserted output-truncation text into `src/features/employees/EmployeeScreens.tsx`. Replaced only that remote file with the exact complete local bytes through the GitHub blob/tree APIs; repair commit `f1dee366d45474c57d109c1f82d656c63b807053` advanced the feature branch normally.
 - Vercel Preview deployment `dpl_BAEF3wb5NDDUg42k6ETmKaWw2Y4U` is READY at `https://golden-baobab-hr-v2-rdndub5yv-simon-mulengas-projects.vercel.app`. The protected `/auth/login` request returned HTTP 200 and the Golden Baobab HR document title. This is an HTTP smoke check, not authenticated browser/CRUD verification.
 - Re-ran TypeScript via `npm.cmd run build` (includes `tsc -b`) successfully; `npm.cmd test -- --run --maxWorkers=1 --reporter=dot` passed all 74 tests across 23 files. Vite still reports the ~909 kB main chunk warning. Authenticated Playwright testing remains blocked by unavailable browser tooling and the earlier Auth test-account schema-query failure.
-- The live attendance/leave database workflows remain persistent and hosted rollback tests pass. Payroll still has no trusted run-creation/calculation operation; attendance and leave are not yet payroll inputs, and statutory verification/finalization remain blocked.
+- The live attendance/leave database workflows remain persistent and hosted rollback tests pass. Payroll has trusted input preview, draft, submit/review, and finalization primitives, but no trusted calculation RPC that persists payroll items. Approval/finalization therefore cannot be reached through a live calculated workflow; statutory rule-version gates remain in place.
 - No credentials, local environment files, Supabase linkage metadata, local Git metadata, or browser artifacts were added to the connector commits.
 ## 28 October 2026 payroll-input increment
 
@@ -118,3 +169,4 @@ The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`
 - Vercel Preview for commit `a1caab4f9f7b4536c8feb2ca0a68a9cecf219cda` is READY: `https://golden-baobab-hr-v2-md16hmwop-simon-mulengas-projects.vercel.app` (deployment `dpl_CkPtLyp9TQq1v1hCeZKF5ymycvn3`). Both `/auth/login` and `/payroll` return HTTP 200 and SPA HTML with the Golden Baobab HR title. This does not execute browser JavaScript or prove Auth/PostgREST CRUD.
 - The CUA browser surface timed out during initialization. Playwright is not installed locally and prior CLI package retrieval stalled. No authenticated browser test is claimed.
 - Supabase linked migration history now aligns locally/remotely through `20261028001100`. Rollback-only role/JWT claim tests passed; they do not substitute for real Auth/PostgREST user sessions.
+
