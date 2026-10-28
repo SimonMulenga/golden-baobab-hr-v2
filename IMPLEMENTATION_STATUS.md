@@ -17,7 +17,7 @@ This is a development integration slice, not an operational payroll system. No e
 - RLS is enabled on all 27 public business tables. Direct HR business writes are closed; attendance and leave mutations use SECURITY DEFINER RPCs with tenant, role, branch, transition, and review checks. `leave_balances` is a security-invoker aggregate over the RLS-protected leave ledger.
 - Trusted RPCs cover employee draft creation/submission/review, deduction creation/review and schedule generation, attendance entry save/submit/review, leave policy save/accrual/request/review, payroll submit/review/finalize, and portfolio membership assignment/revocation.
 - RPC catalog checks confirm `SECURITY DEFINER`, pinned `search_path=pg_catalog`, `row_security=off`, no `anon` execute, and `authenticated` execute where intended.
-- Finalization requires a version-bound approval, approved employees, due/balance-valid deduction installments, and active/effective/verified Zambian PAYE, NAPSA, and NHIMA rule versions. It is not a usable payroll engine because trusted run creation/calculation and verified rules are not present.
+- Finalization requires a version-bound approval, approved employees, due/balance-valid deduction installments, and active/effective/verified Zambian PAYE, NAPSA, and NHIMA rule versions. It is not a usable payroll engine because trusted payroll calculation and verified effective statutory rules are not present; idempotent draft creation is available.
 - New Auth users receive a profile via trigger. The migration backfilled profiles with conflict-safe inserts.
 
 ## Development data and existing account
@@ -61,7 +61,7 @@ This is a development integration slice, not an operational payroll system. No e
 - LIVE deductions list RLS-visible requests and persisted installments, create through `deduction_create_request`, and approve/reject through `deduction_review_request`. Only trusted payroll finalization can post repayments. The dashboard reports the real visible company count and clearly marks employee/payroll figures unavailable.
 - LIVE attendance supports company/branch/month selection, approved employee paging, monthly schedule/worked/paid-leave/unpaid-leave/payable-absence entry, audited corrections, period submission, HR return, and approval. It uses `attendance_save_entry`, `attendance_submit_period`, and `attendance_review_period`; a submitter cannot review their own period.
 - LIVE leave supports persistent requests, configurable effective-dated leave policies, ledger balances, explicit paid/unpaid classification, monthly accrual, approval/rejection, idempotent accrual, overlap prevention, and paid-balance validation. Policy management and accrual are limited to Portfolio Admin and Overall HR; branch managers remain branch-scoped. Leave accrual amounts are configurable assumptions, not legal guidance.
-- Attendance/leave data are not yet consumed by a live payroll calculation. Payroll run creation, calculation, and finalization remain unavailable.
+- Attendance and approved leave evidence are included in a permission-checked live payroll input preview. No payroll calculation is available; finalization remains blocked by missing verified effective rules.
 - Attendance, leave, payroll, statutory, users, audit, reports, notifications, and settings remain gated in LIVE mode until their UI operations are persistently connected. Deduction pause/resume, settlement, and reversal are not exposed yet.
 - Existing mock workflows remain available in MOCK mode.
 
@@ -81,7 +81,7 @@ This is a development integration slice, not an operational payroll system. No e
 3. Complete employee correction/resubmission, profiles, compensation, and CSV/XLSX imports.
 4. Complete live company/branch browser CRUD, role/branch assignment UI, trusted invitations, and role administration.
 5. Implement deduction pause/resume/settlement/reversal and ledger correction workflows.
-6. Build trusted payroll run creation/calculation, version-bound approvals, finalization, payslips, and duplicate-posting tests.
+6. Build trusted payroll calculation, version-bound approvals, finalization, payslips, and duplicate-posting tests; draft creation is already persistent.
 7. Verify NAPSA/NHIMA bases, rates, ceilings, and exemptions against authoritative sources before allowing real payroll finalization.
 8. Implement private documents/payslips, PDF generation, authorized email, reports/exports, audit UI, and settings.
 9. Run authenticated RLS/PostgREST integration, browser acceptance, and performance testing above 2,500 employees.
@@ -103,7 +103,7 @@ The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`
 
 - Added database migration `20261028000900` with permission-checked, read-only `payroll_preview_inputs`; migration `20261028001000` minimizes returned leave/deduction detail. Both are applied to the authorized development Supabase project and migration history aligns through 010.
 - The RPC requires `payroll.prepare` for the requested company/branch and an HR-approved attendance period matching the exact dates. It returns approved employees, effective compensation, approved attendance, approved leave-period evidence, and active due installments. It performs no calculation or writes. Attendance day totals remain the payroll adjustment source to prevent double-counting leave; health-sensitive leave type and deduction reason are omitted from the returned snapshot.
-- LIVE `/payroll` now displays an input-preview screen and uses the RPC. It clearly indicates that no payroll calculation/run/approval/finalization occurs. A branch manager without `payroll.prepare` is denied by the hosted smoke assertion.
+- LIVE `/payroll` now displays an input-preview screen and uses the RPC. It clearly indicates that no payroll calculation, submission, approval, or finalization occurs. A branch manager without `payroll.prepare` is denied by the hosted smoke assertion.
 - Hosted rollback-only smoke test passed after migration 010, including a synthetic K6,000 employee with approved attendance and compensation and the negative branch-manager permission case. All test fixtures are rolled back. Migration history and original test account/data counts are unchanged from the prior baseline except for the two migration records.
 - Local verification: TypeScript check passed; 76 tests across 24 files passed; production build passed; Oxlint completed with the six existing legacy warnings. Browser authenticated role workflows remain outstanding.
 ## 28 October 2026 persistent payroll draft increment
