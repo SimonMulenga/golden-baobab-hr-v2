@@ -45,7 +45,7 @@ export function LiveLoginScreen() {
       <button className="button-primary" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in securely'}</button>
     </form>
     <Link to="/auth/forgot">Forgot password?</Link>
-    <div className="auth-demo-note">Business records in this LIVE session remain synthetic demo data.</div>
+    <div className="auth-demo-note">Company, branch, employee onboarding/review, and deduction request workflows use LIVE Supabase data. Attendance, leave, payroll, and reports are not connected yet.</div>
   </AuthFrame>
 }
 

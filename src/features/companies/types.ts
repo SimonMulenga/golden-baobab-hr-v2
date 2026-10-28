@@ -15,6 +15,8 @@ export type Branch = {
 
 export type Company = {
   id: string
+  /** Present for LIVE records; used only as an identifier checked again by RLS. */
+  portfolioId?: string
   name: string
   registrationNumber: string
   tpin: string
@@ -27,19 +29,9 @@ export type Company = {
   logo: string
   contactPerson: string
   status: CompanyStatus
-  organizationId: string
   employeeCount: number
   createdAt: string
   branches: Branch[]
-}
-
-export type Organization = {
-  id: string
-  name: string
-  industry: string
-  description: string
-  status: CompanyStatus
-  companyIds: string[]
 }
 
 export type CompanyInput = Omit<Company, 'id' | 'createdAt' | 'employeeCount' | 'branches'>

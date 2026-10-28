@@ -1,12 +1,13 @@
 import { createContext, useContext } from 'react'
-import type { Company, Organization } from './types'
+import type { Company } from './types'
 
 export type WorkspaceData = {
   companies: Company[]
-  organizations: Organization[]
-  saveCompany: (company: Company) => void
-  saveOrganization: (organization: Organization) => void
-  deleteCompany: (id: string) => void
+  saveCompany: (company: Company) => void | Company | Promise<void | Company>
+  deleteCompany: (id: string) => void | Promise<void>
+  loading?: boolean
+  error?: string
+  live?: boolean
   setActiveCompany: (id: string) => void
   activeCompanyId: string
 }

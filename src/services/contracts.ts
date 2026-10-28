@@ -1,4 +1,4 @@
-import type { Branch, Company, Organization } from '../features/companies/types'
+import type { Branch, Company } from '../features/companies/types'
 import type { Employee } from '../features/employees/types'
 
 export interface PageRequest {
@@ -24,13 +24,6 @@ export interface AuthService {
   getCurrentUser(): Promise<AuthUser | null>
   signIn(email: string, password: string): Promise<AuthUser>
   signOut(): Promise<void>
-}
-
-export interface OrganizationsService {
-  list(request?: PageRequest): Promise<PageResult<Organization>>
-  getById(id: string): Promise<Organization | null>
-  create(input: Omit<Organization, 'id'>): Promise<Organization>
-  update(id: string, input: Partial<Organization>): Promise<Organization>
 }
 
 export interface CompaniesService {
