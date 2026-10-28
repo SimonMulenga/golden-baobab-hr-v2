@@ -71,6 +71,65 @@ export type PayrollPreviewInputs = {
   attendance_period_id: string; attendance_approved_at: string; items: PayrollPreviewItem[];
 };
 
+export type PayrollTrialItem = {
+  employee_id: string;
+  employee_number: string;
+  employee_name: string;
+  salary_frequency?: string;
+  calculable: boolean;
+  blockers: string[];
+  basic_pay: number | null;
+  housing_allowance?: number;
+  meal_allowance?: number;
+  transport_allowance?: number;
+  other_allowances?: number;
+  overtime?: number;
+  gross_pay: number | null;
+  paye_taxable_income_candidate?: number | null;
+  paye_candidate: number | null;
+  napsa_pensionable_base_candidate?: number | null;
+  napsa_employee_candidate: number | null;
+  napsa_employer_candidate?: number | null;
+  nhima_employee_base_candidate?: number | null;
+  nhima_employer_base_candidate?: number | null;
+  nhima_employee_candidate: number | null;
+  nhima_employer_candidate?: number | null;
+  approved_other_deductions: number | null;
+  candidate_net_pay: number | null;
+  employer_cost_candidate?: number | null;
+  due_deduction_items?: PayrollPreviewItem['due_approved_deductions'];
+};
+
+export type PayrollTrialSnapshot = {
+  status: 'TRIAL_ONLY';
+  payroll_run_id: string;
+  payroll_run_version: number;
+  company_id: string;
+  branch_id: string;
+  period_start: string;
+  period_end: string;
+  attendance_approved_at: string;
+  is_authoritative: false;
+  can_submit: false;
+  can_approve: false;
+  can_finalize: false;
+  rules: Record<string, string>;
+  blockers: string[];
+  totals: {
+    employee_count: number;
+    gross_pay_candidate: number;
+    paye_candidate: number;
+    napsa_employee_candidate: number;
+    napsa_employer_candidate: number;
+    nhima_employee_candidate: number;
+    nhima_employer_candidate: number;
+    approved_other_deductions: number;
+    candidate_net_pay: number;
+    employer_cost_candidate: number;
+  };
+  items: PayrollTrialItem[];
+};
+
 export type DeductionRecord = {
   id: string;
   portfolio_id: string;
@@ -223,6 +282,7 @@ export interface LiveBusinessServices {
     list(request?: PageRequest): Promise<PageResult<PayrollRunRecord>>;
     previewInputs(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string }): Promise<PayrollPreviewInputs>;
     createDraft(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string; frequency: 'MONTHLY' | 'FORTNIGHTLY' | 'WEEKLY'; idempotencyKey: string }): Promise<string>;
+    calculateTrial(runId: string, idempotencyKey: string): Promise<PayrollTrialSnapshot>;
     submitForApproval(runId: string): Promise<string>;
     reviewSubmission(runId: string, action: PayrollReviewAction, expectedVersion: number, reason?: string): Promise<string>;
     finalize(runId: string): Promise<string>;
@@ -510,6 +570,11 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_frequency: input.frequency, p_idempotency_key: input.idempotencyKey,
         }));
       },
+      async calculateTrial(runId, idempotencyKey) {
+        return unwrap(await client.rpc('payroll_calculate_trial', {
+          p_payroll_run_id: runId, p_idempotency_key: idempotencyKey,
+        })) as PayrollTrialSnapshot;
+      },
       async submitForApproval(runId) {
         return unwrap(await client.rpc('payroll_submit_for_approval', { p_payroll_run_id: runId }));
       },
@@ -524,5 +589,4 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
     },
   };
 }
-
 

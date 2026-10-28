@@ -381,6 +381,36 @@ begin
   perform set_config('test.payroll_run', v_first::text, true);
 end $$;
 
+do $$
+declare v_first jsonb; v_second jsonb; v_run uuid; v_calculation_count integer; v_employee_line jsonb;
+begin
+  v_run := current_setting('test.payroll_run')::uuid;
+  v_first := public.payroll_calculate_trial(v_run, 'remote-smoke-trial-oct-2026-v1');
+  v_second := public.payroll_calculate_trial(v_run, 'remote-smoke-trial-oct-2026-v1');
+  if v_first <> v_second then raise exception 'Payroll trial idempotent retry returned a different snapshot.'; end if;
+  if v_first->>'status' <> 'TRIAL_ONLY' or (v_first->>'can_finalize')::boolean is distinct from false
+    or (v_first #>> '{totals,gross_pay_candidate}')::numeric <> 6000
+    or (v_first #>> '{totals,paye_candidate}')::numeric <> 180
+    or (v_first #>> '{totals,napsa_employee_candidate}')::numeric <> 300
+    or (v_first #>> '{totals,nhima_employee_candidate}')::numeric <> 60
+    or (v_first #>> '{totals,candidate_net_pay}')::numeric <> 5460 then
+    raise exception 'Trial calculation did not return the expected explicitly non-authoritative synthetic breakdown.';
+  end if;
+  select value into strict v_employee_line from jsonb_array_elements(v_first->'items')
+    where value->>'employee_number' = 'REMOTE-SMOKE-EMP-1';
+  if not (v_first->'blockers' ? 'NAPSA_2026_CONFIGURATION_UNVERIFIED')
+    or not (v_first->'blockers' ? 'NHIMA_CONTRIBUTION_BASE_UNRESOLVED')
+    or not (v_employee_line->'blockers' ? 'UNPAID_LEAVE_FORMULA_REQUIRES_APPROVED_CONTRACT_RULE') then
+    raise exception 'Trial calculation did not expose statutory and unpaid-leave blockers.';
+  end if;
+  select count(*) into v_calculation_count from public.payroll_trial_calculations where payroll_run_id = v_run;
+  if v_calculation_count <> 1
+    or (select status from public.payroll_runs where id = v_run) <> 'DRAFT'
+    or (select count(*) from public.payroll_run_items where payroll_run_id = v_run) <> 0 then
+    raise exception 'Trial calculation was not stored once as a non-payable snapshot or altered payroll state.';
+  end if;
+end $$;
+
 select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
 do $$
 begin
@@ -394,6 +424,11 @@ begin
     perform public.payroll_create_draft('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', 'MONTHLY', 'unauthorized-payroll-draft');
     raise exception 'Branch manager without payroll preparation permission created a payroll run.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.payroll_calculate_trial(current_setting('test.payroll_run')::uuid, 'unauthorized-trial-calculation');
+    raise exception 'Branch manager without payroll preparation permission calculated payroll.';
   exception when insufficient_privilege then null;
   end;
 end $$;
@@ -462,4 +497,3 @@ end $$;
 
 reset role;
 rollback;
-

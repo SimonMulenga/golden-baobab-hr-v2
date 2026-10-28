@@ -56,6 +56,7 @@ describe('live Supabase business service adapter', () => {
     await expect(services.payroll.submitForApproval('run-1')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.previewInputs({ companyId: 'company-1', branchId: 'branch-1', periodStart: '2026-10-01', periodEnd: '2026-10-31' })).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.createDraft({ companyId: 'company-1', branchId: 'branch-1', periodStart: '2026-10-01', periodEnd: '2026-10-31', frequency: 'MONTHLY', idempotencyKey: 'payroll-request-1' })).resolves.toBe('synthetic-record-id');
+    await expect(services.payroll.calculateTrial('run-1', 'trial-request-1')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.reviewSubmission('run-1', 'APPROVE', 4)).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.finalize('run-1')).resolves.toBe('synthetic-record-id');
 
@@ -73,6 +74,7 @@ describe('live Supabase business service adapter', () => {
       'payroll_submit_for_approval',
       'payroll_preview_inputs',
       'payroll_create_draft',
+      'payroll_calculate_trial',
       'payroll_review_submission',
       'payroll_finalize',
     ]);
@@ -119,5 +121,4 @@ describe('live Supabase business service adapter', () => {
     expect(range).toHaveBeenCalledWith(0, 49);
   });
 });
-
 

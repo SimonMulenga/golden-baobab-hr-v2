@@ -21,3 +21,8 @@
 .live-inputs-error p { margin: 8px 0 0; }
 .live-inputs-draft-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 @media (max-width: 640px) { .live-inputs-summary { grid-template-columns: 1fr; } .live-inputs-filters > * { width: 100%; } .live-inputs-filters select, .live-inputs-filters input { width: 100%; } }
+.live-trial-results { display: grid; gap: 16px; margin-top: 18px; }
+.live-trial-results .live-inputs-error ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+.live-trial-results .live-inputs-error li { text-transform: capitalize; }
+.live-trial-row-warning { color: #a16207 !important; white-space: normal !important; min-width: 160px; }
+.live-trial-footnote { color: var(--muted-foreground, #64748b); font-size: 12px; line-height: 1.5; margin: 0; }

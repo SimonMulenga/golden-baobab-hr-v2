@@ -1,5 +1,17 @@
 # Golden Baobab HR V2 implementation status
 
+## Payroll trial calculation increment (28 October 2026)
+
+- Added and applied forward-only migration `20261028001500_payroll_trial_calculation.sql` to the verified development project. It adds an RLS-protected, append-only-by-application trial snapshot table and the `payroll_calculate_trial` SECURITY DEFINER RPC. It reads authorized approved inputs, derives numeric candidate breakdowns in PostgreSQL, stores an idempotent snapshot, and writes an audit event. It never creates `payroll_run_items`, changes run state, posts deduction transactions, or enables submission/approval/finalization.
+- LIVE Payroll now creates/returns a draft and can calculate/recalculate a persisted trial snapshot. The screen displays gross, PAYE, NAPSA/NHIMA candidate values, due approved deductions, candidate net, employee blockers and global blockers. NAPSA/NHIMA numbers are clearly unverified candidates; non-monthly inputs, missing/ambiguous compensation/attendance, unpaid-leave formulas and overtime inputs surface blockers.
+- Hosted rollback smoke was extended to assert the K6,000 synthetic salary candidate breakdown, scoped authorization denial, same-key idempotency, snapshot single-write behavior, unchanged DRAFT status, zero payroll items and no posted repayments. First assertion run exposed an employee-ordering assumption; the test was corrected to select by synthetic employee number. The rerun passed. Post-test counts: 1 existing Auth user, 0 smoke companies, 0 persisted trial snapshots.
+- Catalog verification confirms RLS enabled, `anon` has no SELECT/EXECUTE, authenticated SELECT is gated by `payroll.view`, and the calculator is SECURITY DEFINER with `search_path=pg_catalog` and `row_security=off`.
+- Production payroll is still not operational: trial snapshots are non-payable; NAPSA 2026 application details and NHIMA base are unresolved; overtime/bonus/commission and unpaid-leave calculation inputs/rules are incomplete; no verified net-pay line items, submit/review/approval/finalization, or repayment posting are exposed. The existing finalization gate remains unchanged.
+- Local verification passed: typecheck; full Vitest 99 tests / 26 files on the standalone rerun; changed payroll/service files lint clean (two existing warnings remain in mock `PayrollScreens.tsx`); production build passed with the existing ~910 kB bundle advisory. The first concurrent test/build run had a Vitest worker-start timeout, resolved by running the suite alone.
+- No production changes, invitation emails, or real payroll data were used.
+
+Updated: 28 October 2026
+
 ## 28 October 2026 statutory/payroll review increment
 
 - Created `ZAMBIA_STATUTORY_RULES_2026.md` with official source links and an explicit verification state. ZRA's 2026 ordinary PAYE bands, taxable-emoluments guidance, pension-contribution treatment and K15,000 example are confirmed from ZRA. NAPSA publishes 5% employee + 5% employer and a K28,920.30 ceiling, but Act 72/SI 62 of 2026 changed the legal framework during the year and the current published ceiling/threshold/basis was not reconciled against the new instruments. NHIMA publishes 1% per side but its official FAQ conflicts on employee/employer contribution bases. These unresolved rules remain blockers for production payroll finalization.
@@ -172,4 +184,3 @@ The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`
 - Vercel Preview for commit `a1caab4f9f7b4536c8feb2ca0a68a9cecf219cda` is READY: `https://golden-baobab-hr-v2-md16hmwop-simon-mulengas-projects.vercel.app` (deployment `dpl_CkPtLyp9TQq1v1hCeZKF5ymycvn3`). Both `/auth/login` and `/payroll` return HTTP 200 and SPA HTML with the Golden Baobab HR title. This does not execute browser JavaScript or prove Auth/PostgREST CRUD.
 - The CUA browser surface timed out during initialization. Playwright is not installed locally and prior CLI package retrieval stalled. No authenticated browser test is claimed.
 - Supabase linked migration history now aligns locally/remotely through `20261028001100`. Rollback-only role/JWT claim tests passed; they do not substitute for real Auth/PostgREST user sessions.
-

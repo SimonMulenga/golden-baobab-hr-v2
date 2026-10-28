@@ -2,6 +2,12 @@
 
 Last updated: 28 October 2026
 
+## LIVE payroll trial calculation (28 October 2026)
+
+- Payroll screen now persists a draft and invokes the trusted `payroll_calculate_trial` database RPC, which stores an idempotent employee-by-employee trial snapshot. The UI presents gross, official 2026 PAYE candidate, NAPSA/NHIMA candidates, due approved deductions, and candidate net with explicit non-payable labeling.
+- Trial calculation uses database numeric arithmetic and authorization/RLS. It does not create actual payroll items, change DRAFT status, post deduction repayments, or allow submit/approve/finalize. Statutory and missing-input blockers are displayed.
+- Migration 015 and hosted rollback-only synthetic assertions passed. Local typecheck, full Vitest (99 tests / 26 files), targeted lint, and build passed. Authenticated browser tests remain outstanding.
+
 ## Statutory/payroll review (28 October 2026)
 
 - Added `ZAMBIA_STATUTORY_RULES_2026.md` with official-source findings and unresolved NAPSA/NHIMA blockers.
@@ -170,7 +176,7 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 
 ## Current LIVE integration update (28 October 2026)
 
-- Six migrations (`20261028000100`â€“`20261028000600`) are applied to the authorized V2 development Supabase project; see `IMPLEMENTATION_STATUS.md` for the remote preflight, migration history, data counts, and hosted rollback-only RLS results.
+- Six migrations (`20261028000100`–`20261028000600`) are applied to the authorized V2 development Supabase project; see `IMPLEMENTATION_STATUS.md` for the remote preflight, migration history, data counts, and hosted rollback-only RLS results.
 - The existing Auth test user was preserved and provisioned as Portfolio Administrator for a synthetic development portfolio. That portfolio contains one clearly synthetic company and branch; no employee or payroll rows exist.
 - Added a live company/branch Supabase service and test coverage. LIVE App state no longer loads mock company/employee records from localStorage. The LIVE dashboard shows the real visible company count and marks unconnected metrics unavailable.
 - LIVE company/branch routes display database records. Employee directory reads, onboarding draft/submit, and HR review decisions now call the live Supabase service/RPCs; sensitive fields are excluded from directory reads. Other unconnected HR/payroll routes remain gated instead of presenting mock data as real. MOCK workflows remain intact.
@@ -179,5 +185,4 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 - Supabase Management API rollback tests exercised company/branch writes, tenant scoping, private-detail denial, membership assignment/revocation, employee approval RPCs, and a K6,000/six-month schedule. This is hosted PostgreSQL role simulation, not full Supabase Auth/PostgREST integration.
 - The Vercel project was located through the connected Vercel integration. Encrypted LIVE environment values are scoped only to Preview for `feature/supabase-auth`. Its last failed deployment reported invalid `vercel.json`; the local UTF-8 BOM was removed and JSON validated, but no preview redeployment occurred because current changes are not pushed.
 - Git remains blocked by the execution sandbox's read-only `.git` mount; no commit or push was made. No deployment occurred.
-
 
