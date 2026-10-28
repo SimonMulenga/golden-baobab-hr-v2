@@ -227,6 +227,23 @@ begin
   end if;
 end $$;
 
+do $$
+declare v_first uuid; v_second uuid; v_period_id uuid;
+begin
+  v_first := public.payroll_create_draft('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', 'MONTHLY', 'remote-smoke-payroll-2026-10');
+  v_second := public.payroll_create_draft('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', 'MONTHLY', 'remote-smoke-payroll-2026-10');
+  if v_first <> v_second then raise exception 'Payroll draft idempotent retry created a second run.'; end if;
+  select payroll_period_id into strict v_period_id from public.payroll_runs where id = v_first;
+  if (select status from public.payroll_runs where id = v_first) <> 'DRAFT'
+    or (select count(*) from public.payroll_run_items where payroll_run_id = v_first) <> 0
+    or (select count(*) from public.payroll_periods where id = v_period_id) <> 1 then
+    raise exception 'Draft creation wrote items or failed to create one matching period/run.';
+  end if;
+  perform set_config('test.payroll_run', v_first::text, true);
+end $$;
+
 select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
 do $$
 begin
@@ -234,6 +251,12 @@ begin
     perform public.payroll_preview_inputs('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31');
     raise exception 'Branch manager without payroll preparation permission received payroll details.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.payroll_create_draft('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31', 'MONTHLY', 'unauthorized-payroll-draft');
+    raise exception 'Branch manager without payroll preparation permission created a payroll run.';
   exception when insufficient_privilege then null;
   end;
 end $$;

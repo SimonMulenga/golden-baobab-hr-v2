@@ -22,17 +22,32 @@ export function LivePayrollInputs() {
   const [month, setMonth] = useState(currentMonth)
   const [snapshot, setSnapshot] = useState<PayrollPreviewInputs | null>(null)
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createdRunId, setCreatedRunId] = useState('')
+  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
 
   const load = async () => {
     if (!companyId || !branchId || !month) return
-    setBusy(true); setError(''); setSnapshot(null)
+    setBusy(true); setError(''); setNotice(''); setCreatedRunId(''); setSnapshot(null)
     try {
       const services = createLiveBusinessServices(getSupabaseClient())
       setSnapshot(await services.payroll.previewInputs({ companyId, branchId, periodStart: monthStart(month), periodEnd: monthEnd(month) }))
     } catch {
       setError('Inputs could not be loaded. Confirm payroll preparation access and that attendance for these exact dates has HR approval.')
     } finally { setBusy(false) }
+  }
+
+  const createDraft = async () => {
+    if (!snapshot || snapshot.items.some((item) => item.input_warnings.length)) return
+    setCreating(true); setError(''); setNotice('')
+    try {
+      const services = createLiveBusinessServices(getSupabaseClient())
+      const id = await services.payroll.createDraft({ companyId, branchId, periodStart: monthStart(month), periodEnd: monthEnd(month), frequency: 'MONTHLY', idempotencyKey: crypto.randomUUID() })
+      setCreatedRunId(id); setNotice('Draft payroll run saved in Supabase. It has not been calculated or submitted.')
+    } catch {
+      setError('Draft payroll was not created. Confirm payroll preparation access and review any existing run for this period.')
+    } finally { setCreating(false) }
   }
 
   return <div className="employee-screen live-payroll-inputs">
@@ -49,6 +64,7 @@ export function LivePayrollInputs() {
       <button className="primary-button" type="button" disabled={busy || !companyId || !branchId} onClick={() => void load()}>{busy ? <RefreshCw size={15} className="spin"/> : <CalendarDays size={15}/>} Load approved inputs</button>
     </section>
     {error && <div className="panel live-inputs-error" role="alert">{error}</div>}
+    {notice && <div className="panel live-inputs-note" role="status"><strong>{notice}</strong>{createdRunId && <span>Run reference: {createdRunId}</span>}</div>}
     {snapshot && <>
       <div className="panel live-inputs-summary"><div><small>Approved attendance</small><strong>{new Date(snapshot.attendance_approved_at).toLocaleString()}</strong></div><div><small>Included approved employees</small><strong>{snapshot.items.length}</strong></div><div><small>Input warnings</small><strong>{snapshot.items.reduce((sum, item) => sum + item.input_warnings.length, 0)}</strong></div></div>
       <div className="panel live-inputs-table-wrap"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Frequency</th><th>Basic pay</th><th>Allowances</th><th>Worked / scheduled</th><th>Paid / unpaid leave</th><th>Approved leave</th><th>Due deductions</th></tr></thead><tbody>
@@ -56,6 +72,7 @@ export function LivePayrollInputs() {
         {snapshot.items.length === 0 && <tr><td colSpan={8} className="empty-row">No approved employees overlap this period.</td></tr>}
       </tbody></table></div>
       {snapshot.items.some((item) => item.input_warnings.length) && <div className="panel live-inputs-error"><strong>Preparation warnings</strong>{snapshot.items.filter((item) => item.input_warnings.length).map((item) => <p key={item.employee_id}>{item.employee_number}: {item.input_warnings.join(', ')}</p>)}</div>}
+      <div className="live-inputs-draft-action"><span>Draft creation requires complete compensation and attendance inputs. Payroll calculations remain unavailable until verified statutory rules and calculation workflows are configured.</span><button className="primary-button" type="button" disabled={creating || !snapshot.items.length || snapshot.items.some((item) => item.input_warnings.length) || Boolean(createdRunId)} onClick={() => void createDraft()}>{creating ? 'Creating draft…' : createdRunId ? 'Draft created' : 'Create draft payroll'}</button></div>
     </>}
   </div>
 }

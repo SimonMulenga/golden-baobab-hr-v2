@@ -31,6 +31,7 @@ describe('live Supabase business service adapter', () => {
     await expect(services.leave.accrueMonth('leave-policy-1', '2026-10-01')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.submitForApproval('run-1')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.previewInputs({ companyId: 'company-1', branchId: 'branch-1', periodStart: '2026-10-01', periodEnd: '2026-10-31' })).resolves.toBe('synthetic-record-id');
+    await expect(services.payroll.createDraft({ companyId: 'company-1', branchId: 'branch-1', periodStart: '2026-10-01', periodEnd: '2026-10-31', frequency: 'MONTHLY', idempotencyKey: 'payroll-request-1' })).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.reviewSubmission('run-1', 'APPROVE', 4)).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.finalize('run-1')).resolves.toBe('synthetic-record-id');
 
@@ -47,6 +48,7 @@ describe('live Supabase business service adapter', () => {
       'leave_accrue_month',
       'payroll_submit_for_approval',
       'payroll_preview_inputs',
+      'payroll_create_draft',
       'payroll_review_submission',
       'payroll_finalize',
     ]);

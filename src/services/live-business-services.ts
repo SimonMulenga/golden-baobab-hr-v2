@@ -182,6 +182,7 @@ export interface LiveBusinessServices {
   payroll: {
     list(request?: PageRequest): Promise<PageResult<PayrollRunRecord>>;
     previewInputs(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string }): Promise<PayrollPreviewInputs>;
+    createDraft(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string; frequency: 'MONTHLY' | 'FORTNIGHTLY' | 'WEEKLY'; idempotencyKey: string }): Promise<string>;
     submitForApproval(runId: string): Promise<string>;
     reviewSubmission(runId: string, action: PayrollReviewAction, expectedVersion: number, reason?: string): Promise<string>;
     finalize(runId: string): Promise<string>;
@@ -388,6 +389,13 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_company_id: input.companyId, p_branch_id: input.branchId,
           p_period_start: input.periodStart, p_period_end: input.periodEnd,
         })) as PayrollPreviewInputs;
+      },
+      async createDraft(input) {
+        return unwrap(await client.rpc('payroll_create_draft', {
+          p_company_id: input.companyId, p_branch_id: input.branchId,
+          p_period_start: input.periodStart, p_period_end: input.periodEnd,
+          p_frequency: input.frequency, p_idempotency_key: input.idempotencyKey,
+        }));
       },
       async submitForApproval(runId) {
         return unwrap(await client.rpc('payroll_submit_for_approval', { p_payroll_run_id: runId }));
