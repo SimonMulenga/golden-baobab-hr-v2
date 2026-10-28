@@ -113,3 +113,8 @@ The previous workspace checkpoint was `54b3c49ad22dccfe5e7cab33ba6f2ba0adb1252e`
 - LIVE payroll input preview now offers persistent draft creation and reports the saved run ID. It disables draft creation if any approved employee input is missing compensation/attendance. No calculation, submission, approval, finalization, or payment processing is implied.
 - Hosted rollback-only synthetic smoke passed the preview snapshot, exact-period DRAFT creation, idempotent retry, no-item assertion, and branch-manager denial. All records rolled back.
 - TypeScript passed; the full 76-test suite passed across 24 files; Oxlint completed with six existing legacy warnings; production build passed. The latest Vercel Preview for this draft increment is not yet verified.
+## 28 October 2026 deployment verification
+
+- Vercel Preview for commit `a1caab4f9f7b4536c8feb2ca0a68a9cecf219cda` is READY: `https://golden-baobab-hr-v2-md16hmwop-simon-mulengas-projects.vercel.app` (deployment `dpl_CkPtLyp9TQq1v1hCeZKF5ymycvn3`). Both `/auth/login` and `/payroll` return HTTP 200 and SPA HTML with the Golden Baobab HR title. This does not execute browser JavaScript or prove Auth/PostgREST CRUD.
+- The CUA browser surface timed out during initialization. Playwright is not installed locally and prior CLI package retrieval stalled. No authenticated browser test is claimed.
+- Supabase linked migration history now aligns locally/remotely through `20261028001100`. Rollback-only role/JWT claim tests passed; they do not substitute for real Auth/PostgREST user sessions.
