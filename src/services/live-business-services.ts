@@ -35,6 +35,41 @@ export type PayrollRunRecord = {
   created_at: string;
 };
 
+export type PayrollPreviewItem = {
+  employee_id: string;
+  employee_number: string;
+  employee_name: string;
+  contract_type: string;
+  employment_type: string;
+  salary_frequency: string | null;
+  compensation_effective_from: string | null;
+  basic_pay: number | null;
+  housing_allowance: number | null;
+  meal_allowance: number | null;
+  transport_allowance: number | null;
+  other_allowances: number | null;
+  overtime_eligible: boolean | null;
+  allowance_tax_treatment: Record<string, unknown> | null;
+  attendance: {
+    scheduled_working_days: number; actual_days_worked: number; paid_leave_days: number;
+    unpaid_leave_days: number; other_payable_absence_days: number;
+  } | null;
+  approved_leave_requests: Array<{
+    leave_request_id: string; leave_type: string; pay_classification: 'PAID' | 'UNPAID';
+    start_date: string; end_date: string; leave_days: number;
+  }>;
+  due_approved_deductions: Array<{
+    deduction_id: string; installment_id: string; deduction_type: string; reason: string;
+    scheduled_amount: number; due_period: string; outstanding_balance: number;
+  }>;
+  input_warnings: string[];
+};
+
+export type PayrollPreviewInputs = {
+  portfolio_id: string; company_id: string; branch_id: string; period_start: string; period_end: string;
+  attendance_period_id: string; attendance_approved_at: string; items: PayrollPreviewItem[];
+};
+
 export type DeductionRecord = {
   id: string;
   portfolio_id: string;
@@ -146,6 +181,7 @@ export interface LiveBusinessServices {
   };
   payroll: {
     list(request?: PageRequest): Promise<PageResult<PayrollRunRecord>>;
+    previewInputs(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string }): Promise<PayrollPreviewInputs>;
     submitForApproval(runId: string): Promise<string>;
     reviewSubmission(runId: string, action: PayrollReviewAction, expectedVersion: number, reason?: string): Promise<string>;
     finalize(runId: string): Promise<string>;
@@ -347,6 +383,12 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         if (result.error) throw result.error;
         return { items: (result.data ?? []) as PayrollRunRecord[], total: result.count ?? 0 };
       },
+      async previewInputs(input) {
+        return unwrap(await client.rpc('payroll_preview_inputs', {
+          p_company_id: input.companyId, p_branch_id: input.branchId,
+          p_period_start: input.periodStart, p_period_end: input.periodEnd,
+        })) as PayrollPreviewInputs;
+      },
       async submitForApproval(runId) {
         return unwrap(await client.rpc('payroll_submit_for_approval', { p_payroll_run_id: runId }));
       },
@@ -361,5 +403,4 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
     },
   };
 }
-
 

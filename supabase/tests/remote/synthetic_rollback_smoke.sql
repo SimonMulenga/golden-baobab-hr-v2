@@ -210,6 +210,35 @@ begin
   end if;
 end $$;
 
+do $$
+declare v_inputs jsonb; v_item jsonb;
+begin
+  v_inputs := public.payroll_preview_inputs('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31');
+  select rows.item into strict v_item from jsonb_array_elements(v_inputs->'items') as rows(item)
+    where rows.item->>'employee_number' = 'REMOTE-SMOKE-EMP-1';
+  if (v_item->>'basic_pay')::numeric <> 6000 or (v_item #>> '{attendance,actual_days_worked}')::numeric <> 19
+    or (v_item #>> '{attendance,unpaid_leave_days}')::numeric <> 1 then
+    raise exception 'Payroll input preview did not include current compensation and approved attendance.';
+  end if;
+  if v_inputs->>'attendance_period_id' is null or v_item->'approved_leave_requests' is null
+    or v_item->'due_approved_deductions' is null then
+    raise exception 'Payroll preview is missing its approved HR input references.';
+  end if;
+end $$;
+
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+do $$
+begin
+  begin
+    perform public.payroll_preview_inputs('cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-10-01', '2026-10-31');
+    raise exception 'Branch manager without payroll preparation permission received payroll details.';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+
 select set_config('test.leave_policy', public.leave_policy_save('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'Annual leave', 'PAID', 2.0, 30, '2026-01-01', null)::text, true);
 select public.leave_accrue_month(current_setting('test.leave_policy')::uuid, '2026-10-01');
@@ -273,4 +302,3 @@ end $$;
 
 reset role;
 rollback;
-

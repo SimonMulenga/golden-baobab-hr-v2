@@ -1,0 +1,22 @@
+.live-payroll-inputs { display: grid; gap: 16px; }
+.live-inputs-note { display: grid; gap: 5px; padding: 16px 18px; border-left: 3px solid #bb8b37; }
+.live-inputs-note strong { font-size: 13px; }
+.live-inputs-note span { color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.live-inputs-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; padding: 18px; }
+.live-inputs-filters label { display: grid; gap: 6px; color: var(--text-muted); font-size: 11px; font-weight: 650; }
+.live-inputs-filters select, .live-inputs-filters input { min-width: 170px; min-height: 38px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-primary); }
+.live-inputs-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 18px; }
+.live-inputs-summary div { display: grid; gap: 6px; }
+.live-inputs-summary small { color: var(--text-muted); font-size: 11px; }
+.live-inputs-summary strong { font-size: 13px; }
+.live-inputs-table-wrap { overflow-x: auto; }
+.live-inputs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.live-inputs-table th, .live-inputs-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.live-inputs-table th { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
+.live-inputs-table td:first-child { min-width: 190px; }
+.live-inputs-table td:first-child strong, .live-inputs-table td:first-child small { display: block; }
+.live-inputs-table td:first-child small { margin-top: 4px; color: var(--text-muted); }
+.live-inputs-table .empty-row { padding: 28px; color: var(--text-muted); text-align: center; }
+.live-inputs-error { padding: 16px 18px; color: var(--danger, #a43e38); font-size: 12px; }
+.live-inputs-error p { margin: 8px 0 0; }
+@media (max-width: 640px) { .live-inputs-summary { grid-template-columns: 1fr; } .live-inputs-filters > * { width: 100%; } .live-inputs-filters select, .live-inputs-filters input { width: 100%; } }
