@@ -7,6 +7,7 @@ Last updated: 28 October 2026
 - Added `ZAMBIA_STATUTORY_RULES_2026.md` with official-source findings and unresolved NAPSA/NHIMA blockers.
 - The illustrative PAYE helper now uses integer cents/basis points and includes band checkpoint and cent-rounding tests. It remains browser-side preview logic, not the payroll authority.
 - LIVE payroll remains input preview and persistent draft creation only. No calculation, approval, finalization, or payslip delivery is represented as operational.
+- Local check results: TypeScript passed; full Vitest passed 98 tests / 26 files; full Oxlint completed with six existing legacy warnings; production build passed with the existing large-bundle advisory. The READY Preview for commit `aa031c1` returned HTTP 200 for `/auth/login` and `/payroll`; this was an HTTP smoke check only. Authenticated browser automation could not start because WSL lacks `/bin/bash` and CUA timed out.
 
 ## Latest LIVE admin and import increment (28 October 2026)
 
