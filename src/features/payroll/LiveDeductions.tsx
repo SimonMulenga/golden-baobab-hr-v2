@@ -120,7 +120,7 @@ export function LiveDeductions() {
   }
 
   return <div className="employee-screen live-deductions">
-    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/>LIVE EMPLOYEE ADVANCES</div><h1>Deductions & advances</h1><p>Manage authorized repayment requests for {company?.name ?? 'your selected company'}.</p></div></section>
+    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/>PAYROLL DEDUCTIONS</div><h1>Deductions & advances</h1><p>Manage authorized repayment requests for {company?.name ?? 'your selected company'}.</p></div></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Requests and schedules are loaded from Supabase. The trusted backend enforces company, branch, role, and separation-of-duties checks.</div>
     {(error || notice) && <div className={error ? 'auth-shell-error' : 'live-deduction-success'} role={error ? 'alert' : 'status'}>{error || notice} {error && <button className="button-secondary" onClick={() => { setLoading(true); setError(''); void load() }}><RotateCcw size={14}/> Retry</button>}</div>}
     <div className="live-deduction-layout">

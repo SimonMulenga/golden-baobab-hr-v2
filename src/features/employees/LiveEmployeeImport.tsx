@@ -64,13 +64,18 @@ export function LiveEmployeeImport() {
       if (values.date_of_birth && !dateForImport(values.date_of_birth)) errors.push('Date of birth must use an unambiguous date value')
       if (values.contract_start_date && !dateForImport(values.contract_start_date)) errors.push('Employment start date is invalid')
       if (values.contract_end_date && !dateForImport(values.contract_end_date)) errors.push('Contract end date is invalid')
+      const birthDate = dateForImport(values.date_of_birth)
+      const employmentStart = dateForImport(values.contract_start_date)
+      const employmentEnd = dateForImport(values.contract_end_date)
+      if (birthDate && birthDate > new Date().toISOString().slice(0, 10)) errors.push('Date of birth cannot be in the future')
+      if (employmentStart && employmentEnd && employmentEnd < employmentStart) errors.push('Contract end date cannot be before employment start date')
       for (const field of liveImportFields.filter((item) => item.type === 'number')) {
         if (values[field.key] && (!Number.isFinite(Number(values[field.key])) || Number(values[field.key]) < 0)) errors.push(`${field.label} must be zero or greater`)
       }
       if (values.basic_pay && Number(values.basic_pay) <= 0) errors.push('Basic pay must be greater than zero')
       if (values.payment_method && !['BANK_TRANSFER', 'CASH', 'MOBILE_MONEY'].includes(enumValue(values.payment_method))) errors.push('Payment method must be Bank transfer, Cash, or Mobile money')
       if (values.identity_document_type && !['NRC', 'PASSPORT', 'OTHER'].includes(enumValue(values.identity_document_type))) errors.push('Identity document type must be NRC, Passport, or Other')
-      if (values.gender && !['FEMALE', 'MALE', 'NON_BINARY', 'UNDISCLOSED'].includes(enumValue(values.gender))) errors.push('Gender must be Female, Male, Non-binary, or Undisclosed')
+      if (values.gender && !['FEMALE', 'MALE'].includes(enumValue(values.gender))) errors.push('Gender must be Male or Female')
       if (values.employment_type && !['PERMANENT', 'FIXED_TERM', 'PART_TIME', 'CASUAL', 'DAILY_RATED'].includes(enumValue(values.employment_type))) errors.push('Employment type is not supported')
       if (values.salary_frequency && !['MONTHLY', 'FORTNIGHTLY', 'WEEKLY', 'DAILY'].includes(enumValue(values.salary_frequency))) errors.push('Salary frequency is not supported')
       if (values.payment_method && enumValue(values.payment_method) === 'BANK_TRANSFER' && (!values.bank_name || !values.bank_account_name || !values.bank_account_number)) errors.push('Bank name, account name, and account number are required for bank transfer')
@@ -80,7 +85,8 @@ export function LiveEmployeeImport() {
         if (seen.has(employeeKey)) errors.push('Employee number is duplicated in this file')
         seen.add(employeeKey)
       }
-      return { line: index + 1, values, errors }
+      const sourceLine = Number(source.__sourceLine)
+      return { line: Number.isSafeInteger(sourceLine) && sourceLine > 0 ? sourceLine : index + 1, values, errors }
     })
   }, [sourceRows, mapping])
 
@@ -96,12 +102,12 @@ export function LiveEmployeeImport() {
       const matrix = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[firstSheet], { header: 1, raw: true, defval: '' })
       const headerIndex = findImportHeaderRow(matrix)
       const nextHeaders = (matrix[headerIndex] ?? []).map((value, index) => String(value ?? '').trim() || `Column ${index + 1}`)
-      const dataRows = matrix.slice(headerIndex + 1).filter((row) => row.some((value) => String(value ?? '').trim()))
+      const dataRows = matrix.slice(headerIndex + 1).map((row, index) => ({ row, line: headerIndex + index + 2 })).filter(({ row }) => row.some((value) => String(value ?? '').trim()))
       if (!nextHeaders.length || !dataRows.length) { setError('No header row and employee rows were found. Check the selected worksheet.'); return }
       if (dataRows.length > 5000) { setError('A single import is limited to 5,000 rows. Split larger files into batches.'); return }
       setHeaders(nextHeaders)
       setMapping(mapImportHeader(nextHeaders))
-      setSourceRows(dataRows.map((row) => Object.fromEntries(nextHeaders.map((header, index) => [header, row[index]]))))
+      setSourceRows(dataRows.map(({ row, line }) => ({ ...Object.fromEntries(nextHeaders.map((header, index) => [header, row[index]])), __sourceLine: line })))
       setFileName(file.name); setSheetName(firstSheet)
     } catch { setError('The file could not be read. It remains on this device and was not uploaded.') }
   }
@@ -172,7 +178,7 @@ export function LiveEmployeeImport() {
   const invalidCount = rows.length - validCount
 
   return <div className="employee-screen live-import-screen">
-    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> LIVE SECURE IMPORT</div><h1>Import employees</h1><p>Map your own spreadsheet columns, validate locally, then submit through the authorized employee approval workflow.</p></div><Link className="button-secondary" to="/employees">Return to employees</Link></section>
+    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> BULK ONBOARDING</div><h1>Import employees</h1><p>Map spreadsheet columns, review validation results, then submit employees for HR approval.</p></div><Link className="button-secondary" to="/employees">Return to employees</Link></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Files are parsed in this browser and never uploaded. Confirming saves employee records to Supabase; branch imports are submitted for HR approval. Sensitive data may appear in the local preview.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}
     {error.startsWith('Import status could not be confirmed') && company && branch && <p role="status">The same company, branch, and idempotency key are retained for a safe retry in this browser tab. <button type="button" className="button-secondary" onClick={() => setIdempotencyKey(rotateImportAttemptKey(company.id, branch.id))}>Start a separate import attempt</button> A new attempt still rejects employee numbers already saved.</p>}

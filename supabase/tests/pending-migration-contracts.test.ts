@@ -73,3 +73,17 @@ describe('pending migrations 028 and 029 security contracts', () => {
     expect(sql).toMatch(/cm\.company_id = p_company_id[\s\S]*cm\.user_id = auth\.uid\(\)[\s\S]*cm\.revoked_at is null/i)
   })
 })
+
+describe('department activation migration security contract', () => {
+  it('restricts activation to the current authorized company manager and audits the state change', () => {
+    const sql = migration('20261029003500_department_activation_workflow.sql')
+    expect(sql).toMatch(/create or replace function public\.department_activate\(p_department_id uuid\)/i)
+    expect(sql).toMatch(/security definer[\s\S]*set row_security\s*=\s*off/i)
+    expect(sql).toContain('auth.uid() is null')
+    expect(sql).toContain('app_private.can_manage_company_hr_configuration(v_department.company_id)')
+    expect(sql).toContain("set status = 'ACTIVE'")
+    expect(sql).toContain("'DEPARTMENT_ACTIVATED'")
+    expect(sql).toContain('revoke all on function public.department_activate(uuid) from public, anon')
+    expect(sql).toContain('grant execute on function public.department_activate(uuid) to authenticated')
+  })
+})

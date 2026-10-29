@@ -291,7 +291,7 @@ export type DeductionRequestInput = {
 
 export interface LiveBusinessServices {
   employees: {
-    list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter }): Promise<PageResult<EmployeeDirectoryRecord>>;
+    list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter; departmentId?: string }): Promise<PageResult<EmployeeDirectoryRecord>>;
     byIds(ids: string[]): Promise<EmployeeDirectoryRecord[]>;
     byId(employeeId: string): Promise<EmployeeDirectoryRecord>;
     history(employeeId: string): Promise<EmployeeHistoryRecord[]>;
@@ -389,12 +389,13 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
         let query = client.from('employees')
           .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at', { count: 'exact' })
-          .order('last_name', { ascending: true })
-          .range(page * pageSize, page * pageSize + pageSize - 1);
         if (request.companyId) query = query.eq('company_id', request.companyId);
         if (request.branchId) query = query.eq('workplace_branch_id', request.branchId);
         if (request.approvalStatus) query = query.eq('approval_status', request.approvalStatus);
+        if (request.departmentId) query = query.eq('department_id', request.departmentId);
         if (request.search?.trim()) query = query.ilike('last_name', `%${request.search.trim()}%`);
+        query = query.order('last_name', { ascending: true })
+          .range(page * pageSize, page * pageSize + pageSize - 1);
         const result = await query;
         if (result.error) throw result.error;
         return { items: (result.data ?? []) as EmployeeDirectoryRecord[], total: result.count ?? 0 };

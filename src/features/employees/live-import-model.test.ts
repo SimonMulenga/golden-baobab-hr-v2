@@ -21,6 +21,9 @@ describe('LIVE employee import mapping', () => {
     expect(dateForImport('2026-10-28')).toBe('2026-10-28')
     expect(dateForImport('3/2/2026')).toBe('2026-02-03')
     expect(dateForImport('28 October 2026')).toBe('')
+    expect(dateForImport('2026-02-29')).toBe('')
+    expect(dateForImport('31/04/2026')).toBe('')
+    expect(dateForImport('29/02/2024')).toBe('2024-02-29')
   })
 
   it('retains an interrupted import key in the current tab and rotates only for a new attempt', () => {

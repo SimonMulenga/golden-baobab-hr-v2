@@ -95,11 +95,11 @@ export function LiveAttendance() {
   }
 
   return <div className="peopleops-screen">
-    <section className="welcome-row peopleops-heading"><div><div className="eyebrow"><span className="eyebrow-line"/>TIME & ATTENDANCE · LIVE</div><h1>Monthly attendance</h1><p>Record attendance by approved employee, then submit the branch period for review.</p></div><div className="welcome-actions"><button className="button-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div></section>
+    <section className="welcome-row peopleops-heading"><div><div className="eyebrow"><span className="eyebrow-line"/>TIME & ATTENDANCE</div><h1>Monthly attendance</h1><p>Record attendance for approved employees, then submit the branch period for review.</p></div><div className="welcome-actions"><button className="button-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div></section>
     <section className="panel peopleops-panel"><div className="peopleops-toolbar">
       <label>Company<select aria-label="Attendance company" value={companyId} onChange={(event) => { const next = companies.find((item) => item.id === event.target.value); setCompanyId(event.target.value); setBranchId(next?.branches[0]?.id ?? ''); setPage(1) }}>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Branch<select aria-label="Attendance branch" value={branchId} onChange={(event) => { setBranchId(event.target.value); setPage(1) }}>{(company?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Payroll month<input type="month" aria-label="Attendance month" value={month} onChange={(event) => setMonth(event.target.value)}/></label>
+      <label>Attendance month<input type="month" aria-label="Attendance month" value={month} onChange={(event) => setMonth(event.target.value)}/></label>
       {period && <span className={`ops-pill ops-${period.status.toLowerCase().replaceAll('_', '-')}`}>{period.status.replaceAll('_', ' ')}</span>}
       {period?.status === 'DRAFT' || period?.status === 'RETURNED_FOR_CORRECTION' ? <button className="button-primary" disabled={busy || entries.length < total} onClick={() => void transition('submit')}><Send size={14}/> Submit period</button> : null}
       {period?.status === 'SUBMITTED' ? <><button className="button-secondary" disabled={busy} onClick={() => void transition('return')}>Return for correction</button><button className="button-primary" disabled={busy} onClick={() => void transition('approve')}><Check size={14}/> Approve period</button></> : null}

@@ -66,6 +66,16 @@ export function LiveHrCatalog({ type }: { type: CatalogType }) {
     finally { setBusy(false) }
   }
 
+  const activate = async (id: string) => {
+    if (!departmentsMode) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await createLiveHrServices(getSupabaseClient()).catalog.activateDepartment(id)
+      setNotice('Department activated. It is available for new employee assignments.'); await load()
+    } catch { setError('This department could not be activated. Verify your company access and retry.') }
+    finally { setBusy(false) }
+  }
+
   const rows = departmentsMode ? departments : roles
   return <div className="live-hr-catalog">
     <header className="page-heading"><div><div className="eyebrow">HR CONFIGURATION</div><h1>{title}</h1><p>{departmentsMode ? 'Company-scoped teams used by employee profiles and imports.' : 'Company job titles linked to departments where needed.'}</p></div></header>
@@ -87,7 +97,7 @@ export function LiveHrCatalog({ type }: { type: CatalogType }) {
     </form>}
     <section className="panel live-hr-catalog-table">
       <header><div><div className="section-eyebrow">{selectedCompany?.name ?? 'COMPANY'}</div><h2>{rows.length} {title.toLowerCase()}</h2></div></header>
-      {loading ? <div className="ops-empty" role="status">Loading authorized company configuration…</div> : !companyId ? <div className="ops-empty">Select a company to view its {title.toLowerCase()}.</div> : rows.length === 0 ? <div className="ops-empty">No {title.toLowerCase()} configured. Add the first one to use it in employee onboarding.</div> : <div className="table-scroll"><table className="peopleops-table"><thead><tr><th>{departmentsMode ? 'DEPARTMENT' : 'JOB TITLE'}</th><th>CODE</th>{!departmentsMode && <th>DEPARTMENT</th>}<th>DESCRIPTION</th><th>STATUS</th><th/></tr></thead><tbody>{rows.map((item) => { const role = item as JobRoleRecord; return <tr key={item.id}><td><strong>{departmentsMode ? (item as DepartmentRecord).name : role.title}</strong></td><td>{item.code}</td>{!departmentsMode && <td>{departments.find((department) => department.id === role.department_id)?.name ?? 'Company-wide'}</td>}<td>{item.description || '—'}</td><td><span className={`admin-status ${item.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{item.status}</span></td><td><div className="live-hr-catalog-row-actions"><button className="ops-action" disabled={busy} onClick={() => edit(item)}><Pencil size={14}/> Edit</button>{item.status === 'ACTIVE' && <button className="ops-action" disabled={busy} onClick={() => void deactivate(item.id)}><UserRoundX size={14}/> Deactivate</button>}</div></td></tr> })}</tbody></table></div>}
+      {loading ? <div className="ops-empty" role="status">Loading authorized company configuration…</div> : !companyId ? <div className="ops-empty">Select a company to view its {title.toLowerCase()}.</div> : rows.length === 0 ? <div className="ops-empty">No {title.toLowerCase()} configured. Add the first one to use it in employee onboarding.</div> : <div className="table-scroll"><table className="peopleops-table"><thead><tr><th>{departmentsMode ? 'DEPARTMENT' : 'JOB TITLE'}</th><th>CODE</th>{!departmentsMode && <th>DEPARTMENT</th>}<th>DESCRIPTION</th><th>STATUS</th><th/></tr></thead><tbody>{rows.map((item) => { const role = item as JobRoleRecord; return <tr key={item.id}><td><strong>{departmentsMode ? (item as DepartmentRecord).name : role.title}</strong></td><td>{item.code}</td>{!departmentsMode && <td>{departments.find((department) => department.id === role.department_id)?.name ?? 'Company-wide'}</td>}<td>{item.description || '—'}</td><td><span className={`admin-status ${item.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{item.status}</span></td><td><div className="live-hr-catalog-row-actions"><button className="ops-action" disabled={busy} onClick={() => edit(item)}><Pencil size={14}/> Edit</button>{item.status === 'ACTIVE' ? <button className="ops-action" disabled={busy} onClick={() => void deactivate(item.id)}><UserRoundX size={14}/> Deactivate</button> : departmentsMode && <button className="ops-action" disabled={busy} onClick={() => void activate(item.id)}><Check size={14}/> Activate</button>}</div></td></tr> })}</tbody></table></div>}
     </section>
   </div>
 }

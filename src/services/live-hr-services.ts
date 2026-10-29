@@ -73,6 +73,7 @@ export function createLiveHrServices(client: SupabaseClient) {
         return resultValue(client.rpc('department_save', { p_company_id: input.companyId, p_department_id: input.id ?? null, p_name: input.name, p_code: input.code, p_description: input.description }))
       },
       deactivateDepartment(id: string): Promise<string> { return resultValue(client.rpc('department_deactivate', { p_department_id: id })) },
+      activateDepartment(id: string): Promise<string> { return resultValue(client.rpc('department_activate', { p_department_id: id })) },
       saveJobRole(input: { companyId: string; id?: string; departmentId: string | null; title: string; code: string; description: string }): Promise<string> {
         return resultValue(client.rpc('job_role_save', { p_company_id: input.companyId, p_job_role_id: input.id ?? null, p_department_id: input.departmentId, p_title: input.title, p_code: input.code, p_description: input.description }))
       },

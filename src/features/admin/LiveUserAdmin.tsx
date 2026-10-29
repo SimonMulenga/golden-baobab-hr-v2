@@ -143,7 +143,11 @@ export function LiveUserAdmin() {
         companyId: selectedCompany.id, branchIds: inviteBranches,
       } })
       if (invokeError) throw invokeError
-      if (data?.accessAssigned === false) {
+      if (data?.invited !== true) {
+        setError('The invitation service did not confirm that an invitation was created. Check the service response before retrying.')
+        return
+      }
+      if (data?.accessAssigned !== true) {
         setError('The invitation email was sent, but role assignment did not complete. This account has no business access. Contact an authorized administrator to finish assignment after activation.')
         return
       }

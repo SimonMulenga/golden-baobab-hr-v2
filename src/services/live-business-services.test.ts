@@ -47,6 +47,20 @@ describe('live Supabase business service adapter', () => {
     expect(range).toHaveBeenCalledWith(25, 49)
   })
 
+  it('filters employee pages by a selected company department within RLS-visible rows', async () => {
+    const range = vi.fn(async () => ({ data: [], count: 0, error: null }))
+    const filter = vi.fn()
+    const builder: any = { eq: filter, ilike: vi.fn(() => builder), order: vi.fn(() => builder), range }
+    const query = { select: vi.fn(() => builder) }
+    filter.mockImplementation(() => builder)
+    const from = vi.fn(() => query)
+    const services = createLiveBusinessServices({ from } as unknown as SupabaseClient)
+    await services.employees.list({ page: 1, pageSize: 25, search: '', departmentId: 'department-qa' })
+    expect(from).toHaveBeenCalledWith('employees')
+    expect(filter).toHaveBeenCalledWith('department_id', 'department-qa')
+    expect(range).toHaveBeenCalledWith(0, 24)
+  })
+
   it('routes company administrator changes and employee status transitions through scoped RPCs', async () => {
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
     const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);

@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn(
 const payrollApproverMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
 const payrollPreparerMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
 const portfolioMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), replaceBranchAssignments: vi.fn(), revoke: vi.fn() }))
-vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
+const functionMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({ functions: functionMocks }) }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ companyAdmins: { ...mocks }, companyPayrollApprovers: { ...payrollApproverMocks }, companyPayrollPreparers: { ...payrollPreparerMocks }, portfolioUsers: { ...portfolioMocks } }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
   useWorkspace: () => ({ companies: [{ id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }] }),
@@ -31,6 +32,7 @@ describe('LIVE company administrator management', () => {
     portfolioMocks.assign.mockResolvedValue(undefined)
     portfolioMocks.replaceBranchAssignments.mockResolvedValue(undefined)
     portfolioMocks.revoke.mockResolvedValue(undefined)
+    functionMocks.invoke.mockReset()
   })
 
   it('lists company-scoped users and assigns only through the authorized live service', async () => {
@@ -48,6 +50,26 @@ describe('LIVE company administrator management', () => {
     expect(screen.getByText(/Submitting the invitation form sends a real email/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Remove access/ }))
     await waitFor(() => expect(mocks.revoke).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '77777777-7777-4777-8777-777777777777', 'Synthetic access review'))
+  })
+
+  it('does not report an invitation as successful when scoped role assignment failed', async () => {
+    functionMocks.invoke.mockResolvedValue({ data: { invited: true, accessAssigned: false }, error: null })
+    render(<LiveUserAdmin />)
+    fireEvent.change(screen.getByLabelText('Invite email address'), { target: { value: 'qa@example.invalid' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }))
+    await waitFor(() => expect(functionMocks.invoke).toHaveBeenCalled())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/email was sent, but role assignment did not complete/)
+    expect(screen.queryByText(/Invitation sent to qa@example.invalid/)).not.toBeInTheDocument()
+  })
+
+  it('requires explicit backend confirmation before showing invitation success', async () => {
+    functionMocks.invoke.mockResolvedValue({ data: { accessAssigned: true }, error: null })
+    render(<LiveUserAdmin />)
+    fireEvent.change(screen.getByLabelText('Invite email address'), { target: { value: 'qa@example.invalid' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }))
+    await waitFor(() => expect(functionMocks.invoke).toHaveBeenCalled())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/did not confirm that an invitation was created/)
+    expect(screen.queryByText(/Invitation sent to qa@example.invalid/)).not.toBeInTheDocument()
   })
 
   it('assigns a branch-scoped manager role only to selected branches via the live adapter', async () => {

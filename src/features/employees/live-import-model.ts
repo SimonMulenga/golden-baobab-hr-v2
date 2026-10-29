@@ -73,12 +73,24 @@ export function mapImportHeader(headers: string[]): Record<string, string> {
 }
 
 export function dateForImport(value: unknown): string {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10)
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return validIsoDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate())
   const text = String(value ?? '').trim()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return validIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))
   const dmy = text.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/)
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
+  if (dmy) return validIsoDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]))
   return ''
+}
+
+function validIsoDate(year: number, month: number, day: number): string {
+  if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) return ''
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return ''
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+export function isValidImportDate(value: unknown): boolean {
+  return dateForImport(value) !== ''
 }
 
 export function importAttemptKey(companyId: string, branchId: string): string {

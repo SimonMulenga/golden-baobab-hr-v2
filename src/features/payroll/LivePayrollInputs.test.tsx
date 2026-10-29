@@ -89,6 +89,23 @@ describe('LIVE persistent payroll workflow', () => {
     expect(screen.queryByText('K13,602.45')).not.toBeInTheDocument()
   })
 
+  it('explains the missing approved attendance prerequisite for the selected period', async () => {
+    mocks.previewInputs.mockRejectedValue({ code: '22023', message: 'An approved attendance period matching the payroll dates is required.' })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load approved inputs' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/create the attendance period for these exact dates/i)
+  })
+
+  it('explains a valid empty result without fabricating employees', async () => {
+    mocks.previewInputs.mockResolvedValue({ ...inputs, items: [] })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load approved inputs' }))
+    expect(await screen.findByText(/No payroll inputs are available/i)).toBeInTheDocument()
+    expect(screen.queryByText('Synthetic Employee')).not.toBeInTheDocument()
+  })
+
   it('requires explicit reason for returned or rejected payroll', async () => {
     renderScreen()
     await loadAndCreate()

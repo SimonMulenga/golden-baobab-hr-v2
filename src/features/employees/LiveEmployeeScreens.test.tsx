@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
@@ -103,6 +103,15 @@ describe('LIVE employee screens', () => {
     expect(screen.queryByText(/updated successfully/)).not.toBeInTheDocument()
   })
 
+  it('offers only Male and Female and keeps job title editable text', () => {
+    renderRoute(<LiveEmployeeForm />)
+    const gender = screen.getByLabelText('Gender')
+    expect(within(gender).getAllByRole('option').map((option) => option.textContent)).toEqual(['Select if applicable', 'Male', 'Female'])
+    const jobTitle = screen.getByLabelText('Job title *')
+    expect(jobTitle.tagName).toBe('INPUT')
+    expect(jobTitle).toHaveAttribute('type', 'text')
+  })
+
   it('creates a company and branch bound employee draft and submits it to HR', async () => {
     renderRoute(<LiveEmployeeForm />)
     const values: Record<string, string> = {
@@ -110,7 +119,7 @@ describe('LIVE employee screens', () => {
       'Date of birth *': '1992-04-03', 'Nationality *': 'Zambian', 'Identity document number *': 'SYN-NRC-2001',
       'Residential address *': 'Synthetic address', 'Phone number *': '+260000000000', Email: 'synthetic@example.invalid',
       'Emergency contact *': 'Synthetic Contact', 'Relationship *': 'Colleague', 'Emergency phone *': '+260000000001',
-      'Job role *': 'Analyst', 'Department *': 'Finance', 'Contract type *': 'PERMANENT', 'Employment start *': '2026-10-01',
+      'Job title *': 'Analyst', 'Department *': 'Finance', 'Contract type *': 'PERMANENT', 'Employment start *': '2026-10-01',
       'Basic pay (ZMW) *': '6000', 'Bank name *': 'Synthetic Bank', 'Account name *': 'Synthetic Person', 'Account number *': 'SYN-ACCT-2001',
     }
     for (const [label, value] of Object.entries(values)) fireEvent.change(screen.getByLabelText(label), { target: { value } })
