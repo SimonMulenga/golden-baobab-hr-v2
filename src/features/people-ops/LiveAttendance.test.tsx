@@ -66,7 +66,30 @@ describe('LIVE attendance workflow', () => {
     renderScreen()
     fireEvent.click(await screen.findByRole('button', { name: 'Approve period' }))
     await waitFor(() => expect(mocks.reviewPeriod).toHaveBeenCalledWith(period.id, 'APPROVE', undefined))
-    expect(await screen.findByRole('status')).toHaveTextContent('Attendance period approved')
+    expect(await screen.findByText('Attendance period approved.')).toHaveAttribute('role', 'status')
+  })
+
+  it('clearly locks submitted attendance entries until a reviewer returns the period', async () => {
+    const period = { id: 'period-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
+      period_start: '2026-10-01', period_end: '2026-10-31', status: 'SUBMITTED', created_by: 'branch-manager', reviewed_by: null, reviewed_at: null, review_reason: null }
+    mocks.periods.mockResolvedValue({ items: [period], total: 1 })
+    mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
+      actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
+    renderScreen()
+    expect(await screen.findByRole('status')).toHaveTextContent(/reviewer must return it for correction/i)
+    expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
+  })
+
+  it('explains that approved attendance cannot be silently edited without reapproval', async () => {
+    const period = { id: 'period-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
+      period_start: '2026-10-01', period_end: '2026-10-31', status: 'APPROVED', created_by: 'branch-manager', reviewed_by: 'reviewer', reviewed_at: '2026-10-30T08:00:00Z', review_reason: null }
+    mocks.periods.mockResolvedValue({ items: [period], total: 1 })
+    mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
+      actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
+    renderScreen()
+    expect(await screen.findByRole('status')).toHaveTextContent(/reopen-and-reapproval correction workflow is not available yet/i)
+    expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
+    expect(mocks.saveEntry).not.toHaveBeenCalled()
   })
 
   it('does not display success when attendance persistence is denied', async () => {
