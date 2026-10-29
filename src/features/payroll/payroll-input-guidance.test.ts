@@ -15,4 +15,10 @@ describe('payroll input guidance', () => {
     expect(payrollWarningGuidance('MISSING_EFFECTIVE_COMPENSATION')).toContain('covers this entire pay period')
     expect(payrollWarningGuidance('INTERNAL_UNKNOWN')).not.toContain('INTERNAL_UNKNOWN')
   })
+  it('explains why a mid-period starter is blocked without suggesting a full-month workaround', () => {
+    const guidance = payrollWarningGuidance('COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD')
+    expect(guidance).toContain('approved compensation effective dates')
+    expect(guidance).toContain('approved partial-month pay rule')
+    expect(guidance).toContain('do not change the effective date')
+  })
 })

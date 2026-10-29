@@ -25,7 +25,7 @@ export function payrollInputLoadGuidance(error: unknown): string {
 export function payrollWarningGuidance(code: string): string {
   const messages: Record<string, string> = {
     MISSING_EFFECTIVE_COMPENSATION: 'No compensation record covers this entire pay period.',
-    COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD: 'Compensation records do not cover this entire period exactly once.',
+    COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD: 'Compensation is not defined for this entire pay period exactly once. Check the employee’s approved compensation effective dates. If the employee started during this period, payroll is blocked until an approved partial-month pay rule is configured; do not change the effective date to force a full month of pay.',
     EARNING_INPUTS_AWAITING_APPROVAL: 'Variable earnings are awaiting separate HR approval.',
     CROSS_PERIOD_LEAVE_REQUIRES_REVIEW: 'Approved leave crosses the payroll period boundary and needs HR review.',
     APPROVED_LEAVE_NOT_RECONCILED_WITH_ATTENDANCE: 'Approved leave days do not match the attendance entry.',
