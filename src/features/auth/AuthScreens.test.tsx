@@ -86,3 +86,4 @@ describe('live authentication screens', () => {
     expect(await screen.findByText('Your account is active. Sign in to continue.')).toBeInTheDocument()
   })
 })
+

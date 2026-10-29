@@ -54,3 +54,4 @@ Deno.serve(async (request) => {
   }
   return response(200, { invited: true, accessAssigned: true, userId: invited.user.id, role }, origin)
 })
+

@@ -43,7 +43,7 @@ export function LiveLoginScreen() {
       <label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>
       <label>Password<span className="auth-password"><input type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></span></label>
       {error && <div className="auth-error" role="alert">{error}</div>}
-      <button className="button-primary" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in securely'}</button>
+      <button className="button-primary" disabled={submitting}>{submitting ? 'Signing inâ€¦' : 'Sign in securely'}</button>
     </form>
     <Link to="/auth/forgot">Forgot password?</Link>
     <div className="auth-demo-note">Company, branch, employee, deduction, attendance, and leave workflows use LIVE Supabase data. Payroll currently supports input previews and draft creation only; calculation, approval, finalization, and reports are not available.</div>
@@ -68,8 +68,8 @@ export function ForgotPasswordScreen() {
     finally { setSubmitting(false) }
   }
 
-  return <AuthFrame title="Reset your password" description="Enter your work email and we’ll send a secure reset link if the account is eligible.">
-    {sent ? <div className="auth-response" role="status">If an account matches that address, a password reset message will arrive shortly. Check your inbox.</div> : <form onSubmit={submit} noValidate><label>Email address<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="button-primary" disabled={submitting}>{submitting ? 'Sending…' : 'Send reset link'}</button></form>}
+  return <AuthFrame title="Reset your password" description="Enter your work email and weâ€™ll send a secure reset link if the account is eligible.">
+    {sent ? <div className="auth-response" role="status">If an account matches that address, a password reset message will arrive shortly. Check your inbox.</div> : <form onSubmit={submit} noValidate><label>Email address<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="button-primary" disabled={submitting}>{submitting ? 'Sendingâ€¦' : 'Send reset link'}</button></form>}
     <Link to="/auth/login">Back to sign in</Link>
   </AuthFrame>
 }
@@ -95,7 +95,7 @@ export function ResetPasswordScreen() {
     finally { setSubmitting(false) }
   }
 
-  return <AuthFrame title="Choose a new password" description="Create a strong password for your account."><form onSubmit={submit} noValidate><label>New password<span className="auth-password"><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters"/><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></span></label><label>Confirm new password<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="Enter it again"/></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="button-primary" disabled={submitting}>{submitting ? 'Updating…' : 'Update password'}</button></form></AuthFrame>
+  return <AuthFrame title="Choose a new password" description="Create a strong password for your account."><form onSubmit={submit} noValidate><label>New password<span className="auth-password"><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters"/><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></span></label><label>Confirm new password<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="Enter it again"/></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="button-primary" disabled={submitting}>{submitting ? 'Updatingâ€¦' : 'Update password'}</button></form></AuthFrame>
 }
 
 export function ActivateAccountScreen() {
@@ -123,7 +123,7 @@ export function ActivateAccountScreen() {
       <label>New password<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
       <label>Confirm password<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
       {error && <div className="auth-error" role="alert">{error}</div>}
-      <button className="button-primary" disabled={busy}>{busy ? 'Activating…' : 'Set password and activate'}</button>
+      <button className="button-primary" disabled={busy}>{busy ? 'Activatingâ€¦' : 'Set password and activate'}</button>
     </form>
   </AuthFrame>
 }
@@ -136,6 +136,7 @@ export function AuthCallbackScreen() {
 }
 
 export function AuthLoading() {
-  return <main className="auth-prototype" aria-live="polite"><div className="route-loading"><span className="route-loading-mark">GB</span><span>Securing your session…</span></div></main>
+  return <main className="auth-prototype" aria-live="polite"><div className="route-loading"><span className="route-loading-mark">GB</span><span>Securing your sessionâ€¦</span></div></main>
 }
+
 

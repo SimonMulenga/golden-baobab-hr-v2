@@ -104,3 +104,4 @@ grant execute on function public.authorize_member_invitation(uuid, text, uuid) t
 comment on function public.portfolio_membership_directory(uuid) is 'Returns only the caller-authorized portfolio membership directory; user emails are not exposed to branch users.';
 comment on function public.replace_branch_role_assignments(uuid, uuid, uuid, text, uuid[]) is 'Atomically replaces branch assignments for one active branch-scoped portfolio role and audits the change.';
 comment on function public.authorize_member_invitation(uuid, text, uuid) is 'Checks scope and anti-escalation rules before the trusted invitation service sends email.';
+

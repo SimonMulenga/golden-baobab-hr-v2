@@ -184,3 +184,4 @@ comment on function public.employee_correction_details(uuid) is
   'Returns sensitive draft/returned employee details only to the original creator while employee.create access remains active; read is audited.';
 comment on function public.employee_update_draft(uuid, jsonb, jsonb, jsonb) is
   'Updates a creator-owned DRAFT or RETURNED_FOR_CORRECTION record atomically and records a correction audit event; it does not change status or resubmit.';
+

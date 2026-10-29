@@ -309,3 +309,4 @@ grant execute on function public.payroll_preview_inputs(uuid, uuid, date, date) 
 comment on table public.company_memberships is 'Company-scoped access. Company administrators do not gain portfolio-wide privileges.';
 comment on function public.employee_set_employment_status(uuid, text, text) is 'Audited status workflow. Only active/suspended/terminated transitions are allowed; terminated is terminal.';
 comment on function public.payroll_preview_inputs(uuid, uuid, date, date) is 'Read-only payroll input snapshot that requires approved attendance, approved employees, active employment status, and authorized branch access. Does not calculate or persist payroll.';
+
