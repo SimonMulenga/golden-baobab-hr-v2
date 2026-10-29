@@ -23,10 +23,11 @@ type EditDraft = {
 }
 
 export function LiveStatutoryFilings() {
-  const { companies, activeCompanyId, preferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
+  const { companies, activeCompanyId, setActiveCompany, preferences } = useWorkspace()
+  const companyId = activeCompanyId === 'all' ? '' : activeCompanyId
   const company = companies.find((item) => item.id === companyId)
-  const [branchId, setBranchId] = useState(company?.branches[0]?.id ?? '')
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+  const branchId = company?.branches.some((item) => item.id === selectedBranchId) ? selectedBranchId : company?.branches[0]?.id ?? ''
   const [runs, setRuns] = useState<FinalizedPayslipRunRecord[]>([])
   const [records, setRecords] = useState<StatutoryFilingRecord[]>([])
   const [total, setTotal] = useState(0)
@@ -41,6 +42,15 @@ export function LiveStatutoryFilings() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    setSelectedBranchId('')
+    setPage(1)
+    setRuns([])
+    setRecords([])
+    setError('')
+    setLoading(Boolean(company?.branches[0]?.id))
+  }, [companyId])
 
   useEffect(() => {
     if (!companyId || !branchId) return
@@ -127,8 +137,8 @@ export function LiveStatutoryFilings() {
       <div className="live-data-notice"><ShieldCheck size={15}/> Liabilities use the finalized payroll record and cannot be edited here. NAPSA contributions relate to the last day of the payroll month; the 10th of the following month is the remittance deadline. This workspace does not file returns or transfer/remit funds.</div>
       {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-notice" role="status">{notice}</p>}
       <section className="panel statutory-filing-filters" aria-label="Statutory filing filters">
-        <label>Company<select aria-label="Filing company" value={companyId} onChange={(event) => { const next = companies.find((item) => item.id === event.target.value); setCompanyId(event.target.value); setBranchId(next?.branches[0]?.id ?? ''); setPage(1); setRuns([]); setRecords([]); setError(''); setLoading(Boolean(next?.branches[0])) }}><option value="">Select company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label>Branch<select aria-label="Filing branch" value={branchId} onChange={(event) => { setBranchId(event.target.value); setPage(1); setRecords([]); setRuns([]); setError(''); setLoading(Boolean(event.target.value)) }} disabled={!company}><option value="">Select branch</option>{company?.branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Company<select aria-label="Filing company" value={companyId} onChange={(event) => { setActiveCompany(event.target.value || 'all'); setPage(1); setRuns([]); setRecords([]); setError(''); setLoading(false) }}><option value="">Select company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Branch<select aria-label="Filing branch" value={branchId} onChange={(event) => { setSelectedBranchId(event.target.value); setPage(1); setRecords([]); setRuns([]); setError(''); setLoading(Boolean(event.target.value)) }} disabled={!company}><option value="">Select branch</option>{company?.branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <form className="statutory-filing-prepare" onSubmit={(event) => void prepare(event)}>
           <label>Finalized run<select required value={runId} onChange={(event) => setRunId(event.target.value)}><option value="">Select finalized payroll</option>{runs.map((run) => <option key={run.id} value={run.id}>{run.payroll_periods.period_start} · version {run.version}</option>)}</select></label>
           <label>Authority<select value={authority} onChange={(event) => setAuthority(event.target.value as FilingAuthority)}>{authorities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>

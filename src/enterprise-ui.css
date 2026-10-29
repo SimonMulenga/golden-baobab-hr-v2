@@ -1,0 +1,51 @@
+/* Reinforce the shared readable table scale after legacy feature styles load.
+   Feature pages keep their own column definitions, actions, and scroll behavior. */
+.app-shell main .table-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
+.app-shell main .employee-table th,
+.app-shell main .peopleops-table th,
+.app-shell main .admin-table th,
+.app-shell main .live-inputs-table th,
+.app-shell main .live-report-table th,
+.app-shell main .live-reconciliation-table th{padding:12px 14px;font-size:13px;line-height:1.4;vertical-align:bottom}
+.app-shell main .employee-table td,
+.app-shell main .peopleops-table td,
+.app-shell main .admin-table td,
+.app-shell main .live-inputs-table td,
+.app-shell main .live-report-table td,
+.app-shell main .live-reconciliation-table td{padding:11px 14px;font-size:14px;line-height:1.45;vertical-align:middle;overflow-wrap:anywhere}
+.app-shell main .employee-table td strong,
+.app-shell main .peopleops-table td strong,
+.app-shell main .admin-table td strong{font-size:14px;line-height:1.4}
+.app-shell main .employee-table td small,
+.app-shell main .peopleops-table td small,
+.app-shell main .admin-table td small{font-size:13px;line-height:1.4}
+.app-shell main .live-report-table table{white-space:normal;table-layout:auto}
+.app-shell main .live-report-table table{min-width:1180px}
+.app-shell main .live-report-table th,
+.app-shell main .live-report-table td{white-space:normal}
+.app-shell main .live-report-table th:not(:first-child):not(:nth-child(2)),
+.app-shell main .live-report-table td:not(:first-child):not(:nth-child(2)){white-space:nowrap;overflow-wrap:normal;font-variant-numeric:tabular-nums}
+.app-shell main .live-report-table th{font-size:13px}
+.app-shell main .live-reconciliation-table th,
+.app-shell main .live-reconciliation-table td{white-space:normal}
+.app-shell main .live-reconciliation-table table{min-width:780px;width:100%;table-layout:auto}
+.app-shell main .live-inputs-table{min-width:1100px;width:100%;table-layout:auto}
+.app-shell main .live-inputs-table td:not(:first-child){white-space:nowrap;font-variant-numeric:tabular-nums}
+.app-shell main .admin-table-panel .table-scroll{overflow-x:auto}
+.app-shell main .live-inputs-table-wrap{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
+.app-shell main .live-report-filters label,
+.app-shell main .live-payslip-filters label,
+.app-shell main .live-reconciliation-filters label,
+.app-shell main .payroll-run-filters label,
+.app-shell main .live-earning-form label,
+.app-shell main .live-deduction-form label,
+.app-shell main .employee-department-filter{font-size:14px;line-height:1.4}
+.app-shell main .live-reconciliation-summary>div span,
+.app-shell main .live-reconciliation-summary>small{font-size:13px;line-height:1.4}
+@media(max-width:760px){
+  .app-shell main .live-report-filters{grid-template-columns:1fr}
+  .app-shell main .live-reconciliation-filters{grid-template-columns:1fr}
+  .app-shell main .live-inputs-table{min-width:860px}
+  .app-shell main .live-reconciliation-table table{min-width:780px}
+  .app-shell main .live-report-table .table-scroll{overflow-x:auto}
+}

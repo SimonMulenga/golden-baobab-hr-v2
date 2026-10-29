@@ -6,6 +6,7 @@ import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeDirectoryRecord, type EmployeeReviewDecision, type EmploymentHistoryRecord } from '../../services/live-business-services'
 import { createLiveHrServices, type DepartmentRecord, type EmployeeDocumentRecord } from '../../services/live-hr-services'
 import './live-employee-screens.css'
+import './live-employee-ui.css'
 
 const PAGE_SIZE = 25
 
@@ -48,7 +49,7 @@ export function LiveEmployeeDirectory() {
   useEffect(() => { const timer = window.setTimeout(() => { void load() }, 0); return () => { window.clearTimeout(timer); requestGeneration.current += 1 } }, [load])
 
   return <div className="employee-screen">
-    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> PEOPLE DIRECTORY</div><h1>Employees</h1><p>Employee records available to your account.</p></div><div className="live-employee-actions"><Link className="button-secondary" to="/employee-approvals">Review submissions</Link><Link className="button-primary" to="/employees/new">Add employee</Link></div></section>
+    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> PEOPLE DIRECTORY</div><h1>Employees</h1><p>Employee records available to your account.</p></div><div className="live-employee-actions"><Link className="button-secondary" to="/employee-approvals">Review submissions</Link><Link className="button-secondary" to="/employees/import"><Upload size={15}/> Bulk Upload Employees</Link><Link className="button-primary" to="/employees/new">Add employee</Link></div></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Personal identity, contact, banking, and compensation details are not included in this directory view.</div>
     <section className="panel employee-directory-panel">
       <div className="employee-toolbar"><div><strong>{total} employees</strong><small>Current employee records in your authorized scope</small></div><label className="employee-department-filter"><span>Department</span><select aria-label="Filter employees by department" value={departmentId} onChange={(event) => { setLoading(true); setError(''); setDepartmentId(event.target.value); setPage(1) }}><option value="">All departments</option>{departmentOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search employees"/></label></div>

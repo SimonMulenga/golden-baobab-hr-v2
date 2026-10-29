@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { mockCompanies } from '../companies/mockData'
@@ -47,6 +47,14 @@ describe('LIVE attendance workflow', () => {
     await waitFor(() => expect(mocks.saveEntry).toHaveBeenCalledTimes(1))
     expect(mocks.saveEntry.mock.calls[0][0]).toMatchObject({ companyId: company.id, branchId: 'synthetic-branch', employeeId: employee.id, scheduledDays: 22, workedDays: 20, paidLeaveDays: 2, contractType: 'MONTHLY' })
     expect(await screen.findByRole('status')).toHaveTextContent('Monthly attendance entry saved')
+  })
+
+  it('exposes the attendance table as a named, keyboard-reachable data region', async () => {
+    renderScreen()
+    const records = await screen.findByRole('region', { name: 'Monthly attendance records' })
+    expect(records).toHaveAttribute('tabindex', '0')
+    expect(within(records).getByRole('table', { name: 'Employee attendance' })).toBeInTheDocument()
+    expect(within(records).getByRole('columnheader', { name: 'ACTION' })).toBeInTheDocument()
   })
 
   it('submits a recorded period and lets a separate reviewer approve it', async () => {

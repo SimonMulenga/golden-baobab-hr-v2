@@ -70,6 +70,7 @@ describe('LIVE employee screens', () => {
     renderRoute(<LiveEmployeeDirectory />)
     expect(await screen.findByText('Demo Employee')).toBeInTheDocument()
     expect(screen.getByText('SYN-1001')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Bulk Upload Employees' })).toHaveAttribute('href', '/employees/import')
     expect(serviceMocks.list).toHaveBeenCalledWith({ page: 1, pageSize: 25, search: '' })
   })
 

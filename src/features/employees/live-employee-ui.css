@@ -1,0 +1,46 @@
+/* Match the shared workspace scale on the LIVE employee surfaces. */
+.employee-screen{width:100%;max-width:1500px;margin:0 auto;min-width:0}
+.employee-welcome{align-items:flex-start;gap:20px;margin-bottom:20px}
+.employee-welcome h1{font-size:28px;line-height:1.2;letter-spacing:-.45px}
+.employee-welcome p{font-size:15px;line-height:1.55}
+.employee-screen .live-data-notice{padding:12px 14px;font-size:14px;line-height:1.5}
+.employee-directory-panel{min-width:0;border-radius:10px}
+.employee-toolbar{gap:14px;padding:16px;flex-wrap:wrap}
+.employee-toolbar>div strong{font-size:15px;line-height:1.4}
+.employee-toolbar>div small{font-size:13px;line-height:1.4}
+.employee-search,.employee-department-filter{min-height:42px;font-size:14px}
+.employee-search input{font-size:14px}
+.employee-department-filter select{min-height:42px;font-size:14px}
+.employee-table{width:100%;min-width:820px;table-layout:auto;white-space:normal}
+.employee-table th{height:auto;padding:12px 14px;font-size:12px;line-height:1.35;letter-spacing:.045em;vertical-align:bottom}
+.employee-table td{height:auto;padding:12px 14px;font-size:14px;line-height:1.45;vertical-align:middle;overflow-wrap:anywhere}
+.employee-table td strong{font-size:14px;line-height:1.4}
+.employee-table td small{font-size:13px;line-height:1.4}
+.employee-pagination{min-height:52px;padding:10px 16px;font-size:13px}
+.employee-pagination button{min-width:40px;min-height:40px}
+.approval-status{font-size:12px;line-height:1.35}
+.approval-actions{gap:8px}
+.approval-actions button{min-height:40px;padding-inline:12px;font-size:13px}
+.employee-empty{padding:44px 20px;font-size:15px;line-height:1.55}
+.live-onboarding-form{padding:24px}
+.live-onboarding-form>section{padding:20px 0}
+.live-onboarding-form .section-eyebrow{font-size:13px;line-height:1.4}
+.live-onboarding-grid{gap:16px}
+.live-onboarding-field{font-size:14px;line-height:1.4}
+.live-onboarding-field input,.live-onboarding-field select{height:42px;font-size:15px}
+.live-onboarding-footer{font-size:14px;line-height:1.5}
+.live-onboarding-footer button{min-height:42px}
+.employee-profile-card dt{font-size:13px;line-height:1.4}
+.employee-profile-card dd{font-size:15px;line-height:1.45}
+.employee-history-card li strong{font-size:14px;line-height:1.4}
+.employee-history-card li small,.employee-history-card li p{font-size:13px;line-height:1.5}
+@media(max-width:760px){
+  .employee-welcome{align-items:flex-start;flex-direction:column}
+  .employee-welcome h1{font-size:26px}
+  .employee-welcome .live-employee-actions{width:100%;flex-wrap:wrap;justify-content:flex-start}
+  .employee-toolbar{align-items:stretch;flex-direction:column}
+  .employee-search{max-width:none;width:100%}
+  .employee-table{min-width:820px}
+  .employee-profile-grid{grid-template-columns:1fr}
+  .employee-profile-card,.employee-history-card{padding:16px}
+}

@@ -56,6 +56,7 @@ const SettingsScreen = lazy(() => import('./features/admin/AdminScreens').then((
 const AuthPrototype = lazy(() => import('./features/auth/AuthPrototype').then((module) => ({ default: module.AuthPrototype })))
 import './index.css'
 import './client-ui.css'
+import './enterprise-ui.css'
 
 const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },

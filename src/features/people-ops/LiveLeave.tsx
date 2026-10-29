@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeDirectoryRecord } from '../../services/live-business-services'
 import { createLiveHrServices, type LeaveBalanceRecord, type LeaveCalendarExceptionRecord, type LeavePolicyRecord, type LeaveRequestHistoryRecord, type LeaveRequestRecord } from '../../services/live-hr-services'
 import { countRequestedLeaveDays } from './leave-days'
+import './people-ops.css'
 
 const PAGE_SIZE = 25
 const defaultMonthStart = `${new Date().toISOString().slice(0, 7)}-01`
