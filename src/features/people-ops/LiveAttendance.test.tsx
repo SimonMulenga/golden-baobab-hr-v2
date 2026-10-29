@@ -5,12 +5,13 @@ import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { mockCompanies } from '../companies/mockData'
 import { LiveAttendance } from './LiveAttendance'
 
-const mocks = vi.hoisted(() => ({ listEmployees: vi.fn(), periods: vi.fn(), entries: vi.fn(), saveEntry: vi.fn(), submitPeriod: vi.fn(), reviewPeriod: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listEmployees: vi.fn(), periods: vi.fn(), entries: vi.fn(), saveEntry: vi.fn(), approvedCorrectionCapability: vi.fn(), requestApprovedCorrection: vi.fn(), submitPeriod: vi.fn(), reviewPeriod: vi.fn() }))
 const historyMock = vi.hoisted(() => vi.fn())
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({
   employees: { list: mocks.listEmployees }, attendance: { periods: mocks.periods, entries: mocks.entries,
-    saveEntry: mocks.saveEntry, submitPeriod: mocks.submitPeriod, reviewPeriod: mocks.reviewPeriod },
+    saveEntry: mocks.saveEntry, approvedCorrectionCapability: mocks.approvedCorrectionCapability,
+    requestApprovedCorrection: mocks.requestApprovedCorrection, submitPeriod: mocks.submitPeriod, reviewPeriod: mocks.reviewPeriod },
 }) }))
 vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => ({ attendance: { history: historyMock } }) }))
 
@@ -32,6 +33,8 @@ describe('LIVE attendance workflow', () => {
     mocks.periods.mockResolvedValue({ items: [], total: 0 })
     mocks.entries.mockResolvedValue([])
     mocks.saveEntry.mockResolvedValue('synthetic-entry')
+    mocks.approvedCorrectionCapability.mockResolvedValue(false)
+    mocks.requestApprovedCorrection.mockResolvedValue('synthetic-period')
     mocks.submitPeriod.mockResolvedValue('synthetic-period')
     mocks.reviewPeriod.mockResolvedValue('synthetic-period')
     historyMock.mockResolvedValue([])
@@ -87,9 +90,25 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByRole('status')).toHaveTextContent(/reopen-and-reapproval correction workflow is not available yet/i)
+    expect(await screen.findByRole('status')).toHaveTextContent(/request an audited correction to reopen it/i)
+    expect(await screen.findByRole('button', { name: 'Correction unavailable' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
     expect(mocks.saveEntry).not.toHaveBeenCalled()
+  })
+
+  it('opens an approved-period correction with a reason and requires reapproval', async () => {
+    const period = { id: 'period-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
+      period_start: '2026-10-01', period_end: '2026-10-31', status: 'APPROVED', created_by: 'branch-manager', reviewed_by: 'reviewer', reviewed_at: '2026-10-30T08:00:00Z', review_reason: null }
+    mocks.periods.mockResolvedValue({ items: [period], total: 1 })
+    mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
+      actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
+    mocks.approvedCorrectionCapability.mockResolvedValue(true)
+    renderScreen()
+    fireEvent.click(await screen.findByRole('button', { name: 'Request correction' }))
+    fireEvent.change(screen.getByLabelText('Reason for correction'), { target: { value: 'Correct an approved attendance entry' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Open correction' }))
+    await waitFor(() => expect(mocks.requestApprovedCorrection).toHaveBeenCalledWith(period.id, 'Correct an approved attendance entry'))
+    expect(await screen.findByText(/must be resubmitted for independent review/i)).toBeInTheDocument()
   })
 
   it('does not display success when attendance persistence is denied', async () => {

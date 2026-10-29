@@ -145,6 +145,8 @@ describe('live Supabase business service adapter', () => {
     await expect(services.attendance.saveEntry({ portfolioId: 'portfolio-1', companyId: 'company-1', branchId: 'branch-1',
       periodStart: '2026-10-01', periodEnd: '2026-10-31', employeeId: 'employee-1', scheduledDays: 22,
       workedDays: 20, paidLeaveDays: 1, unpaidLeaveDays: 1, payableAbsenceDays: 0, contractType: 'MONTHLY' })).resolves.toBe('synthetic-record-id');
+    await expect(services.attendance.approvedCorrectionCapability('company-1', 'branch-1')).resolves.toBe(false)
+    await expect(services.attendance.requestApprovedCorrection('attendance-period-1', 'Synthetic correction reason')).resolves.toBe('synthetic-record-id')
     await expect(services.attendance.submitPeriod('attendance-period-1')).resolves.toBe('synthetic-record-id');
     await expect(services.attendance.reviewPeriod('attendance-period-1', 'APPROVE')).resolves.toBe('synthetic-record-id');
     await expect(services.payroll.submitForApproval('run-1')).resolves.toBe('synthetic-record-id');
@@ -166,6 +168,8 @@ describe('live Supabase business service adapter', () => {
       'deduction_create_request',
       'deduction_review_request',
       'attendance_save_entry',
+      'attendance_approved_correction_capability',
+      'attendance_request_approved_correction',
       'attendance_submit_period',
       'attendance_review_period',
       'payroll_submit_for_approval',

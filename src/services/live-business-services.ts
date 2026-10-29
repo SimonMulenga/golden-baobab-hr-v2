@@ -338,6 +338,8 @@ export interface LiveBusinessServices {
     periods(request?: PageRequest & { periodStart?: string }): Promise<PageResult<AttendancePeriodRecord>>;
     entries(periodId: string): Promise<AttendanceEntryRecord[]>;
     saveEntry(input: AttendanceEntryInput): Promise<string>;
+    approvedCorrectionCapability(companyId: string, branchId: string): Promise<boolean>;
+    requestApprovedCorrection(periodId: string, reason: string): Promise<string>;
     submitPeriod(periodId: string): Promise<string>;
     reviewPeriod(periodId: string, decision: 'APPROVE' | 'RETURN', reason?: string): Promise<string>;
   };
@@ -634,6 +636,18 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_paid_leave_days: input.paidLeaveDays, p_unpaid_leave_days: input.unpaidLeaveDays,
           p_payable_absence_days: input.payableAbsenceDays, p_contract_type: input.contractType,
           p_correction_note: input.correctionNote ?? null,
+        }));
+      },
+      async approvedCorrectionCapability(companyId, branchId) {
+        const result = await client.rpc('attendance_approved_correction_capability', {
+          p_company_id: companyId, p_branch_id: branchId,
+        });
+        if (result.error) throw result.error;
+        return result.data === true;
+      },
+      async requestApprovedCorrection(periodId, reason) {
+        return unwrap(await client.rpc('attendance_request_approved_correction', {
+          p_period_id: periodId, p_reason: reason,
         }));
       },
       async submitPeriod(periodId) { return unwrap(await client.rpc('attendance_submit_period', { p_period_id: periodId })); },
