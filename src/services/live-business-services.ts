@@ -246,14 +246,15 @@ export type EmployeeDraftInput = {
 };
 export type EmployeeImportJobResult = {
   id: string; status: 'COMPLETED' | 'VALIDATION_FAILED' | 'FAILED'; total_rows: number;
-  imported_rows: number; errors: Array<{ line?: number; message: string }>; replayed: boolean;
+  imported_rows: number; updated_rows: number; errors: Array<{ line?: number; message: string }>; replayed: boolean;
 };
 export type EmployeeImportJobRecord = {
   id: string; company_id: string; branch_id: string; status: EmployeeImportJobResult['status'];
-  total_rows: number; imported_rows: number; errors: Array<{ line?: number; message: string }>; created_at: string;
+  total_rows: number; imported_rows: number; updated_rows: number; errors: Array<{ line?: number; message: string }>; created_at: string;
 };
 export type EmployeeImportBatchInput = Omit<EmployeeDraftInput, 'portfolioId' | 'companyId' | 'branchId'> & {
   line: number;
+  operation?: 'CREATE' | 'SAFE_UPSERT_DRAFT';
 };
 export type EmployeeCorrectionDetails = {
   employee: Record<string, string | number | null>;
@@ -303,7 +304,8 @@ export interface LiveBusinessServices {
     submitForHrApproval(employeeId: string): Promise<string>;
     reviewSubmission(employeeId: string, decision: EmployeeReviewDecision, reason?: string): Promise<string>;
     importBatch(input: { portfolioId: string; companyId: string; branchId: string; idempotencyKey: string; rows: EmployeeImportBatchInput[] }): Promise<EmployeeImportJobResult>;
-    importHistory(companyId: string, branchId: string, page?: number): Promise<PageResult<EmployeeImportJobRecord>>;
+    importHistory(portfolioId: string, companyId: string, branchId: string, page?: number): Promise<PageResult<EmployeeImportJobRecord>>;
+    supportsDraftImportUpdates(portfolioId: string, companyId: string, branchId: string): Promise<boolean>;
   };
   companyAdmins: {
     list(portfolioId: string, companyId: string): Promise<CompanyAdminRecord[]>;
@@ -466,23 +468,38 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         }));
       },
       async importBatch(input) {
-        const rows = input.rows.map(({ line, employee, privateDetails, compensation }) => ({
-          line, employee, private_details: privateDetails, compensation,
+        const rows = input.rows.map(({ line, operation, employee, privateDetails, compensation }) => ({
+          line, operation, employee, private_details: privateDetails, compensation,
         }));
-        return unwrap(await client.rpc('employee_import_atomic', {
+        const result = unwrap(await client.rpc('employee_import_atomic', {
           p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_branch_id: input.branchId,
           p_idempotency_key: input.idempotencyKey, p_rows: rows,
-        })) as EmployeeImportJobResult;
+        })) as Omit<EmployeeImportJobResult, 'updated_rows'> & { updated_rows?: number };
+        return { ...result, updated_rows: Number(result.updated_rows ?? 0) };
       },
-      async importHistory(companyId, branchId, page = 1) {
+      async importHistory(portfolioId, companyId, branchId, page = 1) {
         const pageSize = 20;
         const offset = Math.max(0, page - 1) * pageSize;
+        const capability = await client.rpc('employee_import_supports_draft_updates', {
+          p_portfolio_id: portfolioId, p_company_id: companyId, p_branch_id: branchId,
+        });
+        const supportsUpdates = !capability.error && capability.data === true;
+        const columns = supportsUpdates
+          ? 'id,company_id,branch_id,status,total_rows,imported_rows,updated_rows,errors,created_at'
+          : 'id,company_id,branch_id,status,total_rows,imported_rows,errors,created_at';
         const result = await client.from('employee_import_jobs')
-          .select('id,company_id,branch_id,status,total_rows,imported_rows,errors,created_at', { count: 'exact' })
+          .select(columns, { count: 'exact' })
           .eq('company_id', companyId).eq('branch_id', branchId)
           .order('created_at', { ascending: false }).range(offset, offset + pageSize - 1);
         if (result.error) throw result.error;
-        return { items: (result.data ?? []) as EmployeeImportJobRecord[], total: result.count ?? 0 };
+        const records = (result.data ?? []) as unknown as Array<Record<string, unknown>>;
+        return { items: records.map((item) => ({ ...item, updated_rows: Number(item.updated_rows ?? 0) })) as unknown as EmployeeImportJobRecord[], total: result.count ?? 0 };
+      },
+      async supportsDraftImportUpdates(portfolioId, companyId, branchId) {
+        const result = await client.rpc('employee_import_supports_draft_updates', {
+          p_portfolio_id: portfolioId, p_company_id: companyId, p_branch_id: branchId,
+        });
+        return !result.error && result.data === true;
       },
     },
     companyAdmins: {

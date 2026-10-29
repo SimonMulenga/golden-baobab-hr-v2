@@ -4,16 +4,31 @@ import { createLiveBusinessServices } from './live-business-services';
 
 describe('live Supabase business service adapter', () => {
   it('submits imports through one idempotent atomic server workflow', async () => {
-    const response = { id: 'job-1', status: 'COMPLETED', total_rows: 1, imported_rows: 1, errors: [], replayed: false }
+    const response = { id: 'job-1', status: 'COMPLETED', total_rows: 1, imported_rows: 0, updated_rows: 1, errors: [], replayed: false }
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: response, error: null }))
     const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
     await expect(services.employees.importBatch({
       portfolioId: 'portfolio-1', companyId: 'company-1', branchId: 'branch-1', idempotencyKey: 'synthetic-import-123',
-      rows: [{ line: 2, employee: { employee_number: 'SYN-1' }, privateDetails: { phone: 'synthetic' }, compensation: { basic_pay: 1000 } }],
-    })).resolves.toMatchObject({ id: 'job-1', status: 'COMPLETED', imported_rows: 1 })
+      rows: [{ line: 2, operation: 'SAFE_UPSERT_DRAFT', employee: { employee_number: 'SYN-1' }, privateDetails: { phone: 'synthetic' }, compensation: { basic_pay: 1000 } }],
+    })).resolves.toMatchObject({ id: 'job-1', status: 'COMPLETED', imported_rows: 0, updated_rows: 1 })
     expect(rpc).toHaveBeenCalledWith('employee_import_atomic', expect.objectContaining({
-      p_idempotency_key: 'synthetic-import-123', p_rows: [{ line: 2, employee: { employee_number: 'SYN-1' }, private_details: { phone: 'synthetic' }, compensation: { basic_pay: 1000 } }],
+      p_idempotency_key: 'synthetic-import-123', p_rows: [{ line: 2, operation: 'SAFE_UPSERT_DRAFT', employee: { employee_number: 'SYN-1' }, private_details: { phone: 'synthetic' }, compensation: { basic_pay: 1000 } }],
     }))
+  })
+
+  it('enables controlled draft updates only when the scoped database capability confirms them', async () => {
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: true, error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.supportsDraftImportUpdates('portfolio-1', 'company-1', 'branch-1')).resolves.toBe(true)
+    expect(rpc).toHaveBeenCalledWith('employee_import_supports_draft_updates', {
+      p_portfolio_id: 'portfolio-1', p_company_id: 'company-1', p_branch_id: 'branch-1',
+    })
+  })
+
+  it('keeps controlled draft updates disabled when the database capability is absent', async () => {
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: new Error('function not found') }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.supportsDraftImportUpdates('portfolio-1', 'company-1', 'branch-1')).resolves.toBe(false)
   })
 
   it('reads payslip delivery history through a redacted permission-checked RPC', async () => {

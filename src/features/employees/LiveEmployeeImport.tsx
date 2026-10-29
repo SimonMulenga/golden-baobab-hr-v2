@@ -59,11 +59,14 @@ export function LiveEmployeeImport() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [outcomes, setOutcomes] = useState<ImportOutcome[]>([])
+  const [lastImportCounts, setLastImportCounts] = useState<{ created: number; updated: number } | null>(null)
   const [confirmed, setConfirmed] = useState(false)
+  const [updateOwnedDrafts, setUpdateOwnedDrafts] = useState(false)
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID())
   const [history, setHistory] = useState<EmployeeImportJobRecord[]>([])
   const [historyError, setHistoryError] = useState('')
   const [historyRefresh, setHistoryRefresh] = useState(0)
+  const [draftUpdateSupported, setDraftUpdateSupported] = useState(false)
   const [departments, setDepartments] = useState<DepartmentRecord[]>([])
   const [departmentError, setDepartmentError] = useState('')
   const [templateHasExampleRow, setTemplateHasExampleRow] = useState(false)
@@ -87,13 +90,22 @@ export function LiveEmployeeImport() {
   }, [companyId])
 
   useEffect(() => {
-    if (!companyId || !branchId) return
+    if (!companyId || !company?.portfolioId || !branchId) return
     let cancelled = false
-    createLiveBusinessServices(getSupabaseClient()).employees.importHistory(companyId, branchId)
+    createLiveBusinessServices(getSupabaseClient()).employees.importHistory(company.portfolioId, companyId, branchId)
       .then((result) => { if (!cancelled) { setHistory(result.items); setHistoryError('') } })
       .catch(() => { if (!cancelled) { setHistory([]); setHistoryError('Import history is unavailable under the current branch permissions.') } })
     return () => { cancelled = true }
-  }, [companyId, branchId, historyRefresh])
+  }, [companyId, company?.portfolioId, branchId, historyRefresh])
+
+  useEffect(() => {
+    if (!company?.portfolioId || !companyId || !branchId) { setDraftUpdateSupported(false); setUpdateOwnedDrafts(false); return }
+    let cancelled = false
+    createLiveBusinessServices(getSupabaseClient()).employees.supportsDraftImportUpdates(company.portfolioId, companyId, branchId)
+      .then((supported) => { if (!cancelled) { setDraftUpdateSupported(supported); if (!supported) setUpdateOwnedDrafts(false) } })
+      .catch(() => { if (!cancelled) { setDraftUpdateSupported(false); setUpdateOwnedDrafts(false) } })
+    return () => { cancelled = true }
+  }, [company?.portfolioId, companyId, branchId])
 
   const rows = useMemo<ImportRow[]>(() => {
     const seen = new Set<string>()
@@ -162,7 +174,7 @@ export function LiveEmployeeImport() {
   }, [sourceRows, mapping, companyId, departments, headers])
 
   async function chooseFile(file?: File) {
-    setError(''); setOutcomes([]); setConfirmed(false); setHeaders([]); setSourceRows([]); setTemplateHasExampleRow(false); setExampleRowRemoved(false)
+    setError(''); setOutcomes([]); setLastImportCounts(null); setConfirmed(false); setUpdateOwnedDrafts(false); setHeaders([]); setSourceRows([]); setTemplateHasExampleRow(false); setExampleRowRemoved(false)
     if (!file) return
     if (!/\.(csv|xlsx)$/i.test(file.name)) { setError('Choose a CSV or XLSX file.'); return }
     if (file.size > 10 * 1024 * 1024) { setError('Files must be 10 MB or smaller.'); return }
@@ -208,6 +220,7 @@ export function LiveEmployeeImport() {
         const v = row.values
         return {
           line: row.line,
+          operation: updateOwnedDrafts && draftUpdateSupported ? 'SAFE_UPSERT_DRAFT' : 'CREATE',
           employee: {
             employee_number: v.employee_number, first_name: v.first_name, middle_name: v.middle_name || null, last_name: v.last_name,
             date_of_birth: dateForImport(v.date_of_birth), gender: v.gender ? enumValue(v.gender) : null,
@@ -243,6 +256,7 @@ export function LiveEmployeeImport() {
         portfolioId: company.portfolioId, companyId: company.id, branchId: branch.id, idempotencyKey, rows: batch,
       })
       if (result.status === 'COMPLETED') {
+        setLastImportCounts({ created: result.imported_rows, updated: result.updated_rows })
         setOutcomes(readyRows.map((row) => ({ line: row.line, result: 'submitted', message: 'Submitted for HR review' })))
       } else {
         const errorsByLine = new Map<number, string[]>()
@@ -251,7 +265,7 @@ export function LiveEmployeeImport() {
           errorsByLine.set(issue.line, [...(errorsByLine.get(issue.line) ?? []), issue.message])
         }
         setOutcomes(readyRows.map((row) => ({ line: row.line, result: 'failed', message: errorsByLine.get(row.line)?.join('; ') ?? (result.status === 'FAILED' ? 'Atomic import failed; no employee rows were saved.' : 'Import validation failed.') })))
-        setError(result.status === 'VALIDATION_FAILED' ? 'This file contains duplicate employee numbers or numbers already used in this company. Existing employees were not changed; use the employee correction workflow for updates.' : 'The import could not be completed. No employee rows were saved.')
+        setError(result.status === 'VALIDATION_FAILED' ? 'Some employee numbers are duplicated or cannot be updated under this import mode. No rows were changed; review the row errors and choose the matching-draft option only for drafts you created.' : 'The import could not be completed. No employee rows were saved or changed.')
       }
       setIdempotencyKey(rotateImportAttemptKey(company.id, branch.id))
     } catch {
@@ -269,19 +283,20 @@ export function LiveEmployeeImport() {
     <div className="live-data-notice"><ShieldCheck size={15}/> Files are read on this device; no data is sent until you confirm. This preview includes private employee and pay details, so keep your screen private. Confirming submits the employees for HR approval.</div>
     {templateHasExampleRow && <div className="auth-shell-error" role="note"><strong>Template example row:</strong> the workbook instructions say to replace its example row. Remove that row before continuing.<label className="live-import-example-check"><input type="checkbox" checked={exampleRowRemoved} onChange={(event) => setExampleRowRemoved(event.target.checked)} /> I removed the template example row from this file.</label></div>}
     {error && <div className="auth-shell-error" role="alert">{error}</div>}
-    {error.startsWith('Import status could not be confirmed') && company && branch && <p role="status">The same company, branch, and idempotency key are retained for a safe retry in this browser tab. <button type="button" className="button-secondary" onClick={() => setIdempotencyKey(rotateImportAttemptKey(company.id, branch.id))}>Start a separate import attempt</button> A new attempt still rejects employee numbers already saved.</p>}
+    {error.startsWith('Import status could not be confirmed') && company && branch && <p role="status">The same company, branch, and idempotency key are retained for a safe retry in this browser tab. <button type="button" className="button-secondary" onClick={() => setIdempotencyKey(rotateImportAttemptKey(company.id, branch.id))}>Start a separate import attempt</button> A new attempt checks employee numbers already saved.</p>}
       <section className="panel live-import-upload"><label><Upload size={22}/><strong>{fileName || 'Choose a CSV or Excel workbook'}</strong><span>CSV or XLSX · file maximum 10 MB · one atomic server job up to 5,000 rows (5.5 MB mapped request)</span><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label>{sheetName && <p>Worksheet: {sheetName}</p>}</section>
     {headers.length > 0 && <>
       <section className="panel live-import-mapping"><header><div><div className="section-eyebrow">FIELD MAPPING</div><h2>Match spreadsheet columns</h2><p>Header suggestions are editable. Workplace branch is selected separately from any bank branch column.</p></div></header><div className="live-import-fields">{liveImportFields.map((field) => <label key={field.key}><span>{field.label}{field.required && <i> *</i>}</span><select value={mapping[field.key] ?? ''} onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Not mapped</option>{headers.map((header) => <option value={header} key={`${field.key}-${header}`}>{header}</option>)}</select></label>)}</div></section>
       <section className="panel live-import-preview"><header><div><div className="section-eyebrow">LOCAL VALIDATION</div><h2>{rows.length.toLocaleString()} rows previewed</h2></div><div className="live-import-selectors"><label>Company<select value={companyId} onChange={(event) => { setCompanyId(event.target.value); setBranchId(''); setHistory([]) }}><option value="">Select company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Workplace branch<select value={branchId} onChange={(event) => { const nextBranchId = event.target.value; setBranchId(nextBranchId); setIdempotencyKey(nextBranchId ? importAttemptKey(companyId, nextBranchId) : crypto.randomUUID()); setHistory([]) }} disabled={!company}><option value="">Select workplace branch</option>{company?.branches.filter((item) => item.status === 'Active').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div></header>
         {departmentError && <p role="alert">{departmentError}</p>}
+        {draftUpdateSupported ? <label className="live-import-update-mode"><input type="checkbox" checked={updateOwnedDrafts} onChange={(event) => { setUpdateOwnedDrafts(event.target.checked); setConfirmed(false) }} /> Update matching employee numbers when the record is a draft or returned for correction that I created. New numbers still create employees; approved records and records from another branch or user are rejected.</label> : <p className="live-import-update-mode-note">Matching employee updates are unavailable until the controlled update workflow is enabled for this company and branch. New employee imports remain available.</p>}
         {rows.some((row) => row.errors.some((message) => message.startsWith('Department is not active'))) && <p className="live-form-hint">Use <Link to="/departments">Departments</Link> to create or activate the department for this company, then return to the import. Your configuration access is checked when the department is saved.</p>}
         <div className="live-import-summary"><strong>{validCount.toLocaleString()} ready</strong><strong>{invalidCount.toLocaleString()} need correction</strong><span>{outcomes.filter((item) => item.result === 'submitted').length.toLocaleString()} submitted · {outcomes.filter((item) => item.result === 'draft').length.toLocaleString()} drafts · {outcomes.filter((item) => item.result === 'failed').length.toLocaleString()} failed</span></div>
         {busy && <div className="live-import-progress" role="status">Submitting {validCount.toLocaleString()} validated rows in one atomic server transaction…</div>}
         <div className="table-scroll"><table className="employee-table"><thead><tr><th>ROW</th><th>EMPLOYEE NUMBER</th><th>NAME</th><th>DEPARTMENT</th><th>VALIDATION</th></tr></thead><tbody>{rows.slice(0, 100).map((row) => <tr key={row.line}><td>{row.line}</td><td>{row.values.employee_number}</td><td>{row.values.first_name} {row.values.last_name}</td><td>{row.values.department}</td><td>{row.errors.length ? row.errors.join('; ') : 'Ready to submit'}</td></tr>)}</tbody></table></div><footer>Showing first {Math.min(rows.length, 100).toLocaleString()} of {rows.length.toLocaleString()} rows. Validation covers the complete file.</footer>
       </section>
-      <form className="live-import-confirm" onSubmit={(event) => void submitImport(event)}><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm these employee records are authorized for this company and branch. Valid rows will be submitted for HR review.</label><button className="button-primary" disabled={busy || !confirmed || !branch || (templateHasExampleRow && !exampleRowRemoved) || validCount === 0}>{busy ? 'Submitting…' : `Import ${validCount.toLocaleString()} valid rows`}</button>{outcomes.length > 0 && <div role="status">{outcomes.filter((item) => item.result === 'submitted').length} rows submitted for HR approval. {outcomes.filter((item) => item.result === 'draft').length} saved as drafts requiring review. {outcomes.filter((item) => item.result === 'failed').length} were rejected.</div>}{outcomes.some((item) => item.result !== 'submitted') && <ul>{outcomes.filter((item) => item.result !== 'submitted').map((item) => <li key={item.line}>Row {item.line}: {item.message}</li>)}</ul>}<span><FileSpreadsheet size={15}/> Private fields are sent only after you confirm; local previews are cleared on page refresh.</span></form>
+      <form className="live-import-confirm" onSubmit={(event) => void submitImport(event)}><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm these employee records are authorized for this company and branch. Valid rows will be submitted for HR review{updateOwnedDrafts ? ', and matching drafts I created may be corrected and resubmitted' : ''}.</label><button className="button-primary" disabled={busy || !confirmed || !branch || (templateHasExampleRow && !exampleRowRemoved) || validCount === 0}>{busy ? 'Submitting…' : `${updateOwnedDrafts ? 'Import or update' : 'Import'} ${validCount.toLocaleString()} valid rows`}</button>{outcomes.length > 0 && <div role="status">{lastImportCounts ? `${lastImportCounts.created} new employees created and ${lastImportCounts.updated} draft records corrected; all submitted for HR review.` : `${outcomes.filter((item) => item.result === 'submitted').length} rows submitted for HR approval.`} {outcomes.filter((item) => item.result === 'failed').length} were rejected.</div>}{outcomes.some((item) => item.result !== 'submitted') && <ul>{outcomes.filter((item) => item.result !== 'submitted').map((item) => <li key={item.line}>Row {item.line}: {item.message}</li>)}</ul>}<span><FileSpreadsheet size={15}/> Private fields are sent only after you confirm; local previews are cleared on page refresh.</span></form>
     </>}
-    {companyId && branchId && <section className="panel live-import-history" aria-label="Employee import history"><header><div><div className="section-eyebrow">DURABLE SERVER JOBS</div><h2>Recent import history</h2></div></header>{historyError && <p role="alert">{historyError}</p>}{!historyError && !history.length && <p>No import jobs are available for this branch yet.</p>}{history.map((job) => <div key={job.id}><span>{new Date(job.created_at).toLocaleString()}</span><strong>{job.status.replaceAll('_', ' ')}</strong><span>{job.imported_rows.toLocaleString()} / {job.total_rows.toLocaleString()} rows</span><small>{job.errors[0]?.message ?? 'No row errors'}</small></div>)}</section>}
+    {companyId && branchId && <section className="panel live-import-history" aria-label="Employee import history"><header><div><div className="section-eyebrow">IMPORT HISTORY</div><h2>Recent import history</h2></div></header>{historyError && <p role="alert">{historyError}</p>}{!historyError && !history.length && <p>No import jobs are available for this branch yet.</p>}{history.map((job) => <div key={job.id}><span>{new Date(job.created_at).toLocaleString()}</span><strong>{job.status.replaceAll('_', ' ')}</strong><span>{job.imported_rows.toLocaleString()} new · {job.updated_rows.toLocaleString()} updated / {job.total_rows.toLocaleString()} rows</span><small>{job.errors[0]?.message ?? 'No row errors'}</small></div>)}</section>}
   </div>
 }
