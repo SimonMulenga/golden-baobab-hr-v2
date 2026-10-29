@@ -8,8 +8,7 @@ import './live-audit-logs.css'
 const timestamp = (value: string, preferences?: ReturnType<typeof useWorkspace>['preferences']) => formatWorkspaceDateTime(value, preferences, { dateStyle: 'medium', timeStyle: 'short' })
 
 export function LiveAuditLogs() {
-  const { companies, preferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState('all')
+  const { companies, preferences, activeCompanyId: companyId, setActiveCompany: setCompanyId } = useWorkspace()
   const [branchId, setBranchId] = useState('all')
   const [action, setAction] = useState('')
   const [from, setFrom] = useState('')
@@ -21,6 +20,10 @@ export function LiveAuditLogs() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const branches = companies.filter((company) => companyId === 'all' || company.id === companyId).flatMap((company) => company.branches)
+
+  useEffect(() => {
+    if (branchId !== 'all' && !branches.some((branch) => branch.id === branchId)) setBranchId('all')
+  }, [companyId, branchId, branches])
 
   useEffect(() => {
     let cancelled = false
@@ -42,16 +45,16 @@ export function LiveAuditLogs() {
     <div className="live-data-notice"><ShieldCheck size={15}/> Events are read from the protected audit log. Browser users cannot edit or delete audit entries.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}
     <form className="panel live-audit-filters" onSubmit={applyFilters}>
-      <label>Company<select aria-label="Audit company" value={companyId} onChange={(event) => { setLoading(true); setCompanyId(event.target.value); setBranchId('all'); setPage(1) }}><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>
-      <label>Branch<select aria-label="Audit branch" value={branchId} onChange={(event) => { setLoading(true); setBranchId(event.target.value); setPage(1) }}><option value="all">All authorized branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>
+      <label>Company<select aria-label="Audit company" value={companyId} onChange={(event) => { setLoading(true); setCompanyId(event.target.value); setBranchId('all'); setPage(1) }}><option value="all">All companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>
+      <label>Branch<select aria-label="Audit branch" value={branchId} onChange={(event) => { setLoading(true); setBranchId(event.target.value); setPage(1) }}><option value="all">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>
       <label>Action contains<input value={action} onChange={(event) => setAction(event.target.value)} placeholder="e.g. PAYROLL_FINALIZED" /></label>
       <label>From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
       <label>To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
       <button className="button-primary"><Search size={14}/> Apply filters</button>
     </form>
     <section className="panel live-audit-table">
-      <header><div><div className="section-eyebrow">PERSISTED EVENTS</div><h2>{total.toLocaleString()} matching events</h2></div><span>Page {page} of {pageCount}</span></header>
-      {loading ? <div className="live-audit-empty" role="status"><LoaderCircle size={18}/> Loading authorized audit records…</div>
+      <header><div><div className="section-eyebrow">COMPANY HISTORY</div><h2>{total.toLocaleString()} matching events</h2></div><span>Page {page} of {pageCount}</span></header>
+      {loading ? <div className="live-audit-empty" role="status"><LoaderCircle size={18}/> Loading audit history…</div>
         : rows.length ? <div className="table-scroll"><table><thead><tr><th>TIME</th><th>ACTION</th><th>MODULE</th><th>COMPANY / BRANCH</th><th>ACTOR</th><th>RECORD</th><th/></tr></thead><tbody>{rows.map((row) => { const company = companies.find((item) => item.id === row.company_id); const branch = company?.branches.find((item) => item.id === row.branch_id); return <tr key={row.id}><td>{timestamp(row.occurred_at, preferences)}</td><td><strong>{row.action.replaceAll('_', ' ')}</strong></td><td>{row.module}</td><td>{company?.name ?? 'Portfolio event'}{branch ? <small>{branch.name}</small> : null}</td><td><span className="audit-actor-id">{row.actor_id}</span></td><td>{row.record_id}</td><td><button className="admin-link" onClick={() => setSelected(row)}>View details</button></td></tr> })}</tbody></table></div>
         : <div className="live-audit-empty"><Clock3 size={20}/><strong>No audit events found</strong><span>Try a wider date range or another company.</span></div>}
       <footer><span>Records are returned in reverse chronological order.</span><div><button className="button-secondary" disabled={page <= 1 || loading} onClick={() => { setLoading(true); setPage((value) => value - 1) }}><ChevronLeft size={14}/> Previous</button><button className="button-secondary" disabled={page >= pageCount || loading} onClick={() => { setLoading(true); setPage((value) => value + 1) }}>Next <ChevronRight size={14}/></button></div></footer>

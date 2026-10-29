@@ -10,7 +10,8 @@ const functionMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({ functions: functionMocks }) }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ companyAdmins: { ...mocks }, companyPayrollApprovers: { ...payrollApproverMocks }, companyPayrollPreparers: { ...payrollPreparerMocks }, portfolioUsers: { ...portfolioMocks } }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
-  useWorkspace: () => ({ companies: [{ id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }] }),
+  useWorkspace: () => ({ companies: [{ id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }], preferences: null }),
+  useCompanySelection: () => ({ companyId: 'company-demo', company: { id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }, setCompanyId: vi.fn() }),
   formatWorkspaceDate: (value: string | number | Date) => new Date(value).toLocaleDateString('en-GB'),
 }))
 
@@ -47,7 +48,7 @@ describe('LIVE company administrator management', () => {
     vi.spyOn(window, 'prompt').mockReturnValue('Synthetic access review')
     render(<LiveUserAdmin />)
     expect(await screen.findByText('demo@example.invalid')).toBeInTheDocument()
-    expect(screen.getByText(/Submitting the invitation form sends a real email/)).toBeInTheDocument()
+    expect(screen.getByText(/Invitations send a real email/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Remove access/ }))
     await waitFor(() => expect(mocks.revoke).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '77777777-7777-4777-8777-777777777777', 'Synthetic access review'))
   })

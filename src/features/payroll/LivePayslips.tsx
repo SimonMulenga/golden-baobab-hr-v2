@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord } from '../../services/live-business-services'
-import { formatWorkspaceDate, useWorkspace } from '../companies/WorkspaceContext'
+import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { buildPayslipView } from './payslip-model'
 import './live-payslips.css'
 
@@ -10,8 +10,8 @@ const money = (value: number) => `K${value.toLocaleString('en-ZM', { minimumFrac
 const period = (run: FinalizedPayslipRunRecord, preferences?: ReturnType<typeof useWorkspace>['preferences']) => formatWorkspaceDate(`${run.payroll_periods.period_start}T00:00:00Z`, preferences, { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
 export function LivePayslips() {
-  const { companies, activeCompanyId, preferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
+  const { companies, preferences } = useWorkspace()
+  const { companyId, setCompanyId } = useCompanySelection()
   const company = companies.find((item) => item.id === companyId)
   const [branchId, setBranchId] = useState('all')
   const [runs, setRuns] = useState<FinalizedPayslipRunRecord[]>([])
@@ -127,8 +127,8 @@ export function LivePayslips() {
       <label>Finalized payroll<select aria-label="Finalized payroll run" value={runId} onChange={(event) => { setLoadingItems(Boolean(event.target.value)); setItems([]); setEmployees([]); setRunId(event.target.value); setPage(1) }}><option value="">Select a finalized run</option>{runs.map((run) => <option value={run.id} key={run.id}>{period(run, preferences)} · {company?.branches.find((branch) => branch.id === run.branch_id)?.name ?? 'Branch'} · v{run.version}</option>)}</select></label>
       <label>Employee<select aria-label="Payslip employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} disabled={!items.length}><option value="">Select employee on this page</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.employee_number} · {employee.first_name} {employee.last_name}</option>)}</select></label>
     </section>
-    {loadingRuns || loadingItems ? <div className="panel live-payslip-state" role="status"><LoaderCircle size={18}/> Loading authorized finalized records…</div>
-      : !runs.length ? <div className="panel live-payslip-state"><FileText size={22}/><strong>No finalized payroll found</strong><span>Only payroll runs finalized in Supabase appear here.</span></div>
+    {loadingRuns || loadingItems ? <div className="panel live-payslip-state" role="status"><LoaderCircle size={18}/> Loading finalized records…</div>
+      : !runs.length ? <div className="panel live-payslip-state"><FileText size={22}/><strong>No finalized payroll found</strong><span>Only finalized payroll runs appear here.</span></div>
         : !model ? <div className="panel live-payslip-state"><FileText size={22}/><strong>Select an employee</strong><span>{total.toLocaleString()} finalized payslip records · 100 employees per page.</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div></div>
           : <>
             <div className="live-payslip-actions"><span>{total.toLocaleString()} employees in finalized {period(selectedRun!, preferences)} payroll · page {page}/{pageCount}</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button><button className="button-secondary" onClick={print}><Printer size={15}/> Print / save as PDF</button><button className="button-primary" disabled={artifactBusy} onClick={() => void issueSecurePdf()}>{artifactBusy ? <LoaderCircle size={15}/> : <FileText size={15}/>} Generate secure PDF</button></div></div>

@@ -46,7 +46,7 @@ describe('LIVE attendance workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
     await waitFor(() => expect(mocks.saveEntry).toHaveBeenCalledTimes(1))
     expect(mocks.saveEntry.mock.calls[0][0]).toMatchObject({ companyId: company.id, branchId: 'synthetic-branch', employeeId: employee.id, scheduledDays: 22, workedDays: 20, paidLeaveDays: 2, contractType: 'MONTHLY' })
-    expect(await screen.findByRole('status')).toHaveTextContent('saved to Supabase')
+    expect(await screen.findByRole('status')).toHaveTextContent('Monthly attendance entry saved')
   })
 
   it('submits a recorded period and lets a separate reviewer approve it', async () => {

@@ -10,9 +10,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => ({ catalog: mocks }) }))
-vi.mock('../companies/WorkspaceContext', () => ({ useWorkspace: () => ({
-  companies: [{ id: 'company-qa', name: 'Synthetic QA Ltd', status: 'Active', branches: [] }], activeCompanyId: 'company-qa',
-}) }))
+vi.mock('../companies/WorkspaceContext', () => ({
+  useWorkspace: () => ({ companies: [{ id: 'company-qa', name: 'Synthetic QA Ltd', status: 'Active', branches: [] }], activeCompanyId: 'company-qa' }),
+  useCompanySelection: () => ({ companyId: 'company-qa', company: { id: 'company-qa', name: 'Synthetic QA Ltd', status: 'Active', branches: [] }, setCompanyId: vi.fn() }),
+}))
 
 import { LiveHrCatalog } from './LiveHrCatalog'
 

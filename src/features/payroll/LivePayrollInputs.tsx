@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, CircleDollarSign, Download, FileCheck2, RefreshCw, Send } from 'lucide-react'
-import { formatWorkspaceDate, formatWorkspaceDateTime, useWorkspace } from '../companies/WorkspaceContext'
+import { formatWorkspaceDate, formatWorkspaceDateTime, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type PayrollCalculationHistoryEntry, type PayrollCalculationSnapshot, type PayrollEarningInputRecord, type PayrollPreviewInputs, type PayrollPayoutInstructions, type PayrollRunRecord, type PayrollReviewAction, type PayrollPreviewItem } from '../../services/live-business-services'
 import '../employees/employee-screens.css'
@@ -22,9 +22,8 @@ const csvCell = (value: unknown) => {
 }
 
 export function LivePayrollInputs() {
-  const { companies, activeCompanyId, preferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
-  const company = companies.find((item) => item.id === companyId)
+  const { companies, preferences } = useWorkspace()
+  const { companyId, company, setCompanyId } = useCompanySelection()
   const [branchId, setBranchId] = useState(company?.branches[0]?.id ?? '')
   const [month, setMonth] = useState(currentMonth)
   const [inputs, setInputs] = useState<PayrollPreviewInputs | null>(null)
@@ -58,6 +57,11 @@ export function LivePayrollInputs() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
+  useEffect(() => {
+    if (company?.branches.some((item) => item.id === branchId)) return
+    setBranchId(company?.branches[0]?.id ?? '')
+  }, [companyId, company, branchId])
+
   const services = () => createLiveBusinessServices(getSupabaseClient())
   const refreshRuns = async () => {
     if (!companyId || !branchId) return
@@ -78,7 +82,7 @@ export function LivePayrollInputs() {
       setCalculation((selected.calculations?.status === 'CALCULATED' ? selected.calculations : null) as PayrollCalculationSnapshot | null)
       setHistory(await api.payroll.listCalculationHistory(id))
     } catch {
-      setError('Payroll run details could not be loaded. The database did not provide an authorized run record.')
+      setError('Payroll run details could not be loaded. Check your access and try again.')
     }
   }
   const load = async () => {
@@ -160,7 +164,7 @@ export function LivePayrollInputs() {
       const id = await services().payroll.createDraft({ companyId, branchId, periodStart: monthStart(month), periodEnd: monthEnd(month), frequency: 'MONTHLY', idempotencyKey: crypto.randomUUID() })
       await refreshRuns()
       await selectRun(id)
-      setNotice('Draft payroll run is stored in Supabase. Calculate it to persist employee-level payroll lines.')
+      setNotice('Payroll draft saved. Calculate it to create the employee payroll lines.')
     } catch {
       setError('Draft payroll was not created. Confirm payroll preparation access and check for an existing run for these dates.')
     } finally { setCreating(false) }

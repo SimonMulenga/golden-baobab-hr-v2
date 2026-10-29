@@ -46,3 +46,11 @@ export function useWorkspace() {
   return context
 }
 
+export function useCompanySelection() {
+  const { companies, activeCompanyId, setActiveCompany } = useWorkspace()
+  const companyId = activeCompanyId === 'all' ? '' : activeCompanyId
+  const company = companies.find((item) => item.id === companyId)
+  const setCompanyId = (nextId: string) => setActiveCompany(nextId || 'all')
+  return { companyId, company, setCompanyId }
+}
+

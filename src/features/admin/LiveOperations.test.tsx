@@ -33,6 +33,6 @@ describe('LIVE operations settings and notifications', () => {
     fireEvent.change(screen.getByLabelText('Planned payroll cut-off day'), { target: { value: '20' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save company settings' }))
     await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ companyId: company.id, timezone: 'UTC', dateFormat: 'DD/MM/YYYY', currencyCode: 'ZMW', payrollCutoffDay: 20 })))
-    expect(await screen.findByRole('status')).toHaveTextContent('Company workspace defaults saved')
+    expect(await screen.findByRole('status')).toHaveTextContent('Company settings saved')
   })
 })

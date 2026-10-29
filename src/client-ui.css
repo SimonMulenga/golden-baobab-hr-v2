@@ -1,0 +1,349 @@
+:root {
+  --ui-body: 15px;
+  --ui-small: 13px;
+  --ui-label: 15px;
+  --ui-heading: 28px;
+  --ui-section: 20px;
+  --ui-kpi: 32px;
+}
+
+body {
+  min-width: 320px;
+  overflow-x: hidden;
+  font-size: var(--ui-body);
+  line-height: 1.5;
+}
+
+.app-shell,
+.app-shell button,
+.app-shell input,
+.app-shell select,
+.app-shell textarea {
+  font-family: 'DM Sans', sans-serif;
+}
+
+.app-shell {
+  font-size: var(--ui-body);
+  line-height: 1.5;
+}
+
+.app-shell main,
+.app-shell aside {
+  min-width: 0;
+}
+
+.app-shell p {
+  font-size: var(--ui-body);
+  line-height: 1.55;
+}
+
+.app-shell small,
+.app-shell .nav-count,
+.app-shell .trend,
+.app-shell .eyebrow,
+.app-shell .section-eyebrow,
+.app-shell .date-tag,
+.app-shell kbd {
+  font-size: var(--ui-small);
+  line-height: 1.4;
+}
+
+.app-shell .nav-label {
+  padding-bottom: 8px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.app-shell .nav-link {
+  min-height: 42px;
+  height: auto;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.app-shell .workspace-copy strong,
+.app-shell .profile-copy strong {
+  font-size: 14px;
+}
+
+.app-shell .workspace-copy span,
+.app-shell .profile-copy span,
+.app-shell .help-card span {
+  font-size: 13px;
+}
+
+.app-shell .breadcrumb {
+  font-size: 13px;
+}
+
+.app-shell .company-switch select {
+  font-size: 14px;
+}
+
+.app-shell .page-content {
+  padding: 32px clamp(20px, 3vw, 48px) 22px;
+}
+
+.app-shell .welcome-row h1,
+.app-shell .page-heading h1,
+.app-shell .employee-screen h1,
+.app-shell .peopleops-screen h1,
+.app-shell .payroll-screen h1,
+.app-shell .company-screen h1 {
+  font-size: var(--ui-heading);
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+}
+
+.app-shell .welcome-row p,
+.app-shell .page-heading p {
+  margin-top: 9px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.app-shell h2,
+.app-shell .panel-heading h2,
+.app-shell .ops-dialog h2,
+.app-shell .entity-modal h2,
+.app-shell .payroll-dialog h2 {
+  font-size: var(--ui-section);
+  line-height: 1.3;
+}
+
+.app-shell label,
+.app-shell .field-label,
+.app-shell .live-onboarding-field > span {
+  font-size: var(--ui-label);
+  line-height: 1.4;
+}
+
+.app-shell main input:not([type='checkbox']):not([type='radio']),
+.app-shell main select,
+.app-shell main textarea {
+  min-height: 42px;
+  padding: 9px 11px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.app-shell main textarea {
+  min-height: 92px;
+}
+
+.app-shell main button:not(.icon-button):not(.metric-more),
+.app-shell main .button-primary,
+.app-shell main .button-secondary {
+  min-height: 42px;
+  font-size: 14px;
+}
+
+.app-shell .metric-label {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.app-shell .metric-value {
+  font-size: var(--ui-kpi);
+  line-height: 1.15;
+  letter-spacing: -0.7px;
+}
+
+.app-shell .metric-bottom,
+.app-shell .summary-caption,
+.app-shell .metric-card small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-shell table th,
+.app-shell table td {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.app-shell table th {
+  letter-spacing: 0.025em;
+}
+
+.app-shell .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.app-shell .empty-state,
+.app-shell .ops-empty,
+.app-shell .live-notification-empty {
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.app-shell .empty-state h2,
+.app-shell .ops-empty strong {
+  margin-bottom: 8px;
+}
+
+.app-shell .ops-dialog,
+.app-shell .payroll-dialog,
+.app-shell .entity-modal,
+.app-shell .admin-dialog,
+.app-shell .leave-request-history {
+  width: min(92vw, 820px);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.app-shell :focus-visible {
+  outline: 3px solid #2b8b7d;
+  outline-offset: 2px;
+}
+
+.app-shell .live-error,
+.app-shell .live-notice,
+.app-shell .auth-shell-error,
+.app-shell .live-data-notice {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .app-shell .page-content {
+    padding: 28px 24px 20px;
+  }
+
+  .app-shell .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell .page-content {
+    padding: 22px 16px 18px;
+  }
+
+  .app-shell .topbar {
+    min-height: 60px;
+    height: auto;
+    padding: 8px 12px;
+  }
+
+  .app-shell .breadcrumb {
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  .app-shell .breadcrumb > span,
+  .app-shell .breadcrumb > svg {
+    display: none;
+  }
+
+  .app-shell .top-actions {
+    gap: 4px;
+  }
+
+  .app-shell .company-switch {
+    width: min(36vw, 150px);
+    min-width: 110px;
+    height: 40px;
+    padding: 0 7px;
+    border: 1px solid var(--border);
+  }
+
+  .app-shell .company-switch select {
+    position: static;
+    width: 100%;
+    height: 38px;
+    min-width: 0;
+    opacity: 1;
+    font-size: 13px;
+  }
+
+  .app-shell .company-switch > svg:last-child,
+  .app-shell .search-trigger {
+    display: none;
+  }
+
+  .app-shell .welcome-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .app-shell .welcome-row h1,
+  .app-shell .page-heading h1,
+  .app-shell .employee-screen h1,
+  .app-shell .peopleops-screen h1,
+  .app-shell .payroll-screen h1,
+  .app-shell .company-screen h1 {
+    font-size: 26px;
+  }
+
+  .app-shell .welcome-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .app-shell .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .app-shell .metric-card {
+    min-width: 0;
+    padding: 14px;
+  }
+
+  .app-shell .metric-value {
+    font-size: 28px;
+  }
+
+  .app-shell .app-footer {
+    margin-inline: 16px;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-block: 10px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-shell .page-content {
+    padding-inline: 12px;
+  }
+
+  .app-shell .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell .metric-card {
+    min-height: 0;
+  }
+
+  .app-shell .company-switch {
+    width: 122px;
+    min-width: 100px;
+  }
+
+  .app-shell .top-avatar {
+    display: none;
+  }
+
+  .app-shell .auth-signout {
+    padding-inline: 7px;
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

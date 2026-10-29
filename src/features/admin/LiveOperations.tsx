@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, ChevronLeft, ChevronRight, Clock3, Settings2, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useWorkspace, type WorkspacePreferences } from '../companies/WorkspaceContext'
+import { useCompanySelection, useWorkspace, type WorkspacePreferences } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveOperationsServices, type UserNotificationRecord, type WorkspaceSettingsRecord } from '../../services/live-operations-services'
 import './live-operations.css'
@@ -41,7 +41,7 @@ export function LiveNotifications() {
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-notice" role="status">{notice}</p>}
     <div className="live-notification-tabs"><button className={!unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(false) }}>All</button><button className={unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(true) }}>Unread ({unreadTotal})</button></div>
     <section className="panel live-notification-list" aria-label="Notifications">
-      {loading ? <div className="live-notification-empty" role="status">Loading your notifications…</div> : items.length ? items.map((item) => <article className={item.read_at ? '' : 'unread'} key={item.id}><span className="live-notification-icon"><Bell size={17}/></span><div className="live-notification-copy"><strong>{item.title}</strong><p>{item.message}</p><small><Clock3 size={12}/> {new Date(item.created_at).toLocaleString()} · {item.source_type}</small></div><div className="live-notification-actions"><Link className="button-secondary" to={routeFor(item)}>Open</Link><button className="button-secondary" disabled={busyId === item.id} onClick={() => void setRead(item, !item.read_at)}>{item.read_at ? 'Mark unread' : 'Mark read'}</button></div></article>) : <div className="live-notification-empty"><Bell size={22}/><strong>{unreadOnly ? 'No unread notifications' : 'No workflow updates yet'}</strong><span>Updates appear when another authorized user changes a workflow you started.</span></div>}
+      {loading ? <div className="live-notification-empty" role="status">Loading your notifications…</div> : items.length ? items.map((item) => <article className={item.read_at ? '' : 'unread'} key={item.id}><span className="live-notification-icon"><Bell size={17}/></span><div className="live-notification-copy"><strong>{item.title}</strong><p>{item.message}</p><small><Clock3 size={12}/> {new Date(item.created_at).toLocaleString()} · {item.source_type}</small></div><div className="live-notification-actions"><Link className="button-secondary" to={routeFor(item)}>Open</Link><button className="button-secondary" disabled={busyId === item.id} onClick={() => void setRead(item, !item.read_at)}>{item.read_at ? 'Mark unread' : 'Mark read'}</button></div></article>) : <div className="live-notification-empty"><Bell size={22}/><strong>{unreadOnly ? 'No unread notifications' : 'No workflow updates yet'}</strong><span>Updates appear when a workflow you started changes.</span></div>}
       <footer><span>Page {page} of {pageCount} · {total} notifications</span><div><button className="button-secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={14}/> Previous</button><button className="button-secondary" disabled={page >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={14}/></button></div></footer>
     </section>
   </div>
@@ -49,8 +49,8 @@ export function LiveNotifications() {
 
 const defaultSettings: Omit<WorkspaceSettingsRecord,'portfolio_id'|'company_id'|'updated_by'|'updated_at'> = { timezone: 'Africa/Lusaka', date_format: 'DD/MM/YYYY', currency_code: 'ZMW', payroll_cutoff_day: 25 }
 export function LiveSettings() {
-  const { companies, activeCompanyId, setActiveCompany, setPreferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
+  const { companies, setPreferences } = useWorkspace()
+  const { companyId, setCompanyId } = useCompanySelection()
   const [settings, setSettings] = useState(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -68,18 +68,17 @@ export function LiveSettings() {
     event.preventDefault(); setBusy(true); setError(''); setNotice('')
     try {
       await createLiveOperationsServices(getSupabaseClient()).settings.save({ companyId, timezone: settings.timezone, dateFormat: settings.date_format, currencyCode: settings.currency_code, payrollCutoffDay: Number(settings.payroll_cutoff_day) })
-      setActiveCompany(companyId)
       setPreferences?.(companyId, settings as WorkspacePreferences)
-      setNotice('Company workspace defaults saved and audit logged.')
+      setNotice('Company settings saved.')
     } catch { setError('Settings were not saved. Confirm company administrator access and valid values.') }
     finally { setBusy(false) }
   }
   return <div className="live-operations-screen">
-    <header className="page-heading"><div><div className="eyebrow">COMPANY CONFIGURATION</div><h1>Workspace settings</h1><p>Manage company-level regional defaults and the planned payroll cut-off.</p></div></header>
-    <div className="live-data-notice"><ShieldCheck size={15}/> Settings are company-scoped and audit logged. Time zone and date format are stored as defaults; global date rendering is not yet driven by them. The cut-off day is informational and does not block payroll.</div>
+    <header className="page-heading"><div><div className="eyebrow">COMPANY CONFIGURATION</div><h1>Workspace settings</h1><p>Manage regional defaults and the planned payroll cut-off for a company.</p></div></header>
+    <div className="live-data-notice"><ShieldCheck size={15}/> The planned cut-off date is a reminder and does not authorize or block payroll.</div>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-notice" role="status">{notice}</p>}
-    <section className="panel live-settings-panel"><label>Company<select aria-label="Settings company" value={companyId} onChange={(event) => setCompanyId(event.target.value)}><option value="">Select company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      {loading ? <p role="status">Loading authorized settings…</p> : !companyId ? <p>Select a company to view its settings.</p> : <form onSubmit={(event) => void save(event)}>
+    <section className="panel live-settings-panel"><label>Company<select aria-label="Settings company" value={companyId} onChange={(event) => setCompanyId(event.target.value)}><option value="">Choose a company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      {loading ? <p role="status">Loading settings…</p> : !companyId ? <p>Choose a company to view its settings.</p> : <form onSubmit={(event) => void save(event)}>
         <label>Time zone<select required value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })}>{['Africa/Lusaka','Africa/Harare','Africa/Johannesburg','UTC'].map((zone) => <option key={zone}>{zone}</option>)}</select></label>
         <label>Date format<select value={settings.date_format} onChange={(event) => setSettings({ ...settings, date_format: event.target.value as WorkspaceSettingsRecord['date_format'] })}><option value="DD/MM/YYYY">DD/MM/YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></label>
         <label>Currency<input value="ZMW · Zambian Kwacha" readOnly aria-label="Currency"/></label>

@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Download, FileBarChart2, LoaderCircle, Print
 import * as XLSX from '@e965/xlsx'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord } from '../../services/live-business-services'
-import { formatWorkspaceDate, useWorkspace } from '../companies/WorkspaceContext'
+import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import './live-payroll-reports.css'
 
 type ReportMode = 'payroll' | 'statutory'
@@ -13,12 +13,11 @@ const monthLabel = (run: FinalizedPayslipRunRecord, preferences?: ReturnType<typ
 const safeCsv = (value: unknown) => { let text = String(value ?? ''); if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`; return `"${text.replaceAll('"', '""')}"` }
 
 export function LivePayrollReports({ mode = 'payroll' }: { mode?: ReportMode }) {
-  const { companies, activeCompanyId, preferences } = useWorkspace()
-  const [companyId, setCompanyId] = useState(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
+  const { companies, preferences } = useWorkspace()
+  const { companyId, setCompanyId } = useCompanySelection()
   useEffect(() => {
-    setCompanyId(activeCompanyId === 'all' ? companies[0]?.id ?? '' : activeCompanyId)
     setBranchId('all'); setRunId(''); setPage(1); setRuns([]); setItems([]); setTotal(0)
-  }, [activeCompanyId, companies])
+  }, [companyId])
   const company = companies.find((item) => item.id === companyId)
   const [branchId, setBranchId] = useState('all')
   const [runs, setRuns] = useState<FinalizedPayslipRunRecord[]>([])
@@ -117,7 +116,7 @@ export function LivePayrollReports({ mode = 'payroll' }: { mode?: ReportMode }) 
 
   return <div className="live-payroll-reports">
     <header className="page-heading"><div><div className="eyebrow">FINALIZED RECORDS · {statutoryMode ? 'STATUTORY SUMMARY' : 'PAYROLL REPORTING'}</div><h1>{statutoryMode ? 'Statutory summaries' : 'Payroll reports'}</h1><p>{statutoryMode ? 'Employee and employer contribution totals from finalized payroll.' : 'Payroll register and employer cost reports from finalized payroll.'}</p></div></header>
-    <div className="live-data-notice"><ShieldCheck size={15}/> Reports read persisted finalized payroll versions under database permissions. Calculations are not repeated, and these reports are not filings with ZRA, NAPSA or NHIMA.</div>
+    <div className="live-data-notice"><ShieldCheck size={15}/> Reports use finalized payroll records. They are not filings with ZRA, NAPSA or NHIMA.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="live-report-notice" role="status">{notice}</div>}
     {!companies.length && <div className="panel live-report-state">No authorized companies are available for reporting.</div>}
     <section className="panel live-report-filters" aria-label="Report filters">

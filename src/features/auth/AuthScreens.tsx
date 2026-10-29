@@ -46,7 +46,6 @@ export function LiveLoginScreen() {
       <button className="button-primary" disabled={submitting}>{submitting ? 'Signing inâ€¦' : 'Sign in securely'}</button>
     </form>
     <Link to="/auth/forgot">Forgot password?</Link>
-    <div className="auth-demo-note">Company, branch, employee, deduction, attendance, and leave workflows use LIVE Supabase data. Payroll currently supports input previews and draft creation only; calculation, approval, finalization, and reports are not available.</div>
   </AuthFrame>
 }
 

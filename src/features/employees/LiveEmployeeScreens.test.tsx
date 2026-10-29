@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
 const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
-const workspaceMocks = vi.hoisted(() => ({ companies: [] as unknown[] }))
+const workspaceMocks = vi.hoisted(() => ({ companies: [] as unknown[], activeCompanyId: 'company-synthetic', setActiveCompany: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({
   createLiveBusinessServices: () => ({ employees: serviceMocks }),
@@ -14,7 +14,8 @@ vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => 
   jobRoles: vi.fn().mockResolvedValue([{ id: 'job-role-1', department_id: 'department-1', title: 'Analyst', status: 'ACTIVE' }]),
 } }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
-  useWorkspace: () => ({ companies: workspaceMocks.companies }),
+  useWorkspace: () => ({ companies: workspaceMocks.companies, activeCompanyId: workspaceMocks.activeCompanyId, setActiveCompany: workspaceMocks.setActiveCompany }),
+  useCompanySelection: () => ({ companyId: workspaceMocks.activeCompanyId, company: (workspaceMocks.companies as { id: string }[]).find((item) => item.id === workspaceMocks.activeCompanyId), setCompanyId: vi.fn() }),
   formatWorkspaceDate: (value: string | number | Date) => new Date(value).toLocaleDateString('en-GB'),
   formatWorkspaceDateTime: (value: string | number | Date) => new Date(value).toLocaleString('en-GB'),
 }))
@@ -165,7 +166,7 @@ describe('LIVE employee screens', () => {
     renderProfileRoute()
     expect(await screen.findByRole('heading', { name: 'Demo Employee' })).toBeInTheDocument()
     expect(screen.getByText('SUBMITTED')).toBeInTheDocument()
-    expect(screen.getByText(/Private identifiers, banking details and compensation are intentionally excluded/)).toBeInTheDocument()
+    expect(screen.getByText(/Private identifiers, banking details and compensation are available only in their designated secure workflows/)).toBeInTheDocument()
     expect(screen.queryByText(/SYN-ACCT/)).not.toBeInTheDocument()
     expect(serviceMocks.byId).toHaveBeenCalledWith('employee-synthetic-1')
     expect(serviceMocks.history).toHaveBeenCalledWith('employee-synthetic-1')
