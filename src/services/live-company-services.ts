@@ -35,6 +35,26 @@ function mapCompany(row: CompanyRow): Company {
   }
 }
 
+async function withEmployeeCounts(client: SupabaseClient, row: CompanyRow): Promise<Company> {
+  const count = async (branchId?: string) => {
+    let query = client.from('employees').select('id', { count: 'exact', head: true })
+      .eq('company_id', row.id).eq('approval_status', 'APPROVED').eq('employment_status', 'ACTIVE')
+    if (branchId) query = query.eq('workplace_branch_id', branchId)
+    const result = await query
+    if (result.error) throw result.error
+    return result.count ?? 0
+  }
+  const mapped = mapCompany(row)
+  const [companyCount, ...branchCounts] = await Promise.all([
+    count(), ...mapped.branches.map((branch) => count(branch.id)),
+  ])
+  return {
+    ...mapped,
+    employeeCount: companyCount,
+    branches: mapped.branches.map((branch, index) => ({ ...branch, employeeCount: branchCounts[index] ?? 0 })),
+  }
+}
+
 export function createLiveCompanyServices(client: SupabaseClient, userId: string) {
   const fields = 'id,portfolio_id,name,registration_number,tpin,industry,business_email,phone,province,town,physical_address,contact_person,status,created_at,branches(id,name,code,province,town,physical_address,manager_name,contact_phone,status)'
 
@@ -42,7 +62,7 @@ export function createLiveCompanyServices(client: SupabaseClient, userId: string
     async list(): Promise<Company[]> {
       const { data, error } = await client.from('companies').select(fields).order('name')
       if (error) throw error
-      return ((data ?? []) as unknown as CompanyRow[]).map(mapCompany)
+      return Promise.all(((data ?? []) as unknown as CompanyRow[]).map((row) => withEmployeeCounts(client, row)))
     },
 
     async save(company: Company, previous?: Company): Promise<Company> {
@@ -62,47 +82,32 @@ export function createLiveCompanyServices(client: SupabaseClient, userId: string
         province: company.province, town: company.town, physical_address: company.address,
         contact_person: company.contactPerson, status: toDbStatus(company.status),
       }
-      let companyId = company.id
-      if (previous) {
-        const { data, error } = await client.from('companies').update(values).eq('id', company.id).select('id').single()
-        if (error) throw error
-        companyId = data.id
-      } else {
-        const { data, error } = await client.from('companies').insert(values).select('id').single()
-        if (error) throw error
-        companyId = data.id
-      }
-
       const oldBranches = previous?.branches ?? []
-      for (const branch of company.branches) {
-        const branchValues = {
-          portfolio_id: portfolioId, company_id: companyId, name: branch.name, code: branch.code,
-          province: branch.province, town: branch.town, physical_address: branch.address,
-          manager_name: branch.manager || null, contact_phone: branch.phone || null, status: toDbStatus(branch.status),
-        }
-        if (oldBranches.some((old) => old.id === branch.id)) {
-          const { error } = await client.from('branches').update(branchValues).eq('id', branch.id).eq('company_id', companyId)
-          if (error) throw error
-        } else {
-          const { error } = await client.from('branches').insert(branchValues)
-          if (error) throw error
-        }
-      }
       const currentIds = new Set(company.branches.map((branch) => branch.id))
-      for (const branch of oldBranches) {
-        if (!currentIds.has(branch.id)) {
-          const { error } = await client.from('branches').update({ status: 'INACTIVE' }).eq('id', branch.id).eq('company_id', companyId)
-          if (error) throw error
-        }
-      }
-
+      const branches = company.branches.map((branch) => ({
+        id: oldBranches.some((old) => old.id === branch.id) ? branch.id : null,
+        name: branch.name, code: branch.code, province: branch.province, town: branch.town,
+        physical_address: branch.address, manager_name: branch.manager || null,
+        contact_phone: branch.phone || null, status: toDbStatus(branch.status),
+      }))
+      const deactivatedIds = oldBranches.filter((branch) => !currentIds.has(branch.id)).map((branch) => branch.id)
+      const saved = await client.rpc('company_workspace_save', {
+        p_portfolio_id: portfolioId,
+        p_company_id: previous ? company.id : null,
+        p_company: values,
+        p_branches: branches,
+        p_deactivate_branch_ids: deactivatedIds,
+      })
+      if (saved.error) throw saved.error
+      if (typeof saved.data !== 'string') throw new Error('The atomic company save returned no company ID.')
+      const companyId = saved.data
       const { data, error } = await client.from('companies').select(fields).eq('id', companyId).single()
       if (error) throw error
-      return mapCompany(data as unknown as CompanyRow)
+      return withEmployeeCounts(client, data as unknown as CompanyRow)
     },
 
     async deactivate(companyId: string): Promise<void> {
-      const { error } = await client.from('companies').update({ status: 'INACTIVE' }).eq('id', companyId)
+      const { error } = await client.rpc('company_set_status', { p_company_id: companyId, p_status: 'INACTIVE' })
       if (error) throw error
     },
   }

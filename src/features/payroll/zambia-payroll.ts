@@ -1,57 +1,94 @@
+/** Development display helper. The trusted PostgreSQL RPC is authoritative. */
 export type ZambiaPayrollBreakdown = {
-  grossCents: number; taxablePayCents: number; payeCents: number; napsaEmployeeCents: number
-  napsaEmployerCents: number; nhimaEmployeeCents: number; nhimaEmployerCents: number
-  totalEmployeeDeductionsCents: number; netPayCents: number; employerContributionCents: number
-  warnings: string[]; productionFinalizationAllowed: false
+  grossCents: number
+  taxablePayCents: number
+  payeCents: number
+  napsaEmployeeCents: number
+  napsaEmployerCents: number
+  nhimaEmployeeCents: number
+  nhimaEmployerCents: number
+  otherDeductionsCents: number
+  totalEmployeeDeductionsCents: number
+  netPayCents: number
+  employerContributionCents: number
+  employerCostCents: number
+  warnings: string[]
+  productionFinalizationAllowed: false
 }
 
-const percent = (baseCents: number, rate: number) => Math.round(baseCents * rate)
+// All inputs and intermediate percentages use integer cents/BigInt. PostgreSQL
+// NUMERIC is authoritative in LIVE mode and uses the same half-away-from-zero rule.
+const percent = (cents: number, basisPoints: bigint) => {
+  const numerator = BigInt(cents) * basisPoints
+  return Number((numerator + 5_000n) / 10_000n)
+}
 
-/** Illustrative 2026 Zambia payroll preview. The provided PAYE bands are progressive.
- * The statutory bases and exemptions listed in warnings are deliberately unverified.
- */
-export function calculateZambiaIllustrativePayroll(input: { basicCents: number; taxableAllowanceCents: number; napsaBaseCents?: number; nhimaEmployeeBaseCents?: number; nhimaEmployerBaseCents?: number }): ZambiaPayrollBreakdown {
+export type ZambiaPayrollInput = {
+  basicCents: number
+  taxableAllowanceCents?: number
+  nonTaxableAllowanceCents?: number
+  napsaBaseCents?: number
+  nhimaEmployeeBaseCents?: number
+  nhimaEmployerBaseCents?: number
+  otherDeductionsCents?: number
+}
+
+/** Computes the owner-approved 2026 ordinary monthly configuration for UI examples. */
+export function calculateZambiaIllustrativePayroll(input: ZambiaPayrollInput): ZambiaPayrollBreakdown {
   for (const [name, value] of Object.entries(input)) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`${name} must be non-negative integer cents.`)
   }
-  const grossCents = input.basicCents + input.taxableAllowanceCents
+  const taxableAllowances = input.taxableAllowanceCents ?? 0
+  const nonTaxableAllowances = input.nonTaxableAllowanceCents ?? 0
+  const grossCents = input.basicCents + taxableAllowances + nonTaxableAllowances
   if (!Number.isSafeInteger(grossCents)) throw new Error('Gross pay exceeds the supported integer range.')
-  const taxablePayCents = grossCents
-  const bands = [
-    { limit: 510_000, rate: 0 },
-    { limit: 710_000, rate: 0.2 },
-    { limit: 920_000, rate: 0.3 },
-    { limit: Number.POSITIVE_INFINITY, rate: 0.37 },
-  ]
-  let previous = 510_000
+  const taxablePayCents = input.basicCents + taxableAllowances
+  const limits = [510_000, 710_000, 920_000]
+  const rates = [0n, 2_000n, 3_000n, 3_700n]
+  let lower = 0
   let payeCents = 0
-  for (const band of bands.slice(1)) {
-    const bandAmount = Math.max(0, Math.min(taxablePayCents, band.limit) - previous)
-    payeCents += percent(bandAmount, band.rate)
-    previous = band.limit
+  for (let index = 0; index < rates.length; index += 1) {
+    const upper = limits[index] ?? Number.POSITIVE_INFINITY
+    const slice = Math.max(0, Math.min(taxablePayCents, upper) - lower)
+    payeCents += percent(slice, rates[index])
+    lower = upper
   }
   const napsaBase = input.napsaBaseCents ?? grossCents
+  const napsaRaw = percent(napsaBase, 500n)
+  const napsaEmployeeCents = Math.min(napsaRaw, 186_180)
+  const napsaEmployerCents = Math.min(napsaRaw, 186_180)
   const nhimaEmployeeBase = input.nhimaEmployeeBaseCents ?? input.basicCents
   const nhimaEmployerBase = input.nhimaEmployerBaseCents ?? input.basicCents
-  const napsaEmployeeCents = percent(napsaBase, 0.05)
-  const napsaEmployerCents = percent(napsaBase, 0.05)
-  const nhimaEmployeeCents = percent(nhimaEmployeeBase, 0.01)
-  const nhimaEmployerCents = percent(nhimaEmployerBase, 0.01)
-  const totalEmployeeDeductionsCents = payeCents + napsaEmployeeCents + nhimaEmployeeCents
+  const nhimaEmployeeCents = percent(nhimaEmployeeBase, 100n)
+  const nhimaEmployerCents = percent(nhimaEmployerBase, 100n)
+  const otherDeductionsCents = input.otherDeductionsCents ?? 0
+  const totalEmployeeDeductionsCents = payeCents + napsaEmployeeCents + nhimaEmployeeCents + otherDeductionsCents
+  const netPayCents = grossCents - totalEmployeeDeductionsCents
+  if (netPayCents < 0) throw new Error('Approved deductions exceed gross pay; negative net pay is not allowed.')
+  const employerContributionCents = napsaEmployerCents + nhimaEmployerCents
   return {
-    grossCents, taxablePayCents, payeCents, napsaEmployeeCents, napsaEmployerCents, nhimaEmployeeCents, nhimaEmployerCents,
-    totalEmployeeDeductionsCents, netPayCents: Math.max(0, grossCents - totalEmployeeDeductionsCents),
-    employerContributionCents: napsaEmployerCents + nhimaEmployerCents,
-    warnings: ['Illustrative only. Confirm taxable emoluments, NAPSA and NHIMA bases/caps/exemptions, employee coverage, and effective dates against current authoritative rules.'],
+    grossCents,
+    taxablePayCents,
+    payeCents,
+    napsaEmployeeCents,
+    napsaEmployerCents,
+    nhimaEmployeeCents,
+    nhimaEmployerCents,
+    otherDeductionsCents,
+    totalEmployeeDeductionsCents,
+    netPayCents,
+    employerContributionCents,
+    employerCostCents: grossCents + employerContributionCents,
+    warnings: ['UI example only; the trusted Supabase PostgreSQL payroll RPC is authoritative.'],
     productionFinalizationAllowed: false,
   }
 }
 
 export const zambiaPayrollFormulaNotes = {
-  napsa: 'Proposed illustration: employee 5% and employer 5% of a configured contribution base; cap, exclusions, and eligibility must be confirmed for the applicable effective date.',
-  nhima: 'Requested illustration: employee 1% and employer 1%; the applicable base differs between published NHIMA material and requires confirmation before activation.',
-  gratuity: 'Proposed contract rule: 25% of basic pay earned over an eligible long-term contract, prorated at termination where applicable; eligibility and interaction with other benefits require legal review.',
-  overtime: 'Proposed statutory reference: 1.5× hourly basic rate for qualifying hours above ordinary limits; 2× for qualifying public holiday/rest-day work. Confirm employee coverage, normal hours, divisor, and contract terms.',
-  annualLeave: 'Illustrative Employment Code formula: full pay × accrued leave days ÷ 26; confirm applicability and payroll treatment for each leave/payment case.',
+  paye: 'Progressive monthly 2026 bands on taxable gross earnings; employee NAPSA/NHIMA are not subtracted before PAYE.',
+  napsa: 'Employee and employer 5% each on gross monthly earnings, each capped at K1,861.80 for 2026.',
+  nhima: 'Employee and employer 1% each on basic salary only, with no configured ceiling.',
+  gratuity: 'Not included in ordinary monthly payroll without applicable contract and verified event rules.',
+  overtime: 'Requires approved overtime inputs and applicable employee/contract rule; unsupported records block live calculation.',
+  leave: 'Approved paid leave preserves salary; unpaid leave requires an applicable verified formula and blocks calculation while absent.',
 } as const
-

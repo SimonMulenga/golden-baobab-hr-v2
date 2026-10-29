@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { WorkspaceContext } from './WorkspaceContext'
 import type { WorkspaceData } from './WorkspaceContext'
 import { mockCompanies } from './mockData'
-import { CompanyDirectory, CompanyForm, CompanyProfile } from './CompanyScreens'
+import { BranchManagement, CompanyDirectory, CompanyForm, CompanyProfile } from './CompanyScreens'
 import type { Company } from './types'
 
 function renderWorkspace(path: string, overrides: Partial<WorkspaceData> = {}) {
@@ -28,6 +28,7 @@ function renderWorkspace(path: string, overrides: Partial<WorkspaceData> = {}) {
             <Route path="/companies" element={<CompanyDirectory />} />
             <Route path="/companies/new" element={<CompanyForm mode="create" />} />
             <Route path="/companies/:companyId" element={<CompanyProfile />} />
+            <Route path="/branches" element={<BranchManagement />} />
             <Route path="*" element={<div>Mock workspace route</div>} />
           </Routes>
         </MemoryRouter>
@@ -64,6 +65,18 @@ describe('company-first company screens', () => {
     expect(created.branches).toEqual([])
   })
 
+  it('waits for company deactivation to succeed before leaving the profile', async () => {
+    const company = mockCompanies[0]
+    const deleteCompany = vi.fn().mockResolvedValue(undefined)
+    renderWorkspace(`/companies/${company.id}`, { companies: [company], deleteCompany })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate company' }))
+
+    await waitFor(() => expect(deleteCompany).toHaveBeenCalledWith(company.id))
+    expect(await screen.findByRole('heading', { name: 'Companies' })).toBeInTheDocument()
+  })
+
   it('switches the visible company in the directory according to active mock selection', () => {
     const companies = mockCompanies.slice(0, 2)
     renderWorkspace('/companies', { companies, activeCompanyId: companies[1].id })
@@ -91,6 +104,21 @@ describe('company-first company screens', () => {
     const updated = vi.mocked(saveCompany).mock.calls[0][0] as Company
     expect(updated.id).toBe(company.id)
     expect(updated.branches.at(-1)?.name).toBe('Demo Branch')
+  })
+
+  it('deactivates a branch through the workspace save path and retains its records', async () => {
+    const company = mockCompanies[0]
+    const branch = company.branches[0]
+    const saveCompany = vi.fn().mockResolvedValue(undefined)
+    renderWorkspace('/branches', { companies: [company], saveCompany })
+
+    fireEvent.click(screen.getByRole('button', { name: `Deactivate ${branch.name}` }))
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate branch' }))
+
+    await waitFor(() => expect(saveCompany).toHaveBeenCalledOnce())
+    const updated = vi.mocked(saveCompany).mock.calls[0][0] as Company
+    expect(updated.branches.find((item) => item.id === branch.id)).toMatchObject({ id: branch.id, status: 'Inactive' })
+    expect(updated.branches).toHaveLength(company.branches.length)
   })
 
   it('has no organization route or organization form selector', () => {

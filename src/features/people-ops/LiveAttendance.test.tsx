@@ -6,11 +6,13 @@ import { mockCompanies } from '../companies/mockData'
 import { LiveAttendance } from './LiveAttendance'
 
 const mocks = vi.hoisted(() => ({ listEmployees: vi.fn(), periods: vi.fn(), entries: vi.fn(), saveEntry: vi.fn(), submitPeriod: vi.fn(), reviewPeriod: vi.fn() }))
+const historyMock = vi.hoisted(() => vi.fn())
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({
   employees: { list: mocks.listEmployees }, attendance: { periods: mocks.periods, entries: mocks.entries,
     saveEntry: mocks.saveEntry, submitPeriod: mocks.submitPeriod, reviewPeriod: mocks.reviewPeriod },
 }) }))
+vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => ({ attendance: { history: historyMock } }) }))
 
 const company = { ...mockCompanies[0], id: 'synthetic-company', portfolioId: 'synthetic-portfolio', branches: [{ ...mockCompanies[0].branches[0], id: 'synthetic-branch', name: 'Synthetic Branch' }] }
 const employee = { id: 'synthetic-employee', portfolio_id: company.portfolioId, company_id: company.id,
@@ -32,6 +34,7 @@ describe('LIVE attendance workflow', () => {
     mocks.saveEntry.mockResolvedValue('synthetic-entry')
     mocks.submitPeriod.mockResolvedValue('synthetic-period')
     mocks.reviewPeriod.mockResolvedValue('synthetic-period')
+    historyMock.mockResolvedValue([])
   })
 
   it('persists an employee monthly summary through the authorized RPC adapter', async () => {

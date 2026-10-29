@@ -2,18 +2,80 @@
 
 Last updated: 28 October 2026
 
+## Current LIVE screen audit update (28 October 2026)
+
+- `App.tsx` now routes `/payslips` to a LIVE read-only payslip screen. It reads the exact finalized payroll run version and line items under existing payroll/employee permissions, pages 100 items at a time, and provides print/save-to-PDF in the browser.
+- `/reports` and `/statutory` now render an internal register/contribution summary from selected finalized payroll runs. They support branch filtering, per-page employee filtering, 100-row table pagination, CSV/XLSX export, and print. The page states these outputs are not official regulator submissions.
+- `/audit` now uses the persisted RLS-protected audit log with company/branch/date/action filters, 50-row pagination and a read-only event detail drawer. Permission errors show an error state without demo data.
+- The payslip view is not a persisted PDF artifact, and no private Storage bucket, employee self-service payslip access, email delivery, retry queue, or delivery history is implemented. The screen discloses this; no email is sent.
+- Current LIVE routes still show `LiveModuleUnavailable` for statutory-rule administration, notifications, workspace settings, departments, and job roles. Those routes must not be mistaken for completed modules.
+- The existing LIVE company screens are backed by `live-company-services`; however, employee totals are not populated by that service, company logo upload is not persisted, and company+branch edits are not atomic across their multiple API calls.
+- The employee spreadsheet importer parses locally and submits sequential 20-row batches. It is not an atomic import job with durable history or whole-file retry/idempotency; a later batch failure can follow earlier successful rows.
+- Browser automation was attempted using the installed Playwright wrapper and available browser bridge. WSL reports `/bin/bash` is unavailable; the browser bridge timed out. No authenticated browser workflow is claimed. Local Vite is running on port 5174 for review.
+- Read-only migration history verification found local and development Supabase histories match through migration 025. No migration or remote data change was made in this update.
+- Final local checks after the new screens: TypeScript passed; 117 Vitest tests across 31 files passed; Oxlint exited 0 with six pre-existing warnings; production build passed with a 911.85 kB main entry chunk advisory. Local Vite HTTP smoke for `/payslips` returned 200; authenticated browser testing remains unavailable due WSL `/bin/bash` absence and CUA timeout.
+
+## Persistent LIVE payroll workflow (28 October 2026)
+
+- LIVE payroll now supports approved-input loading, persistent draft creation, trusted persistent calculation, employee-level earnings/statutory/net breakdowns, calculation history, submit/review/approval/return/reject, atomic finalization, and immutable payout-instruction CSV preparation.
+- Source-reviewed, effective-dated 2026 PAYE/NAPSA/NHIMA versions are used by the trusted calculation RPC. A K19,619.60 example produced PAYE K4,885.25, NAPSA K980.98 per side, NHIMA K150.92 per side, net K13,602.45 before other deductions, and employer cost K20,751.50.
+- Payout instructions contain payment details and are only available through the authorized finalizer RPC; CSV generation does not send money. No banking/mobile-money provider is connected.
+- Latest hosted rollback-only payroll-input and payroll workflow smoke passed after migrations 019–023. It verified overtime, bonus, paid leave preserving monthly pay, unpaid leave reducing earnings before statutory bases, advance deductions, and auditable source snapshots; all smoke records rolled back. TypeScript, 102 Vitest tests, lint and production build passed. Authenticated browser testing and refreshed Preview verification remain outstanding.
+
+## Prior LIVE payroll trial increment (superseded 28 October 2026)
+
+- The LIVE payroll screen now stores and displays persistent per-employee trial calculations from the trusted PostgreSQL NUMERIC RPC. It includes client-approved 2026 PAYE/NAPSA/NHIMA configuration, rule version and separate `UNVERIFIED` regulatory status, earnings and allowance breakdowns, employee statutory deductions, employer contributions/cost, validation blockers, and calculation history.
+- Migration 016 is applied to the authorized development database. Hosted rollback-only RLS/workflow plus payroll rule tests passed, including the exact K19,619.60 owner example and NAPSA cap boundaries. All test data rolled back; only the versioned client-approved policy remains seeded.
+- This remains a trial calculator. It cannot submit, approve, finalize, create payable items, or post deduction repayments. Finalization remains blocked for independent statutory verification and incomplete input/rule coverage.
+
+- Payroll screen now persists a draft and invokes the trusted `payroll_calculate_trial` database RPC, which stores an idempotent employee-by-employee trial snapshot. The UI presents gross, official 2026 PAYE candidate, NAPSA/NHIMA candidates, due approved deductions, and candidate net with explicit non-payable labeling.
+- Trial calculation uses database numeric arithmetic and authorization/RLS. It does not create actual payroll items, change DRAFT status, post deduction repayments, or allow submit/approve/finalize. Statutory and missing-input blockers are displayed.
+- Migration 015 and hosted rollback-only synthetic assertions passed. Local typecheck, full Vitest (99 tests / 26 files), targeted lint, and build passed. Authenticated browser tests remain outstanding.
+
+## Statutory/payroll review (28 October 2026)
+
+- Added `ZAMBIA_STATUTORY_RULES_2026.md` with official-source findings and unresolved NAPSA/NHIMA blockers.
+- The illustrative PAYE helper now uses integer cents/basis points and includes band checkpoint and cent-rounding tests. It remains browser-side preview logic, not the payroll authority.
+- LIVE payroll remains input preview and persistent draft creation only. No calculation, approval, finalization, or payslip delivery is represented as operational.
+- Local check results: TypeScript passed; full Vitest passed 98 tests / 26 files; full Oxlint completed with six existing legacy warnings; production build passed with the existing large-bundle advisory. The READY Preview for commit `aa031c1` returned HTTP 200 for `/auth/login` and `/payroll`; this was an HTTP smoke check only. Authenticated browser automation could not start because WSL lacks `/bin/bash` and CUA timed out.
+
+## Latest LIVE admin and import increment (28 October 2026)
+
+- LIVE Users & Permissions adds scoped portfolio membership listing and audited branch-role assignment/replacement/revocation. The `invite-user` Supabase Edge Function is deployed with JWT checks and a server origin allowlist restricted to `http://localhost:5173`; no invitation email was sent. Confirm `/auth/activate` in Supabase Auth's allowed redirect URLs before sending invitations.
+- Invitation activation now requires an authenticated invite session and sets the password through Supabase Auth. CSV and XLSX imports are parsed in-browser, support flexible mappings and full-file validation, and submit valid records in bounded batches to Supabase for HR review.
+- Full Vitest passed: 89 tests / 26 files. TypeScript and production build passed. Authenticated browser validation remains blocked by unavailable browser automation and lack of an approved synthetic test account; no account credentials were inspected.
+- Payroll is still not an operational LIVE workflow: input preview and draft persistence are connected, but trusted calculation and persisted payroll items are missing. Submit/review/finalization database primitives exist, but cannot run correctly without the calculation step. Finalization stays gated on verified effective statutory rules.
+- The latest hosted Vercel Preview still points to a prior commit. These new local changes have not been published or deployed.
+
+## Latest LIVE admin and employment-status increment (28 October 2026)
+
+- Migration `20261028001300` is applied to the authorized development project and migration history aligns through 013. Hosted rollback-only checks passed for company administrator scope/escalation denials and employment status history/payroll preview exclusion; baseline records were preserved.
+- LIVE Users & Permissions now manages existing, activated Company Administrator accounts via company-scoped audited RPCs. Email invitations/account activation and branch-manager assignment are not included in this screen.
+- LIVE employee profiles show employment status and status history with reason-required suspend/reactivate/terminate actions. Termination cannot be reversed through the current workflow.
+- Full Vitest passed: 84 tests / 25 files; focused regression: 15 / 15; typecheck and build passed. New LIVE files lint clean. Existing legacy lint warnings and main bundle size warning remain.
+- Browser verification was attempted but blocked by missing WSL `/bin/bash` for the Playwright wrapper and a timeout from the native browser bridge. Authenticated browser checks are not claimed.
+
+## Latest LIVE employee correction slice (28 October 2026)
+
+- Correction route now loads authorized DRAFT/RETURNED_FOR_CORRECTION records through the creator-scoped Supabase RPC, displays protected private fields only after authorization, preserves company/branch assignment, and writes changes through the trusted update RPC before resubmission.
+- Employee directory exposes edit/resubmit links for drafts and returned submissions. A failed reload hides the correction form; a failed resubmission does not claim success or discard the saved correction.
+- Focused correction/profile tests and the full 80-test Vitest suite pass. TypeScript and production build pass. Existing Oxlint warnings and the main-bundle size advisory remain.
+- Hosted synthetic correction/resubmission/approval RLS smoke passed transactionally. Employee and private-data tables remain empty after rollback. Authenticated browser testing remains outstanding.
+- LIVE employee profiles and approval timelines now use RLS-scoped, paginated backend reads. The view intentionally does not request NRC, bank, salary, or compensation data.
+- LIVE-mode shell, login note and dashboard labels now describe connected persistent modules accurately and state that payroll is draft-only while calculations, approvals/finalization and reports remain unavailable.
+
 ## Backend transition note (28 October 2026)
 
-- The frontend continues to use synthetic business state in both MOCK mode and the current LIVE-auth shell. A typed Supabase service adapter now covers employee directory reads/draft creation/review, deduction reads/request creation/review, and payroll reads/submission/review/finalization RPCs. The existing screens are not yet connected; failures in this adapter propagate and never silently return mock data.
-- Employee, compensation, attendance, leave, deduction, payroll, approval, and audit schema/RLS migrations plus trusted workflow RPCs are local source only. Local PostgreSQL/RLS tests passed; no hosted migration or business record has been applied.
-- See `BACKEND_SETUP.md` and `IMPLEMENTATION_STATUS.md` for target verification, SQL test scope, and remaining integration work.
+- MOCK mode remains synthetic. LIVE mode is connected for companies/branches, employee directory/onboarding/review/corrections/profile history, deductions, attendance and leave workflows, plus payroll input previews and persistent draft creation. Payroll calculation, approval/finalization and other gated modules remain unavailable.
+- Fourteen forward-only company-first/domain migrations are applied to the authorized development project. Recent hosted SQL workflow tests are rollback-only; no employee or payroll fixtures persist.
+- This file retains historical mock-mode implementation notes below. For current LIVE scope and verification, see the latest checkpoint in `IMPLEMENTATION_STATUS.md` and `BACKEND_SETUP.md`.
 
 ## Scope and constraints
 
-- Synthetic frontend with Supabase email/password authentication available only in explicitly selected LIVE mode. Business data remains mock-only; no database schema, domain backend, tenant authorization, real payroll processing, or deployment is included.
+- MOCK mode uses synthetic frontend data. Explicit LIVE mode uses Supabase Auth and only the business services documented in the current backend checkpoint; unconnected modules remain unavailable rather than falling back to mock data.
 - Mock records are shared through typed feature contexts; company and employee demo records persist in this browser's local storage for continuity. Old `gbhr-organizations` localStorage data is no longer read or written and may remain inert in existing browsers.
 - Local browser storage is demo persistence only and is not a secure or durable data service.
-- Access and payroll status workflows are visual simulations, not enforced security or financial workflows.
+- Mock-mode access and payroll status workflows are visual simulations. LIVE workflow authorization uses database RLS/trusted RPCs where implemented; payroll calculation and finalization remain disabled.
 
 ## Completed routes and useful interactions
 
@@ -148,3 +210,45 @@ Known: access roles are only visual simulations. Attendance is not yet sourced f
 - The Vercel project was located through the connected Vercel integration. Encrypted LIVE environment values are scoped only to Preview for `feature/supabase-auth`. Its last failed deployment reported invalid `vercel.json`; the local UTF-8 BOM was removed and JSON validated, but no preview redeployment occurred because current changes are not pushed.
 - Git remains blocked by the execution sandbox's read-only `.git` mount; no commit or push was made. No deployment occurred.
 
+# Payroll inputs and HR integration (28 October 2026)
+
+- LIVE payroll now lets authorized payroll preparers submit sourced overtime, bonuses, commissions and other earnings for separate HR approval; rejected/pending values do not enter payroll, and creators cannot approve their own records.
+- Approved attendance and leave are reconciled before calculation. Missing attendance, unapproved/pending earnings, overlapping or cross-period leave, leave totals that disagree with attendance, ambiguous compensation, and unsupported frequency block the run with warnings.
+- Unpaid leave remains blocked by default until HR sets an effective-dated basic-pay or recurring-gross per scheduled workday method. Paid leave preserves monthly salary. Deductions, attendance adjustment, earnings, gross-to-net, statutory amounts and employer cost display as separate line items.
+- Added responsive period earnings and unpaid-leave rule controls to the LIVE payroll screen; success notices remain visible after the page refreshes its records.
+- Hosted rollback-only Supabase smoke covers overtime/bonus approval, unpaid-leave calculation, advance installment input, stale-input locking, versioned calculation and idempotent finalization. Full Vitest: 102 tests / 26 files; typecheck, lint and build passed.
+- Limitations: overtime amount is entered from an approved supporting record rather than derived from hours and a contract multiplier; no bank/mobile-money provider or real disbursement is connected; no authenticated browser run was performed.
+
+# Overtime screen update
+
+The LIVE payroll input screen now captures overtime from hours and category and uses a PostgreSQL RPC to determine the amount. The employee's effective compensation divisor (176, 208 or 240) is displayed and managed through an audited compensation action. Ordinary, rest-day and public-holiday premiums are shown separately. Unit tests cover the displayed 150%/200% estimates; hosted rollback smoke verified persisted 150%/200% amounts and the integrated payroll snapshot. No UI confirmation suggests funds were transferred.
+
+## Payslip and employee-import reliability increment (28 October 2026)
+
+- Added LIVE controls for server-issued payslip PDF, short-lived private download link, email queue, masked delivery history and bounded retries. This frontend requires pending migration 026 and the `payslip-artifacts` Edge Function to be deployed before those actions work against Supabase.
+- Replaced 20-row client-side employee writes with one idempotent `employee_import_atomic` service request, durable import-history view and all-or-none database workflow (pending migration 027). CSV/XLSX parsing and manual mapping remain browser-side.
+- Typecheck and production build passed. The first parallel full test run showed two UI test failures under concurrent load; all six affected report/payslip tests passed on isolated rerun. Full serial suite verification is recorded in `IMPLEMENTATION_STATUS.md`.
+- Windows Edge smoke: LIVE login screen, protected route redirect while unauthenticated, 390 px viewport with no horizontal overflow, zero runtime exceptions. No login credentials were used; this is not an authenticated business-workflow test.
+- No migration was applied: linked history is at 025 and CLI dry-run could not connect because a DB password for its temporary login role is not configured. No Edge deployment or email send occurred.
+- Final local checks after the privacy and import-retry refinements: Vitest 122/122 across 31 files, TypeScript passed, production build passed, Oxlint exited 0 with six legacy warnings and no new warnings in changed payslip/import code or the Edge Function. Delivery history omits recipient email and uses a scoped RPC. Import idempotency keys persist in session storage by company/branch and rotate after a definitive response. A Windows-native TS compile validated the Edge source with temporary runtime/import declarations; Deno itself was blocked by Windows application policy. Edge smoke verified LIVE login, protected-route redirect and 390px layout; authenticated business paths were not tested.
+
+## Phase C and D local completion increment (29 October 2026)
+
+- Phase C LIVE payroll covers sourced payroll inputs, separate review/approval, authoritative calculation, submission/review/finalization, statutory reporting and payslip/payment-instruction exports. Bank exports prepare instructions only; they do not transmit funds. No real payroll run was performed in this increment.
+- Phase D user/role administration and audit-log views were already present. Added a per-user private workflow notification inbox and company-scoped workspace defaults (time zone, date format, ZMW currency, planned cut-off day). Notifications are status-only database triggers for employee, leave, attendance and payroll changes; they do not send email. Settings writes use a permission-checked, audited RPC.
+- Added local migration `20261029003000_workspace_notifications_and_settings.sql`; it has not been applied. Notifications/settings require this migration before LIVE use. Saved date order and time zone now drive LIVE payroll, employee, attendance-history, payslip/report, audit, and user-assignment timestamps. The payroll cut-off remains informational.
+- The notification bell and administration link now show the current RLS-visible unread count, refresh after read-state changes, and poll every minute while authenticated. Saved company date order and timezone are loaded into the workspace context and used for operational timestamps and date displays.
+- Added the LIVE payout reconciliation screen for finalized payout instruction batches. Authorized payroll finalizers can record statement outcomes by employee (paid, partial, failed, returned, pending, or zero-payment due); the screen stores only amounts, dates, references and notes, never bank account data. Records are audited and branch-scoped; this workflow does not initiate or independently verify transfers.
+- Added local migration `20261029003100_payroll_payout_reconciliation.sql`, which provides private reconciliation storage and permission-checked, paginated batch/detail/save RPCs. Migrations 030 and 031 remain unapplied; no hosted reconciliation data or real statement was used.
+- Added rollback-only SQL regression assertions for anonymous, payroll preparer, branch-manager and cross-portfolio denials, exact-branch access, amount validation, recipient scoping, bank-detail omission and audit redaction. They were added but not executed because the new migration is unapplied.
+- Verification: full Vitest 130/130 across 35 files; focused Phase D regressions 38/38 across 11 files; TypeScript and production build passed. Oxlint exited 0 with warnings, including effect-state warnings in the new screens. The production build retains the >500 kB bundle advisory. No hosted migration, deployment, real email or payment action occurred.
+
+## Phase C/D payroll and compliance continuation (29 October 2026; local only)
+
+- Reviewed the preceding Phase A/B status before work: HR configuration and attendance/leave migrations 028/029 remain local and unapplied, so those workflows are not hosted-integrated yet. The hosted RLS assertions for the newer Phase A/B migrations were not executed.
+- Fresh read-only Supabase CLI verification confirmed project linkage/history through `20261028002700`; migrations `20261029002800`–`20261029003200` are pending. A final linked dry run listed exactly 028–032 and applied nothing.
+- Existing LIVE payroll calculations, approval/finalization, statutory summaries, payslip artifacts, payout exports, and payout reconciliation were extended rather than replaced. Payroll run history now filters by status and has server-side pagination using the current company/branch scope.
+- Added `LiveStatutoryFilings` and `statutory_filing_records` migration 032. The database RPCs expose only permission-checked branch records, derive liabilities from immutable finalized payroll versions, and audit manual filing/remittance changes. This records evidence only; there is no agency submission or payment integration. Due dates are entered against the company's approved filing calendar.
+- Migration 032 is local and unapplied. Database function execution, RLS and SQL assertion tests were not run against PostgreSQL or Supabase. It must be reviewed/applied in the development project before the new LIVE register can work.
+- Local verification: final serial Vitest passed 139/139 across 39 files. The focused service test passed 9/9. TypeScript and production build passed. Oxlint exited 0 with React hook/compiler warnings. Production build reports a >500 kB main-chunk advisory.
+- No statutory rates or bases were changed. No migration was applied, no Edge Function deployed, no data was written remotely, and no real email, payment, filing, production or Vercel action occurred.

@@ -21,3 +21,36 @@
 .live-inputs-error p { margin: 8px 0 0; }
 .live-inputs-draft-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 @media (max-width: 640px) { .live-inputs-summary { grid-template-columns: 1fr; } .live-inputs-filters > * { width: 100%; } .live-inputs-filters select, .live-inputs-filters input { width: 100%; } }
+.live-trial-results { display: grid; gap: 16px; margin-top: 18px; }
+.live-trial-results .live-inputs-error ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+.live-trial-results .live-inputs-error li { text-transform: capitalize; }
+.live-trial-row-warning { color: #a16207 !important; white-space: normal !important; min-width: 160px; }
+.live-trial-footnote { color: var(--muted-foreground, #64748b); font-size: 12px; line-height: 1.5; margin: 0; }
+.live-trial-history { padding: 18px; }
+.live-trial-history h2 { margin: 0 0 12px; font-size: 14px; }
+.live-trial-history ol { display: grid; gap: 10px; margin: 0; padding-left: 20px; }
+.live-trial-history li { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(180px, 1fr); gap: 12px; align-items: center; color: var(--text-muted); font-size: 12px; }
+@media (max-width: 700px) { .live-trial-history li { grid-template-columns: 1fr; gap: 3px; } }
+.payroll-live-runs, .payroll-live-selected, .payroll-live-payout { padding: 18px; }
+.payroll-live-runs > header, .payroll-live-selected > header, .payroll-live-payout > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+.payroll-live-runs h2, .payroll-live-selected h2, .payroll-live-payout h2 { margin: 4px 0; font-size: 16px; }
+.payroll-live-selected header p, .payroll-live-payout header p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.payroll-live-run-list { display: grid; gap: 8px; }
+.payroll-run-filters { display:flex; align-items:end; justify-content:space-between; gap:12px; margin:0 0 12px; color:var(--text-muted); font-size:12px; }
+.payroll-run-filters label { display:grid; gap:5px; font-size:11px; }
+.payroll-run-filters select { min-height:36px; padding:6px 9px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text-primary); }
+.payroll-run-pagination { display:flex; justify-content:space-between; gap:10px; margin-top:12px; }
+.payroll-live-run { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-primary); background: var(--surface); text-align: left; cursor: pointer; }
+.payroll-live-run.selected { border-color: #278b7d; box-shadow: 0 0 0 1px #278b7d inset; }
+.payroll-live-run span:first-child { display: grid; gap: 4px; }
+.payroll-live-run small, .payroll-live-run > span:last-child { color: var(--text-muted); font-size: 11px; }
+.payroll-live-empty { margin: 8px 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.payroll-live-totals { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin: 12px 0; }
+.payroll-live-actions { display: flex; flex-wrap: wrap; gap: 9px; margin: 14px 0 18px; }
+.payroll-live-actions button { display: inline-flex; align-items: center; gap: 7px; }
+.payroll-live-payout > p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+@media (max-width: 640px) { .payroll-live-runs > header, .payroll-live-selected > header, .payroll-live-payout > header { flex-direction: column; } .payroll-live-actions > button { flex: 1 1 100%; justify-content: center; } }
+@media (max-width:640px) { .payroll-run-filters { align-items:stretch; flex-direction:column; } }
+.live-payroll-earnings{margin-top:1rem;padding:1.1rem}.live-payroll-earnings>header{display:flex;justify-content:space-between;gap:1rem;margin-bottom:1rem}.live-payroll-earnings>header p{max-width:70ch;color:var(--muted-foreground);font-size:.82rem}.live-earning-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;align-items:end;padding:1rem;border:1px solid var(--border);border-radius:.75rem;background:var(--muted)}.live-earning-form label{display:grid;gap:.35rem;font-size:.78rem;font-weight:600}.live-earning-form input:not([type=checkbox]),.live-earning-form select,.live-inputs-table select{min-width:0;width:100%;padding:.55rem .65rem;border:1px solid var(--border);border-radius:.5rem;background:var(--background);color:var(--foreground)}.live-earning-taxable{display:flex!important;align-items:center}.live-earning-list{display:grid;gap:.5rem;margin-top:.8rem}.live-earning-list article{display:flex;align-items:center;gap:.8rem;justify-content:space-between;padding:.75rem;border:1px solid var(--border);border-radius:.65rem}.live-earning-list article>div:first-child{display:grid;gap:.2rem;flex:1}.live-earning-list article span,.live-earning-list article small{font-size:.76rem;color:var(--muted-foreground)}.live-earning-list article .approval-actions{display:flex;gap:.4rem}.live-inputs-table td select{min-width:9.5rem}.live-inputs-table td button{margin-top:.35rem;white-space:nowrap}
+@media(max-width:850px){.live-earning-form{grid-template-columns:repeat(2,minmax(0,1fr))}.live-earning-list article{align-items:flex-start;flex-wrap:wrap}}
+@media(max-width:560px){.live-earning-form{grid-template-columns:1fr}.live-earning-list article .approval-actions{width:100%}.live-earning-list article .approval-actions button{flex:1}}

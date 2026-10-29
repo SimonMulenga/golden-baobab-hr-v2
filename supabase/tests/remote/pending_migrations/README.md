@@ -1,0 +1,26 @@
+# Pending migration rollback smoke tests
+
+These psql scripts apply migrations cumulatively in their exact order inside one transaction, assert contracts, and finish with `ROLLBACK`. They are only for a **separate disposable Supabase project at migration baseline 001–027**. The backup has verified archive integrity and a partial application-schema restore; a complete Supabase project restore has not been verified. Do not assume the backup is a ready-to-restore project image. The existing native PostgreSQL installation lacks the managed Storage/Auth environment required by migration 028. Docker/WSL is not part of this workflow.
+
+## Target verification and execution order
+
+1. The project owner creates or identifies a disposable Supabase project in the Dashboard and gives its project reference plus explicit authorization for the requested test operations. Do not run these scripts against the development project (`jssuaebiizjcoqmngxzk`) or production. Compare the target reference against both references shown in the owner's Dashboard; stop if either reference is unknown or matches the target. Do not rely on the repository's link/cache state as proof of identity.
+2. Establish the target at exactly migrations 001–027 using an owner-approved isolated-project setup method. Confirm the baseline from that target's Dashboard/SQL session before proceeding. Do not restore the archive wholesale unless a separate full Supabase-compatible restore method has been verified.
+3. Use a dedicated protected password file for this disposable project. Do not reuse the development password file. Set `PGPASSFILE`, `PGSSLMODE=require`, and `PGCONNECT_TIMEOUT=8` in the private PowerShell process environment; never place a password or connection URI in arguments, scripts, or logs. Connect using the disposable project's session-pooler host, port, database, and project-scoped username from its Dashboard.
+4. Run `pending_migrations_preflight.sql` first in read-only mode. Confirm the target identity independently from the Dashboard and verify history is exactly 001–027, all 028–032 are pending, Auth/Storage and `extensions.pgcrypto` are available, the document bucket is compatible, and the reported leave data/constraints have no unresolved compatibility issues. Vault is reported for visibility but is not referenced by migrations 001–032. Stop on any mismatch. The preflight does not authorize or apply changes.
+5. Only after explicit authorization for this named target and rollback-test execution, run the six guarded scripts in order: `028_hr_configuration_documents.rollback.sql`, `029_attendance_leave.rollback.sql`, `029_leave_overlap_and_accrual.rollback.sql`, `030_notifications_settings.rollback.sql`, `031_payroll_reconciliation.rollback.sql`, and `032_statutory_filing.rollback.sql`. Each test includes the required migrations through its stage in one transaction and rolls the transaction back. Confirm its matching `ROLLBACK_COMPLETE_*` marker and exit code before the next script; on any error, stop and re-run the read-only preflight only after establishing a clean target state.
+6. These rollback scripts provide structural checks plus 029 leave overlap/idempotency checks. They do not yet constitute end-to-end PostgREST/Storage HTTP authorization evidence. Before declaring security compatibility, separately test with synthetic users in at least two companies and two branches: allowed and denied employee-document reads/inserts/deletes, anonymous denial, branch-role limits, and authenticated RPC permissions. Do not use real employee records or documents.
+
+No remote connection or write is authorized by this runbook. Target reference and execution authorization must be provided before any remote operation.
+
+Each test refuses to start unless the operator explicitly enables the psql guard:
+
+```powershell
+psql -X -w -v confirm_disposable_target=on -f .\supabase\tests\remote\pending_migrations\028_hr_configuration_documents.rollback.sql
+```
+
+Before enabling that guard, manually verify the host/project against the disposable project's owner-visible Dashboard and run `pending_migrations_preflight.sql` read-only. Keep `PGPASSFILE`, `PGSSLMODE=require`, `PGCONNECT_TIMEOUT=8`, and a bounded outer process timeout in the same private process environment. Do not put passwords or connection URIs in command arguments. `029_leave_overlap_and_accrual.rollback.sql` seeds transaction-scoped synthetic Auth/company/branch/employee rows. The scripts do not yet test Storage authorization across synthetic tenants or the HTTP/PostgREST layer; SQL role simulation alone is not proof of those boundaries.
+
+Each later test includes every earlier pending migration before its own assertions, so it validates application order and dependencies from baseline 027. An error stops psql; disconnect rolls back the open transaction. Confirm the final output includes the explicit rollback marker before considering a test complete.
+
+`029_leave_overlap_and_accrual.rollback.sql` seeds only transaction-scoped synthetic Auth/company/branch/employee rows, then checks overlap rejection across pay classifications, identical-call idempotence, adjacent date acceptance, company isolation, and same-period accrual idempotence. It always rolls back the migration DDL and fixtures.

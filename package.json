@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
     "@supabase/supabase-js": "^2.118.0",
     "autoprefixer": "^10.6.2",
     "lucide-react": "^1.62.0",

@@ -5,70 +5,43 @@ import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { mockCompanies } from '../companies/mockData'
 import { LiveLeave } from './LiveLeave'
 
-const mocks = vi.hoisted(() => ({ requests: vi.fn(), employees: vi.fn(), policies: vi.fn(), balances: vi.fn(), createRequest: vi.fn(), reviewRequest: vi.fn(), savePolicy: vi.fn(), accrueMonth: vi.fn() }))
+const mocks = vi.hoisted(() => ({ requests: vi.fn(), employees: vi.fn(), policies: vi.fn(), balances: vi.fn(), calendar: vi.fn(), createRequest: vi.fn(), transition: vi.fn(), savePolicy: vi.fn(), accrueMonth: vi.fn(), saveCalendarException: vi.fn(), removeCalendarException: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
-vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({
-  employees: { list: mocks.employees }, leave: { requests: mocks.requests, policies: mocks.policies, balances: mocks.balances,
-    createRequest: mocks.createRequest, reviewRequest: mocks.reviewRequest, savePolicy: mocks.savePolicy, accrueMonth: mocks.accrueMonth },
-}) }))
+vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ employees: { list: mocks.employees } }) }))
+vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => ({ leave: { requests: mocks.requests, policies: mocks.policies, balances: mocks.balances, calendar: mocks.calendar, createRequest: mocks.createRequest, transition: mocks.transition, savePolicy: mocks.savePolicy, accrueMonth: mocks.accrueMonth, saveCalendarException: mocks.saveCalendarException, removeCalendarException: mocks.removeCalendarException } }) }))
 
 const company = { ...mockCompanies[0], id: 'synthetic-company', portfolioId: 'synthetic-portfolio', branches: [{ ...mockCompanies[0].branches[0], id: 'synthetic-branch', name: 'Synthetic Branch' }] }
-const employee = { id: 'synthetic-employee', portfolio_id: company.portfolioId, company_id: company.id,
-  workplace_branch_id: 'synthetic-branch', employee_number: 'SYN-100', first_name: 'Demo', middle_name: null,
-  last_name: 'Worker', job_title: 'Clerk', department: 'Finance', employment_type: 'PERMANENT', contract_type: 'MONTHLY',
-  contract_start_date: '2026-01-01', contract_end_date: null, retirement_age: 65, retirement_status: 'NOT_RETIRED',
-  approval_status: 'APPROVED', submitted_at: null, reviewed_at: null, created_at: '2026-01-01T00:00:00Z' }
-const pendingRequest = { id: 'leave-request-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
-  employee_id: employee.id, leave_type: 'Annual leave', pay_classification: 'PAID', start_date: '2026-11-02', end_date: '2026-11-03',
-  leave_days: 2, status: 'PENDING', requested_by: 'branch-manager', reviewed_by: null, reviewed_at: null, reason: 'Synthetic request' }
-
-function renderScreen() {
-  render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: company.id }}><LiveLeave /></WorkspaceContext.Provider>)
-}
+const employee = { id: 'synthetic-employee', portfolio_id: company.portfolioId, company_id: company.id, workplace_branch_id: 'synthetic-branch', employee_number: 'SYN-100', first_name: 'Demo', middle_name: null, last_name: 'Worker', job_title: 'Clerk', department: 'Finance', employment_type: 'PERMANENT', contract_type: 'MONTHLY', contract_start_date: '2026-01-01', contract_end_date: null, retirement_age: 65, retirement_status: 'NOT_RETIRED', approval_status: 'APPROVED', submitted_at: null, reviewed_at: null, created_at: '2026-01-01T00:00:00Z' }
+const policy = { id: 'policy-1', portfolio_id: company.portfolioId, company_id: company.id, leave_type: 'Annual leave', pay_classification: 'PAID' as const, accrual_days_per_month: 1.25, maximum_balance_days: 30, effective_from: '2026-01-01', effective_to: null, enabled: true, day_count_method: 'WORKING_DAYS' as const, carry_forward_limit_days: 10 }
+const pendingRequest = { id: 'leave-request-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch', employee_id: employee.id, leave_policy_id: policy.id, leave_type: 'Annual leave', pay_classification: 'PAID' as const, start_date: '2026-11-02', end_date: '2026-11-03', leave_days: 2, status: 'PENDING' as const, requested_by: 'synthetic-actor', reviewed_by: null, reviewed_at: null, reason: 'Synthetic request', review_reason: null }
+function renderScreen() { render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: company.id }}><LiveLeave /></WorkspaceContext.Provider>) }
 
 describe('LIVE leave workflow', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.requests.mockResolvedValue({ items: [], total: 0 })
-    mocks.employees.mockResolvedValue({ items: [employee], total: 1 })
-    mocks.policies.mockResolvedValue([]); mocks.balances.mockResolvedValue([])
-    mocks.createRequest.mockResolvedValue('leave-request-created'); mocks.reviewRequest.mockResolvedValue('leave-request-1')
-    mocks.savePolicy.mockResolvedValue('leave-policy-created'); mocks.accrueMonth.mockResolvedValue(1)
-  })
+  beforeEach(() => { vi.clearAllMocks(); vi.spyOn(window, 'prompt').mockReturnValue('Synthetic test reason'); mocks.requests.mockResolvedValue({ items: [], total: 0 }); mocks.employees.mockResolvedValue({ items: [employee], total: 1 }); mocks.policies.mockResolvedValue([policy]); mocks.balances.mockResolvedValue([]); mocks.calendar.mockResolvedValue([]); mocks.createRequest.mockResolvedValue('created'); mocks.transition.mockResolvedValue('updated'); mocks.savePolicy.mockResolvedValue('saved'); mocks.accrueMonth.mockResolvedValue(1); mocks.saveCalendarException.mockResolvedValue('saved'); mocks.removeCalendarException.mockResolvedValue('removed') })
 
-  it('saves a leave request with explicit classification and employee scope', async () => {
+  it('uses server-calculated policy-scoped dates for a leave request', async () => {
     renderScreen()
+    fireEvent.change(await screen.findByLabelText('Leave branch'), { target: { value: 'synthetic-branch' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Request leave' }))
-    fireEvent.change(screen.getByLabelText('Leave employee'), { target: { value: employee.id } })
     fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2026-11-02' } })
     fireEvent.change(screen.getByLabelText('End date'), { target: { value: '2026-11-03' } })
-    fireEvent.change(screen.getByLabelText('Leave days'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Submit request' }))
-    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1))
-    expect(mocks.createRequest.mock.calls[0][0]).toMatchObject({ portfolioId: company.portfolioId, companyId: company.id,
-      branchId: 'synthetic-branch', employeeId: employee.id, leaveType: 'Annual leave', payClassification: 'PAID',
-      startDate: '2026-11-02', endDate: '2026-11-03', days: 2 })
-    expect(await screen.findByRole('status')).toHaveTextContent('saved to Supabase')
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledWith(expect.objectContaining({ companyId: company.id, branchId: 'synthetic-branch', employeeId: employee.id, policyId: policy.id, startDate: '2026-11-02', endDate: '2026-11-03' })))
   })
 
-  it('routes approval through the trusted service and refreshes persisted queue data', async () => {
+  it('records approvals through the database transition RPC service', async () => {
     mocks.requests.mockResolvedValue({ items: [pendingRequest], total: 1 })
     renderScreen()
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve leave for Demo' }))
-    await waitFor(() => expect(mocks.reviewRequest).toHaveBeenCalledWith(pendingRequest.id, 'APPROVE', undefined))
-    expect(await screen.findByRole('status')).toHaveTextContent('Leave request approved')
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve leave request' }))
+    await waitFor(() => expect(mocks.transition).toHaveBeenCalledWith(pendingRequest.id, 'APPROVE', ''))
   })
 
-  it('keeps configurable accrual and policy values explicit rather than hard-coded as legal rules', async () => {
+  it('configures day counting and carry-forward policy fields', async () => {
     renderScreen()
     fireEvent.click(await screen.findByRole('button', { name: 'Configure policy' }))
-    fireEvent.change(screen.getByLabelText('Accrual days per month'), { target: { value: '1.25' } })
-    fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-01-01' } })
+    fireEvent.change(screen.getByLabelText('Days per request'), { target: { value: 'CALENDAR_DAYS' } })
+    fireEvent.change(screen.getByLabelText('Carry-forward limit'), { target: { value: '8' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save policy' }))
-    await waitFor(() => expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({
-      companyId: company.id, leave_type: 'Annual leave', pay_classification: 'PAID', accrual_days_per_month: 1.25, effective_from: '2026-01-01',
-    })))
-    expect(await screen.findByRole('status')).toHaveTextContent('not a statement of legal entitlement')
+    await waitFor(() => expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ companyId: company.id, dayCountMethod: 'CALENDAR_DAYS', carryForwardLimit: 8 })))
   })
 })
-

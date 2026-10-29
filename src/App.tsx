@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, ArrowUpRight, Bell, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, FileBarChart2, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
+import { Activity, ArrowUpRight, Bell, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { WorkspaceContext } from './features/companies/WorkspaceContext'
+import { WorkspaceContext, defaultWorkspacePreferences, useWorkspace, type WorkspacePreferences } from './features/companies/WorkspaceContext'
 import { EmployeeContext } from './features/employees/EmployeeContext'
 import { PayrollContext } from './features/payroll/PayrollContext'
 import type { DemoDeduction, DemoPayrollRun } from './features/payroll/PayrollContext'
@@ -12,6 +12,8 @@ import { getAuthGateDecision } from './features/auth/auth-routing'
 import { isLiveMode } from './lib/data-mode'
 import { getSupabaseClient } from './lib/supabase/client'
 import { createLiveCompanyServices } from './services/live-company-services'
+import { createLiveOperationsServices } from './services/live-operations-services'
+import { loadDashboardMetrics, type DashboardMetrics } from './services/live-dashboard-services'
 import { mockEmployees } from './features/employees/mockData'
 import { mockCompanies } from './features/companies/mockData'
 import type { Company } from './features/companies/types'
@@ -25,17 +27,28 @@ const EmployeeApprovals = lazy(() => import('./features/employees/EmployeeApprov
 const LiveEmployeeDirectory = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeDirectory })))
 const LiveEmployeeApprovals = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeApprovals })))
 const LiveEmployeeForm = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeForm })))
+const LiveEmployeeProfile = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeProfile })))
+const LiveEmployeeImport = lazy(() => import('./features/employees/LiveEmployeeImport').then((module) => ({ default: module.LiveEmployeeImport })))
 const AttendanceScreen = lazy(() => import('./features/people-ops/PeopleOpsScreens').then((module) => ({ default: module.AttendanceScreen })))
 const LeaveScreen = lazy(() => import('./features/people-ops/PeopleOpsScreens').then((module) => ({ default: module.LeaveScreen })))
 const LiveAttendance = lazy(() => import('./features/people-ops/LiveAttendance').then((module) => ({ default: module.LiveAttendance })))
 const LiveLeave = lazy(() => import('./features/people-ops/LiveLeave').then((module) => ({ default: module.LiveLeave })))
 const LivePayrollInputs = lazy(() => import('./features/payroll/LivePayrollInputs').then((module) => ({ default: module.LivePayrollInputs })))
+const LivePayrollReconciliation = lazy(() => import('./features/payroll/LivePayrollReconciliation').then((module) => ({ default: module.LivePayrollReconciliation })))
+const LivePayslips = lazy(() => import('./features/payroll/LivePayslips').then((module) => ({ default: module.LivePayslips })))
+const LivePayrollReports = lazy(() => import('./features/payroll/LivePayrollReports').then((module) => ({ default: module.LivePayrollReports })))
+const LiveStatutoryFilings = lazy(() => import('./features/payroll/LiveStatutoryFilings').then((module) => ({ default: module.LiveStatutoryFilings })))
 const CatalogScreen = lazy(() => import('./features/admin/CatalogScreens').then((module) => ({ default: module.CatalogScreen })))
 const PayrollScreen = lazy(() => import('./features/payroll/IntegratedPayrollScreen').then((module) => ({ default: module.IntegratedPayrollScreen })))
 const EmployeeDeductions = lazy(() => import('./features/payroll/EmployeeDeductions').then((module) => ({ default: module.EmployeeDeductions })))
 const LiveDeductions = lazy(() => import('./features/payroll/LiveDeductions').then((module) => ({ default: module.LiveDeductions })))
 const StatutoryScreen = lazy(() => import('./features/payroll/PayrollScreens').then((module) => ({ default: module.StatutoryScreen })))
 const UsersScreen = lazy(() => import('./features/admin/AdminScreens').then((module) => ({ default: module.UsersScreen })))
+const LiveUserAdmin = lazy(() => import('./features/admin/LiveUserAdmin').then((module) => ({ default: module.LiveUserAdmin })))
+const LiveAuditLogs = lazy(() => import('./features/admin/LiveAuditLogs').then((module) => ({ default: module.LiveAuditLogs })))
+const LiveHrCatalog = lazy(() => import('./features/admin/LiveHrCatalog').then((module) => ({ default: module.LiveHrCatalog })))
+const LiveNotifications = lazy(() => import('./features/admin/LiveOperations').then((module) => ({ default: module.LiveNotifications })))
+const LiveSettings = lazy(() => import('./features/admin/LiveOperations').then((module) => ({ default: module.LiveSettings })))
 const ReportsScreen = lazy(() => import('./features/admin/AdminScreens').then((module) => ({ default: module.ReportsScreen })))
 const AuditScreen = lazy(() => import('./features/admin/AdminScreens').then((module) => ({ default: module.AuditScreen })))
 const NotificationsScreen = lazy(() => import('./features/admin/AdminScreens').then((module) => ({ default: module.NotificationsScreen })))
@@ -46,8 +59,8 @@ import './index.css'
 const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },
   { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
-  { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
-  { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Settings', path: '/settings', icon: Settings }] },
+  { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
+  { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
 const employees = [{ name: 'Copperbelt Mining Co.', count: 284, color: '#208779' }, { name: 'Lusaka Foods Ltd.', count: 196, color: '#85b8a9' }, { name: 'Zambezi Logistics', count: 142, color: '#d6a85d' }, { name: 'Other companies', count: 216, color: '#d8e4df' }]
 const payroll = [{ month: 'May', value: 2.74 }, { month: 'Jun', value: 2.81 }, { month: 'Jul', value: 2.76 }, { month: 'Aug', value: 2.98 }, { month: 'Sep', value: 3.05 }, { month: 'Oct', value: 3.18 }]
@@ -82,6 +95,8 @@ function AppShell() {
   const [deductions, setDeductions] = useState<DemoDeduction[]>([])
   const [payrollRuns, setPayrollRuns] = useState<DemoPayrollRun[]>([])
   const [activeCompanyId, setActiveCompanyId] = useState(() => isLiveMode ? 'all' : localStorage.getItem('gbhr-active-company') ?? 'all')
+  const [workspacePreferences, setWorkspacePreferences] = useState<{ companyId: string; value: WorkspacePreferences } | null>(null)
+  const [unreadNotifications, setUnreadNotifications] = useState(0)
   const [authActionError, setAuthActionError] = useState('')
   const location = useLocation()
   const currentName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name ?? 'Dashboard'
@@ -89,6 +104,28 @@ function AppShell() {
   useEffect(() => { if (!isLiveMode) localStorage.setItem('gbhr-companies', JSON.stringify(companies)) }, [companies])
   useEffect(() => { if (!isLiveMode) localStorage.setItem('gbhr-employees', JSON.stringify(employees)) }, [employees])
   useEffect(() => { if (!isLiveMode) localStorage.setItem('gbhr-active-company', activeCompanyId) }, [activeCompanyId])
+  useEffect(() => {
+    if (!isLiveMode || !authUserId || activeCompanyId === 'all') { setWorkspacePreferences(null); return }
+    let cancelled = false
+    createLiveOperationsServices(getSupabaseClient()).settings.get(activeCompanyId)
+      .then((row) => { if (!cancelled) setWorkspacePreferences({ companyId: activeCompanyId, value: row ? { timezone: row.timezone, date_format: row.date_format, currency_code: row.currency_code, payroll_cutoff_day: row.payroll_cutoff_day } : defaultWorkspacePreferences }) })
+      .catch(() => { if (!cancelled) setWorkspacePreferences(null) })
+    return () => { cancelled = true }
+  }, [activeCompanyId, authUserId])
+  useEffect(() => {
+    if (!isLiveMode || !authUserId) { setUnreadNotifications(0); return }
+    let cancelled = false
+    const loadUnread = async () => {
+      try {
+        const count = await createLiveOperationsServices(getSupabaseClient()).notifications.unreadCount()
+        if (!cancelled) setUnreadNotifications(count)
+      } catch { if (!cancelled) setUnreadNotifications(0) }
+    }
+    void loadUnread()
+    window.addEventListener('gbhr-notifications-changed', loadUnread)
+    const interval = window.setInterval(() => void loadUnread(), 60_000)
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-notifications-changed', loadUnread) }
+  }, [authUserId, location.pathname])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
   useEffect(() => {
     if (!isLiveMode || !authUserId) return
@@ -125,7 +162,9 @@ function AppShell() {
       if (activeCompanyId === id) setActiveCompanyId('all')
     },
     setActiveCompany: setActiveCompanyId, activeCompanyId,
-  }), [companies, companiesLoading, workspaceError, authUserId, activeCompanyId])
+    preferences: workspacePreferences?.companyId === activeCompanyId ? workspacePreferences.value : null,
+    setPreferences: (companyId: string, preferences: WorkspacePreferences) => setWorkspacePreferences({ companyId, value: preferences }),
+  }), [companies, companiesLoading, workspaceError, authUserId, activeCompanyId, workspacePreferences])
   const employeeData = useMemo(() => ({ employees, saveEmployee: (employee: Employee) => setEmployees((items) => items.some((item) => item.id === employee.id) ? items.map((item) => item.id === employee.id ? employee : item) : [employee, ...items]), saveEmployees: (records: Employee[]) => setEmployees((items) => [...records, ...items]) }), [employees])
   const payrollData = useMemo(() => ({
     deductions,
@@ -157,27 +196,48 @@ function AppShell() {
     <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span>GB</span></div><span className="brand-word">Golden Baobab <span>HR</span></span><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="workspace-selector"><div className="workspace-avatar">MH</div><div className="workspace-copy"><strong>Mukuba Holdings</strong><span>Enterprise workspace</span></div><ChevronDown size={15} /></div>
-      <nav className="side-nav">{nav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Leave Management' && <span className="nav-count">12</span>}</NavLink>)}</div>)}</nav>
+      <nav className="side-nav">{nav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Leave Management' && <span className="nav-count">12</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom"><div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div><div className="profile-row"><div className="profile-avatar">CM</div><div className="profile-copy"><strong>Chola Mwansa</strong><span>Workspace admin</span></div><MoreHorizontal size={18} /></div></div>
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label="Collapse sidebar"><ChevronLeft size={15} /></button>
     </aside>
-    <div className="main-column"><header className="topbar"><div className="top-left"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions"><label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All companies</option>{companies.filter((company) => company.status === 'Active').map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label><button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search"><Search size={17} /><kbd>âŒ˜ K</kbd></button><button className="icon-button notification-button" aria-label="Notifications"><Bell size={17} /><i /></button>{isLiveMode && <button className="auth-signout" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } }}>Sign out</button>}<div className="top-avatar" title={isLiveMode ? auth.user?.email ?? '' : 'Chola Mwansa'}>{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</div></div></header>
-      {isLiveMode && <div className="live-data-notice">LIVE MODE · Companies, branches, employee workflows, and deduction requests use Supabase. Attendance, leave, payroll, and reports remain unavailable; synthetic records are not shown.</div>}{authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}
-      <main className="page-content"><Suspense fallback={<div className="route-loading"><span className="route-loading-mark">GB</span><span>Opening workspaceâ€¦</span></div>}><Routes><Route path="/" element={isLiveMode ? <LiveDashboard companies={companies} loading={companiesLoading} /> : <Dashboard />} /><Route path="/companies" element={<CompanyDirectory />} /><Route path="/companies/new" element={<CompanyForm mode="create" />} /><Route path="/companies/:companyId/edit" element={<CompanyForm mode="edit" />} /><Route path="/companies/:companyId" element={<CompanyProfile />} /><Route path="/branches" element={<BranchManagement />} /><Route path="/employees" element={isLiveMode ? <LiveEmployeeDirectory /> : <EmployeeDirectory />} /><Route path="/employee-approvals" element={isLiveMode ? <LiveEmployeeApprovals /> : <EmployeeApprovals />} /><Route path="/employees/new" element={isLiveMode ? <LiveEmployeeForm /> : <EmployeeForm />} /><Route path="/employees/import" element={isLiveMode ? <LiveModuleUnavailable name="Employee import" /> : <EmployeeImport />} /><Route path="/employees/:employeeId/correct" element={isLiveMode ? <LiveModuleUnavailable name="Employee corrections" /> : <EmployeeForm />} /><Route path="/employees/:employeeId" element={isLiveMode ? <LiveModuleUnavailable name="Employee profile" /> : <EmployeeProfile />} /><Route path="/attendance" element={isLiveMode ? <LiveAttendance /> : <AttendanceScreen />} /><Route path="/leave" element={isLiveMode ? <LiveLeave /> : <LeaveScreen />} /><Route path="/departments" element={isLiveMode ? <LiveModuleUnavailable name="Departments" /> : <CatalogScreen type="departments" />} /><Route path="/job-roles" element={isLiveMode ? <LiveModuleUnavailable name="Job roles" /> : <CatalogScreen type="roles" />} /><Route path="/payroll" element={isLiveMode ? <LivePayrollInputs /> : <PayrollScreen />} /><Route path="/deductions" element={isLiveMode ? <LiveDeductions /> : <EmployeeDeductions />} /><Route path="/statutory" element={isLiveMode ? <LiveModuleUnavailable name="Statutory deductions" /> : <StatutoryScreen />} /><Route path="/reports" element={isLiveMode ? <LiveModuleUnavailable name="Reports" /> : <ReportsScreen />} /><Route path="/users" element={isLiveMode ? <LiveModuleUnavailable name="Users and permissions" /> : <UsersScreen />} /><Route path="/audit" element={isLiveMode ? <LiveModuleUnavailable name="Audit logs" /> : <AuditScreen />} /><Route path="/notifications" element={isLiveMode ? <LiveModuleUnavailable name="Notifications" /> : <NotificationsScreen />} /><Route path="/settings" element={isLiveMode ? <LiveModuleUnavailable name="Settings" /> : <SettingsScreen/>}/>{nav.flatMap((section) => section.items).filter((item) => !['/', '/companies', '/branches', '/employees', '/employee-approvals', '/attendance', '/leave', '/payroll', '/deductions', '/statutory', '/reports', '/users', '/audit', '/settings'].includes(item.path)).map((item) => <Route key={item.path} path={item.path} element={isLiveMode ? <LiveModuleUnavailable name={item.name} /> : <Placeholder name={item.name} />} />)}<Route path="*" element={isLiveMode ? <LiveDashboard companies={companies} loading={companiesLoading} /> : <Dashboard />} /></Routes></Suspense></main>
+    <div className="main-column"><header className="topbar"><div className="top-left"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions"><label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All companies</option>{companies.filter((company) => company.status === 'Active').map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label><button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search"><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link>{isLiveMode && <button className="auth-signout" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } }}>Sign out</button>}<div className="top-avatar" title={isLiveMode ? auth.user?.email ?? '' : 'Chola Mwansa'}>{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</div></div></header>
+      {isLiveMode && <div className="live-data-notice">LIVE MODE · Companies, branches, employees, attendance, leave, deductions, and payroll workflows use Supabase. Payroll calculation, submission, review, approval, finalization, and payout instruction preparation are enabled for authorized roles. Payment-provider transfers are not connected. Synthetic business data is hidden.</div>}{authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}
+      <main className="page-content"><Suspense fallback={<div className="route-loading"><span className="route-loading-mark">GB</span><span>Opening workspaceâ€¦</span></div>}><Routes><Route path="/" element={isLiveMode ? <LiveDashboard companies={companies} loading={companiesLoading} /> : <Dashboard />} /><Route path="/companies" element={<CompanyDirectory />} /><Route path="/companies/new" element={<CompanyForm mode="create" />} /><Route path="/companies/:companyId/edit" element={<CompanyForm mode="edit" />} /><Route path="/companies/:companyId" element={<CompanyProfile />} /><Route path="/branches" element={<BranchManagement />} /><Route path="/employees" element={isLiveMode ? <LiveEmployeeDirectory /> : <EmployeeDirectory />} /><Route path="/employee-approvals" element={isLiveMode ? <LiveEmployeeApprovals /> : <EmployeeApprovals />} /><Route path="/employees/new" element={isLiveMode ? <LiveEmployeeForm /> : <EmployeeForm />} /><Route path="/employees/import" element={isLiveMode ? <LiveEmployeeImport /> : <EmployeeImport />} /><Route path="/employees/:employeeId/correct" element={isLiveMode ? <LiveEmployeeForm /> : <EmployeeForm />} /><Route path="/employees/:employeeId" element={isLiveMode ? <LiveEmployeeProfile /> : <EmployeeProfile />} /><Route path="/attendance" element={isLiveMode ? <LiveAttendance /> : <AttendanceScreen />} /><Route path="/leave" element={isLiveMode ? <LiveLeave /> : <LeaveScreen />} /><Route path="/departments" element={isLiveMode ? <LiveHrCatalog type="departments" /> : <CatalogScreen type="departments" />} /><Route path="/job-roles" element={isLiveMode ? <LiveHrCatalog type="jobRoles" /> : <CatalogScreen type="roles" />} /><Route path="/payroll" element={isLiveMode ? <LivePayrollInputs /> : <PayrollScreen />} /><Route path="/payslips" element={isLiveMode ? <LivePayslips /> : <LiveModuleUnavailable name="Payslips" />} /><Route path="/reconciliation" element={isLiveMode ? <LivePayrollReconciliation /> : <LiveModuleUnavailable name="Payout reconciliation" />} /><Route path="/deductions" element={isLiveMode ? <LiveDeductions /> : <EmployeeDeductions />} /><Route path="/statutory" element={isLiveMode ? <LiveStatutoryFilings /> : <StatutoryScreen />} /><Route path="/reports" element={isLiveMode ? <LivePayrollReports /> : <ReportsScreen />} /><Route path="/users" element={isLiveMode ? <LiveUserAdmin /> : <UsersScreen />} /><Route path="/audit" element={isLiveMode ? <LiveAuditLogs /> : <AuditScreen />} /><Route path="/notifications" element={isLiveMode ? <LiveNotifications /> : <NotificationsScreen />} /><Route path="/settings" element={isLiveMode ? <LiveSettings /> : <SettingsScreen/>}/>{nav.flatMap((section) => section.items).filter((item) => !['/', '/companies', '/branches', '/employees', '/employee-approvals', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/users', '/audit', '/notifications', '/settings'].includes(item.path)).map((item) => <Route key={item.path} path={item.path} element={isLiveMode ? <LiveModuleUnavailable name={item.name} /> : <Placeholder name={item.name} />} />)}<Route path="*" element={isLiveMode ? <LiveDashboard companies={companies} loading={companiesLoading} /> : <Dashboard />} /></Routes></Suspense></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span><i className="status-dot" /> All systems operational</span></footer>
     </div>
   </div></PayrollContext.Provider></EmployeeContext.Provider></WorkspaceContext.Provider>
 }
 function LiveDashboard({ companies, loading }: { companies: Company[]; loading: boolean }) {
+  const { activeCompanyId, setActiveCompany } = useWorkspace()
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
+  const [metricsLoading, setMetricsLoading] = useState(false)
+  const [metricsError, setMetricsError] = useState('')
+  const selectedCompany = activeCompanyId === 'all' ? null : companies.find((company) => company.id === activeCompanyId) ?? null
+  const scopeCompanies = selectedCompany ? [selectedCompany] : companies
+  const branchIds = selectedCompany ? selectedCompany.branches.filter((branch) => branch.status === 'Active').map((branch) => branch.id) : []
+  useEffect(() => {
+    if (loading || !companies.length) { setMetrics(null); return }
+    let cancelled = false
+    setMetricsLoading(true); setMetricsError('')
+    void loadDashboardMetrics(getSupabaseClient(), scopeCompanies.map((company) => company.id), branchIds)
+      .then((value) => { if (!cancelled) setMetrics(value) })
+      .catch(() => { if (!cancelled) { setMetrics(null); setMetricsError('Dashboard summaries are unavailable under your current company and branch permissions.') } })
+      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [loading, activeCompanyId, companies])
+  const money = metrics?.finalizedPayrollTotal == null ? 'Restricted' : `K${metrics.finalizedPayrollTotal.toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   return <>
-    <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> LIVE SUPABASE WORKSPACE</div><h1>Company workspace</h1><p>Business figures below come from records visible to your authenticated account.</p></div><div className="welcome-actions"><Link className="button-primary" to="/companies/new"><Building2 size={15}/> Add company</Link></div></section>
-    {loading ? <div className="panel empty-state" role="status">Loading authorized company records…</div> : <section className="metrics-grid"><Metric icon={<Building2 />} tone="teal" label="Authorized companies" value={String(companies.length)} note="Visible through database access policies" trend="Live data" /><Metric icon={<Users />} tone="blue" label="Employees" value="Not connected" note="No employee data is shown in LIVE mode" trend="Unavailable" /><Metric icon={<Wallet />} tone="amber" label="Payroll" value="Not connected" note="No payroll figures are shown in LIVE mode" trend="Unavailable" /><Metric icon={<CalendarDays />} tone="rose" label="HR workflows" value="Available" note="Attendance and leave use approved live records" trend="Live workflows" /></section>}
-    {workspaceErrorText(companies, loading) && <div className="panel empty-state">{workspaceErrorText(companies, loading)}</div>}
-    <div className="live-data-notice">Development data only. Company records are persistent; the remaining business modules are not connected.</div>
+    <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> LIVE SUPABASE WORKSPACE</div><h1>{selectedCompany?.name ?? 'Company workspace'}</h1><p>Summaries include records visible to your authenticated account.</p></div><div className="welcome-actions"><label className="live-report-filter">Company<select aria-label="Dashboard company filter" value={activeCompanyId} onChange={(event) => setActiveCompany(event.target.value)}><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label><Link className="button-primary" to="/companies/new"><Building2 size={15}/> Add company</Link></div></section>
+    {loading ? <div className="panel empty-state" role="status">Loading authorized companies…</div> : companies.length === 0 ? <div className="panel empty-state">No companies are visible to this account. Ask a portfolio administrator to grant access.</div> : metricsError ? <div className="auth-shell-error" role="alert">{metricsError}</div> : metricsLoading || !metrics ? <div className="panel empty-state" role="status">Loading authorized dashboard summaries…</div> : <section className="metrics-grid">
+      <Metric icon={<Building2 />} tone="teal" label="Companies in scope" value={String(scopeCompanies.length)} note="Authorized company records" trend="Live data" />
+      <Metric icon={<Users />} tone="blue" label="Employees" value={String(metrics.employees)} note={`${metrics.activeEmployees} active and approved`} trend="Live data" />
+      <Metric icon={<Wallet />} tone="amber" label="Finalized payroll" value={money} note={metrics.finalizedPayrollTotal == null ? 'Payroll rows are restricted' : 'Net pay in visible finalized runs'} trend="Permission checked" />
+      <Metric icon={<CalendarDays />} tone="rose" label="Pending approvals" value={String(metrics.pendingApprovals)} note={`${metrics.attendancePeriods} attendance periods · ${metrics.pendingLeave} leave requests pending`} trend="Live workflows" />
+    </section>}
+    {metrics && !metricsLoading && metrics.employees === 0 && !metricsError && <div className="panel empty-state">No employee or workflow records are available in this company scope yet.</div>}
+    <div className="live-data-notice">Employee and workflow summaries use tenant-scoped queries protected by Supabase row-level policies. Salary totals are shown only when finalized payroll rows are readable for your account.</div>
   </>
 }
-
-function workspaceErrorText(companies: Company[], loading: boolean) { return !loading && companies.length === 0 ? 'No companies are currently visible to this account. Create one if your role permits, or ask a portfolio administrator to grant access.' : '' }
 
 function LiveModuleUnavailable({ name }: { name: string }) {
   return <section className="welcome-row route-welcome"><div><div className="eyebrow"><span className="eyebrow-line" /> LIVE DATA MODE</div><h1>{name}</h1><p>This module is not connected to persistent Supabase business data yet.</p><div className="live-data-notice">Synthetic demo records are hidden in LIVE mode. No changes are being saved for this module.</div></div></section>
