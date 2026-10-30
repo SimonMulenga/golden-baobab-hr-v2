@@ -45,11 +45,31 @@ describe('LIVE attendance workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Record entry' }))
     fireEvent.change(screen.getByLabelText('Scheduled working days'), { target: { value: '22' } })
     fireEvent.change(screen.getByLabelText('Actual days worked'), { target: { value: '20' } })
-    fireEvent.change(screen.getByLabelText('Paid leave days'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Paid leave days taken'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
     await waitFor(() => expect(mocks.saveEntry).toHaveBeenCalledTimes(1))
     expect(mocks.saveEntry.mock.calls[0][0]).toMatchObject({ companyId: company.id, branchId: 'synthetic-branch', employeeId: employee.id, scheduledDays: 22, workedDays: 20, paidLeaveDays: 2, contractType: 'MONTHLY' })
     expect(await screen.findByRole('status')).toHaveTextContent('Monthly attendance entry saved')
+  })
+
+  it('lists branch employees in Update and defaults a new record to 22 scheduled days', async () => {
+    renderScreen()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+    const picker = await screen.findByRole('dialog', { name: 'Update attendance' })
+    fireEvent.click(within(picker).getByRole('button', { name: /Demo Worker/ }))
+    expect(await screen.findByRole('dialog', { name: 'Monthly attendance entry' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Scheduled working days')).toHaveValue(22)
+  })
+
+  it('blocks an attendance summary when work and leave exceed scheduled days', async () => {
+    renderScreen()
+    fireEvent.click(await screen.findByRole('button', { name: 'Record entry' }))
+    fireEvent.change(screen.getByLabelText('Actual days worked'), { target: { value: '21' } })
+    fireEvent.change(screen.getByLabelText('Paid leave days taken'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot exceed scheduled working days/i)
+    expect(mocks.saveEntry).not.toHaveBeenCalled()
   })
 
   it('exposes the attendance table as a named, keyboard-reachable data region', async () => {
@@ -59,7 +79,7 @@ describe('LIVE attendance workflow', () => {
     expect(within(records).getByRole('table', { name: 'Employee attendance' })).toBeInTheDocument()
     expect(within(records).getByRole('columnheader', { name: 'Entry status' })).toBeInTheDocument()
     expect(within(records).getByRole('columnheader', { name: 'Action' })).toBeInTheDocument()
-    expect(within(records).getByText('Missing')).toBeInTheDocument()
+    expect(await within(records).findByText('Missing')).toBeInTheDocument()
     expect(within(records).getByRole('button', { name: 'Record entry' })).toBeEnabled()
     expect(screen.getByRole('region', { name: 'Attendance filters' })).toBeInTheDocument()
   })

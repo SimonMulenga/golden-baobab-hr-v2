@@ -232,3 +232,15 @@
   .attendance-table-footer{align-items:flex-start;flex-direction:column;padding:12px 14px}
   .attendance-table-footer nav{align-self:flex-end}
 }
+
+.attendance-employee-picker{width:min(660px,100%)}
+.attendance-employee-picker>p{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.5}
+.attendance-employee-picker-list{display:grid;gap:7px;max-height:min(55dvh,520px);overflow:auto;padding:1px}
+.attendance-employee-picker-list>button{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);text-align:left;cursor:pointer}
+.attendance-employee-picker-list>button:hover:not(:disabled){border-color:#278779;background:color-mix(in srgb,#278779 6%,var(--panel))}
+.attendance-employee-picker-list>button:focus-visible{outline:3px solid color-mix(in srgb,#278779 35%,transparent);outline-offset:2px}
+.attendance-employee-picker-list>button:disabled{cursor:not-allowed;opacity:.65}
+.attendance-employee-picker-list>button>span:first-child{display:grid;gap:3px;min-width:0}
+.attendance-employee-picker-list strong{font-size:14px;line-height:1.4}
+.attendance-employee-picker-list small,.attendance-employee-picker-list>button>span:last-child{color:var(--muted);font-size:12px;line-height:1.4}
+@media(max-width:600px){.attendance-employee-picker-list>button{align-items:flex-start;flex-direction:column;gap:5px}}

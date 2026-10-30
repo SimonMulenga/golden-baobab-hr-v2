@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { resolveDataMode } from './data-mode'
 
 describe('data mode safety', () => {
-  it('keeps demo data available only in non-production builds', () => {
-    expect(resolveDataMode(undefined, false)).toBe('MOCK')
-    expect(resolveDataMode('MOCK', false)).toBe('MOCK')
-    expect(() => resolveDataMode('MOCK', true)).toThrow('disabled in production builds')
+  it('uses live data by default and rejects synthetic demo mode in all builds', () => {
+    expect(resolveDataMode(undefined, false)).toBe('LIVE')
+    expect(resolveDataMode(undefined, true)).toBe('LIVE')
+    expect(() => resolveDataMode('MOCK', false)).toThrow('must be LIVE')
+    expect(() => resolveDataMode('MOCK', true)).toThrow('must be LIVE')
   })
 
-  it('defaults production builds to live data and accepts explicit LIVE mode', () => {
-    expect(resolveDataMode(undefined, true)).toBe('LIVE')
+  it('accepts explicit LIVE mode for development and production', () => {
+    expect(resolveDataMode('LIVE', false)).toBe('LIVE')
     expect(resolveDataMode('LIVE', true)).toBe('LIVE')
   })
 })

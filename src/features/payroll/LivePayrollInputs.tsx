@@ -16,6 +16,10 @@ const monthEnd = (month: string) => {
   const [year, number] = month.split('-').map(Number)
   return new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10)
 }
+const followingMonth = (month: string) => {
+  const [year, number] = month.split('-').map(Number)
+  return new Date(Date.UTC(year, number, 1)).toISOString().slice(0, 7)
+}
 const money = (amount: number | null | undefined) => amount == null ? '—' : `K${Number(amount).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const csvCell = (value: unknown) => {
   let text = String(value ?? '')
@@ -58,6 +62,7 @@ export function LivePayrollInputs() {
   const [transitioning, setTransitioning] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [runConfirmation, setRunConfirmation] = useState<'TRIAL' | 'FINAL' | null>(null)
 
   useEffect(() => {
     if (company?.branches.some((item) => item.id === branchId)) return
@@ -87,8 +92,8 @@ export function LivePayrollInputs() {
       setError('Payroll run details could not be loaded. Check your access and try again.')
     }
   }
-  const load = async () => {
-    if (!companyId || !branchId || !month) return
+  const load = async (): Promise<PayrollPreviewInputs | null> => {
+    if (!companyId || !branchId || !month) return null
     setBusy(true); setError(''); setNotice(''); setInputs(null); setRun(null); setCalculation(null); setPayout(null)
     try {
       const api = services()
@@ -96,15 +101,17 @@ export function LivePayrollInputs() {
       if (result.items.some((item) => item.basic_salary_proration && !item.input_warnings.length
         && !isScheduledDayProrationConsistent(item.basic_salary_proration, item.basic_pay))) {
         setError('The server returned an inconsistent scheduled-day payroll breakdown. Draft creation is blocked; ask an administrator to review the calculation service.')
-        return
+        return null
       }
       setInputs(result)
       setEarningInputs(result.earning_inputs ?? [])
       setOvertimeDivisors(Object.fromEntries(result.items.map((item) => [item.employee_id, item.overtime_monthly_hours_divisor ?? 208])))
       setUnpaidMethods(Object.fromEntries(result.items.map((item) => [item.employee_id, item.unpaid_leave_deduction_method ?? 'BLOCK'])))
-    await refreshRuns()
+      await refreshRuns()
+      return result
     } catch (loadError) {
       setError(payrollInputLoadGuidance(loadError))
+      return null
     } finally { setBusy(false) }
   }
   const createEarning = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -164,17 +171,53 @@ export function LivePayrollInputs() {
     } catch { setError('Overtime schedule was not saved. Confirm compensation.edit access and check that this payroll period is still open.') }
     finally { setTransitioning(false) }
   }
-  const createDraft = async () => {
-    if (!inputs || !inputs.items.length || inputs.items.some((item) => item.input_warnings.length)) return
+  const createDraft = async (freshInputs: PayrollPreviewInputs = inputs as PayrollPreviewInputs): Promise<string | null> => {
+    if (!freshInputs || !freshInputs.items.length || freshInputs.items.some((item) => item.input_warnings.length)) return null
     setCreating(true); setError(''); setNotice('')
     try {
       const id = await services().payroll.createDraft({ companyId, branchId, periodStart: monthStart(month), periodEnd: monthEnd(month), frequency: 'MONTHLY', idempotencyKey: crypto.randomUUID() })
       await refreshRuns()
       await selectRun(id)
-      setNotice('Payroll draft saved. Calculate it to create the employee payroll lines.')
+      return id
     } catch {
       setError('Draft payroll was not created. Confirm payroll preparation access and check for an existing run for these dates.')
+      return null
     } finally { setCreating(false) }
+  }
+  const runPayroll = async (mode: 'TRIAL' | 'FINAL') => {
+    setRunConfirmation(null)
+    const freshInputs = await load()
+    if (!freshInputs) return
+    if (freshInputs.items.length === 0) {
+      setError('No employees are ready for this period. Approve employee onboarding, compensation, attendance and leave inputs before running payroll.')
+      return
+    }
+    const blocked = freshInputs.items.filter((item) => item.input_warnings.length > 0)
+    if (blocked.length) {
+      setError(`${blocked.length} employee ${blocked.length === 1 ? 'record has' : 'records have'} unresolved payroll readiness warnings. Review the warnings below and correct the source records before running payroll.`)
+      return
+    }
+    const id = await createDraft(freshInputs)
+    if (!id) return
+    setCalculating(true); setError(''); setNotice('')
+    try {
+      const calculationResult = await services().payroll.calculate(id, crypto.randomUUID())
+      setCalculation(calculationResult)
+      if (mode === 'FINAL') {
+        await services().payroll.submitForApproval(id)
+        await selectRun(id)
+        await refreshRuns()
+        setNotice('Final run submitted for independent HR review. The period remains locked after approval; payroll finalization is a separate authorized step.')
+      } else {
+        await selectRun(id)
+        await refreshRuns()
+        setNotice('Trial run calculated and saved. It has not been submitted for approval or finalized.')
+      }
+    } catch {
+      setError(mode === 'FINAL'
+        ? 'Final run was not submitted. Check the calculation, payroll submission access and current period status; no approval or finalization was recorded.'
+        : 'Trial run calculation failed. Review payroll readiness, statutory rules and employee net-pay limits; no partial payroll items were committed.')
+    } finally { setCalculating(false) }
   }
   const calculate = async () => {
     if (!run) return
@@ -207,7 +250,11 @@ export function LivePayrollInputs() {
     try {
       await services().payroll.reviewSubmission(run.id, action, run.version, reason)
       await selectRun(run.id); await refreshRuns()
-      setNotice(action === 'START_REVIEW' ? 'Review started for this exact payroll version.' : `Payroll ${action.toLowerCase().replaceAll('_', ' ')} recorded.`)
+      if (action === 'APPROVE') {
+        const next = followingMonth(month)
+        setMonth(next); setInputs(null); setEarningInputs([])
+        setNotice(`Payroll approved. ${month} is locked and ${next} is selected. Finalization remains a separate authorized step.`)
+      } else setNotice(action === 'START_REVIEW' ? 'Review started for this exact payroll version.' : `Payroll ${action.toLowerCase().replaceAll('_', ' ')} recorded.`)
     } catch { setError('Review action was denied or failed. The server enforces separation of duties, role permissions and version matching.') }
     finally { setTransitioning(false) }
   }
@@ -244,6 +291,7 @@ export function LivePayrollInputs() {
   const safeReset = (nextCompany: string, nextBranch: string) => {
     setCompanyId(nextCompany); setBranchId(nextBranch); setInputs(null); setRuns([]); setRunTotal(0); setRunPage(1); setRun(null); setCalculation(null); setHistory([]); setPayout(null); setError(''); setNotice('')
   }
+  const inputsHaveWarnings = Boolean(inputs?.items.some((item) => item.input_warnings.length > 0))
 
   return <div className="employee-screen live-payroll-inputs">
     <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/>PAYROLL</div><h1>Payroll</h1><p>Prepare, calculate, review and finalize monthly payroll.</p></div></section>
@@ -256,7 +304,9 @@ export function LivePayrollInputs() {
         {(company?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
       <label>Payroll month<input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setInputs(null); setRun(null); setCalculation(null); setPayout(null) }} /></label>
-      <button className="primary-button" type="button" disabled={busy || !companyId || !branchId} onClick={() => void load()}>{busy ? <RefreshCw size={15} className="spin"/> : <FileCheck2 size={15}/>} Load approved inputs</button>
+      <button className="secondary-button" type="button" disabled={busy || !companyId || !branchId} onClick={() => void load()}>{busy ? <RefreshCw size={15} className="spin"/> : <FileCheck2 size={15}/>} Review approved inputs</button>
+      <button className="secondary-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('TRIAL')}>Trial run · Save draft</button>
+      <button className="primary-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('FINAL')}>Final run · Submit for approval</button>
     </section>
     {error && <div className="panel live-inputs-error" role="alert">{error}</div>}
     {notice && <div className="panel live-inputs-note" role="status"><strong>{notice}</strong>{run && <span>Run reference: {run.id} · {run.status} · version {run.version}</span>}</div>}
@@ -289,7 +339,7 @@ export function LivePayrollInputs() {
         <div className="live-earning-list">{earningInputs.length ? earningInputs.map((entry) => <article key={entry.id}><div><strong>{entry.employee_number} · {entry.employee_name}</strong><span>{entry.earning_type.replaceAll('_',' ')} · {money(entry.amount)} · {entry.taxable_for_paye ? 'PAYE taxable' : 'not PAYE taxable'}</span>{entry.earning_type === 'OVERTIME' && <small>{entry.overtime_hours} hours · {entry.overtime_day_type?.replaceAll('_',' ')} · {entry.overtime_hourly_divisor} monthly hours · {entry.overtime_multiplier}× · {entry.overtime_work_date}</small>}<small>{entry.source_reference} · {entry.description}</small></div><span className={`approval-status status-${entry.status.toLowerCase()}`}>{entry.status}</span>{entry.status === 'SUBMITTED' && <div className="approval-actions"><button className="secondary-button" type="button" disabled={transitioning} onClick={() => void reviewEarning(entry,'APPROVE')}>Approve</button><button className="secondary-button" type="button" disabled={transitioning} onClick={() => void reviewEarning(entry,'REJECT')}>Reject</button></div>}</article>) : <p>No earnings adjustments recorded for this payroll period.</p>}</div>
       </section>
       {inputs.items.some((item) => item.input_warnings.length) && <div className="panel live-inputs-error"><strong>Preparation warnings</strong>{inputs.items.filter((item) => item.input_warnings.length).map((item) => <div key={item.employee_id}><strong>{item.employee_number}</strong><ul>{item.input_warnings.map((warning) => <li key={warning}>{payrollWarningGuidance(warning)}</li>)}</ul></div>)}</div>}
-      <div className="live-inputs-draft-action"><span>Draft payroll is available when employee, attendance, leave and compensation details are approved and complete for this period.</span><button className="primary-button" type="button" disabled={creating || !inputs.items.length || inputs.items.some((item) => item.input_warnings.length)} onClick={() => void createDraft()}>{creating ? 'Creating draft…' : 'Create or open draft payroll'}</button></div>
+
     </>}
 
     <section className="panel payroll-live-runs"><header><div><div className="section-eyebrow">PAYROLL HISTORY</div><h2>Runs for this company and branch</h2></div><button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshRuns()}>Refresh runs</button></header>
@@ -304,7 +354,7 @@ export function LivePayrollInputs() {
         <div className="panel live-inputs-table-wrap"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Basic (adjusted)</th><th>Taxable allowances</th><th>Overtime</th><th>Bonus / other earnings</th><th>Gross</th><th>Taxable income</th><th>PAYE</th><th>NAPSA EE / ER</th><th>NHIMA EE / ER</th><th>Unpaid-leave adjustment</th><th>Approved deductions</th><th>Net pay</th><th>Employer cost</th></tr></thead><tbody>{calculation.items.map((item) => <tr key={item.employee_id}><td><strong>{item.employee_name}</strong><small>{item.employee_number}</small></td><td>{money(item.basic_salary)}</td><td>{money(item.taxable_allowances)}</td><td>{money(item.overtime)}</td><td>{money(item.bonuses_and_other_earnings)}</td><td>{money(item.gross_earnings)}</td><td>{money(item.paye_taxable_income)}</td><td>{money(item.paye)}</td><td>{money(item.napsa_employee)} / {money(item.napsa_employer)}</td><td>{money(item.nhima_employee)} / {money(item.nhima_employer)}</td><td>{money(item.attendance_deduction)}</td><td>{money(item.other_approved_deductions)}</td><td>{money(item.net_pay)}</td><td>{money(item.total_employer_cost)}</td></tr>)}</tbody></table></div>
         <p className="live-trial-footnote">Calculated using the approved Zambia payroll rules for this period. Values are rounded to two decimal places.</p>
         <div className="payroll-live-actions">
-          {run.status === 'CALCULATED' && <button className="primary-button" disabled={transitioning} onClick={() => void submit()}><Send size={14}/> Submit for approval</button>}
+          {run.status === 'CALCULATED' && <button className="primary-button" disabled={transitioning} onClick={() => void submit()}><Send size={14}/> Submit this version for approval</button>}
           {run.status === 'SUBMITTED_FOR_APPROVAL' && <button className="primary-button" disabled={transitioning} onClick={() => void review('START_REVIEW')}><FileCheck2 size={14}/> Start review</button>}
           {run.status === 'UNDER_REVIEW' && <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve version {run.version}</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll for correction'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for rejecting this payroll'); if (reason?.trim()) void review('REJECT', reason) }}>Reject</button></>}
           {run.status === 'APPROVED' && <button className="primary-button" disabled={transitioning} onClick={() => void finalize()}><Check size={14}/> Finalize approved version</button>}
@@ -315,6 +365,6 @@ export function LivePayrollInputs() {
       {!calculation && <p className="payroll-live-empty">A calculation has not been completed for this run.</p>}
     </section>}
 
-    {payout && <section className="panel payroll-live-payout"><header><div><div className="section-eyebrow">PAYMENT INSTRUCTIONS · READY TO DOWNLOAD</div><h2>Payment instruction file</h2><p>{payout.instructions.length} recipients · This file has not been sent to a payment provider.</p></div><button className="primary-button" onClick={downloadPayoutCsv}><Download size={14}/> Download bank instruction CSV</button></header><p>The file contains sensitive payment details. Store and transmit it only through your organization’s approved banking channel. No funds have been transferred.</p></section>}
+    {runConfirmation && <div className="ops-backdrop"><section className="panel payroll-run-confirmation" role="dialog" aria-modal="true" aria-labelledby="payroll-run-confirmation-title"><header><div><h2 id="payroll-run-confirmation-title">{runConfirmation === 'TRIAL' ? 'Start a trial run?' : 'Submit a final run for approval?'}</h2><p>{company?.name} · {company?.branches.find((item) => item.id === branchId)?.name} · {month}</p></div><button className="icon-button" type="button" onClick={() => setRunConfirmation(null)} aria-label="Close">×</button></header><p>Have you entered and checked this period’s attendance, worked days, leave, advances and deductions?</p><ul><li>Only approved records are included.</li><li>Payroll readiness warnings stop the run.</li><li>{runConfirmation === 'TRIAL' ? 'The calculation is saved but not submitted.' : 'The calculated version is submitted for independent HR approval. It is not finalized or paid.'}</li></ul><footer><button className="secondary-button" type="button" onClick={() => setRunConfirmation(null)}>Not yet</button><button className="primary-button" type="button" disabled={busy || creating || calculating || transitioning} onClick={() => { if (runConfirmation) void runPayroll(runConfirmation) }}>{runConfirmation === 'TRIAL' ? 'Yes, run trial' : 'Yes, submit final run'}</button></footer></section></div>}    {payout && <section className="panel payroll-live-payout"><header><div><div className="section-eyebrow">PAYMENT INSTRUCTIONS · READY TO DOWNLOAD</div><h2>Payment instruction file</h2><p>{payout.instructions.length} recipients · This file has not been sent to a payment provider.</p></div><button className="primary-button" onClick={downloadPayoutCsv}><Download size={14}/> Download bank instruction CSV</button></header><p>The file contains sensitive payment details. Store and transmit it only through your organization’s approved banking channel. No funds have been transferred.</p></section>}
   </div>
 }

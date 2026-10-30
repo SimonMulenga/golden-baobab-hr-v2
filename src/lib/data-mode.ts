@@ -1,20 +1,16 @@
-export type DataMode = 'MOCK' | 'LIVE'
+export type DataMode = 'LIVE'
 
-export function resolveDataMode(value: string | undefined, productionBuild: boolean): DataMode {
+export function resolveDataMode(value: string | undefined, _productionBuild: boolean): DataMode {
   const normalized = value?.trim().toUpperCase()
 
-  if (!normalized) return productionBuild ? 'LIVE' : 'MOCK'
-  if (normalized === 'MOCK' && productionBuild) {
-    throw new Error('MOCK data mode is disabled in production builds. Configure VITE_DATA_MODE=LIVE.')
-  }
-  if (normalized === 'MOCK' || normalized === 'LIVE') return normalized
+  if (!normalized || normalized === 'LIVE') return 'LIVE'
 
   throw new Error(
-    `Invalid VITE_DATA_MODE "${value}". Set it to MOCK or LIVE.`,
+    `VITE_DATA_MODE must be LIVE. Synthetic demo mode is not available in this application.`,
   )
 }
 
-/** Local development can opt into demo data; production builds fail closed to LIVE. */
+/** The application always uses authenticated business data; demo records are test-only. */
 export const dataMode = resolveDataMode(import.meta.env.VITE_DATA_MODE, import.meta.env.PROD)
 
 export const isLiveMode = dataMode === 'LIVE'

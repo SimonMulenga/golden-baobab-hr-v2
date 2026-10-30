@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Check, ChevronLeft, ChevronRight, RefreshCw, Send } from 'lucide-react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, RefreshCw, Send, UserRoundPen } from 'lucide-react'
 import { formatWorkspaceDateTime, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type AttendanceEntryRecord, type AttendancePeriodRecord, type EmployeeDirectoryRecord } from '../../services/live-business-services'
@@ -30,10 +30,11 @@ export function LiveAttendance() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<EmployeeDirectoryRecord | null>(null)
+  const [employeePickerOpen, setEmployeePickerOpen] = useState(false)
   const [correctionOpen, setCorrectionOpen] = useState(false)
   const [correctionReason, setCorrectionReason] = useState('')
   const [correctionCapability, setCorrectionCapability] = useState<'checking' | 'available' | 'unavailable'>('checking')
-  const [form, setForm] = useState({ scheduled: '', worked: '', paid: '0', unpaid: '0', other: '0', note: '' })
+  const [form, setForm] = useState({ scheduled: '22', worked: '', paid: '0', unpaid: '0', other: '0', note: '' })
 
   useEffect(() => {
     if (company?.branches.some((item) => item.id === branchId)) return
@@ -83,20 +84,30 @@ export function LiveAttendance() {
   const openEditor = (person: EmployeeDirectoryRecord) => {
     const row = byEmployee.get(person.id)
     setEditing(person)
-    setForm({ scheduled: row ? String(row.scheduled_working_days) : '', worked: row ? String(row.actual_days_worked) : '',
+    setForm({ scheduled: row ? String(row.scheduled_working_days) : '22', worked: row ? String(row.actual_days_worked) : '',
       paid: row ? String(row.paid_leave_days) : '0', unpaid: row ? String(row.unpaid_leave_days) : '0',
       other: row ? String(row.other_payable_absence_days) : '0', note: '' })
   }
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); if (!editing || !company?.portfolioId || !branchId) return
+    const scheduled = Number(form.scheduled)
+    const worked = Number(form.worked)
+    const paid = Number(form.paid)
+    const unpaid = Number(form.unpaid)
+    const other = Number(form.other)
+    if ([scheduled, worked, paid, unpaid, other].some((value) => !Number.isFinite(value) || value < 0 || value > 31)
+      || worked + paid + unpaid + other > scheduled) {
+      setError('Check the day totals. Worked, leave and other absence days cannot exceed scheduled working days.')
+      return
+    }
     setBusy(true); setError(''); setNotice('')
     try {
       const services = createLiveBusinessServices(getSupabaseClient())
       await services.attendance.saveEntry({ portfolioId: company.portfolioId, companyId, branchId,
         periodStart: monthStart(month), periodEnd: monthEnd(month), employeeId: editing.id,
-        scheduledDays: Number(form.scheduled), workedDays: Number(form.worked), paidLeaveDays: Number(form.paid),
-        unpaidLeaveDays: Number(form.unpaid), payableAbsenceDays: Number(form.other), contractType: editing.contract_type,
+        scheduledDays: scheduled, workedDays: worked, paidLeaveDays: paid,
+        unpaidLeaveDays: unpaid, payableAbsenceDays: other, contractType: editing.contract_type,
         correctionNote: form.note })
       setEditing(null); setNotice('Monthly attendance entry saved.'); await load()
     } catch { setError('Attendance was not saved. Verify the values and your branch permission.') }
@@ -130,6 +141,9 @@ export function LiveAttendance() {
         <p>Review each employee’s monthly record, resolve missing entries and submit the branch period for approval.</p>
       </div>
       <div className="welcome-actions">
+        <button className="button-primary" type="button" onClick={() => setEmployeePickerOpen(true)} disabled={!branchId || loading || !employees.length || !entriesEditable}>
+          <UserRoundPen size={16}/> Update
+        </button>
         <button className="button-secondary" type="button" onClick={() => void load()} disabled={loading}>
           <RefreshCw size={16}/> {loading ? 'Refreshing' : 'Refresh records'}
         </button>
@@ -138,7 +152,7 @@ export function LiveAttendance() {
 
     <section className="panel attendance-filter-panel" aria-label="Attendance filters">
       <div className="attendance-filter-heading">
-        <div><h2>Attendance period</h2><p>Choose the company, branch and month to review.</p></div>
+      <div><h2>Attendance period</h2><p>Choose the company, branch and month to review. New entries start at 22 days; adjust them to the approved branch schedule.</p></div>
         {period && <span className={`ops-pill ops-${period.status.toLowerCase().replaceAll('_', '-')}`}>{period.status.replaceAll('_', ' ')}</span>}
       </div>
       <div className="attendance-filter-grid">
@@ -217,8 +231,9 @@ export function LiveAttendance() {
         </nav>
       </footer>
     </section>
+    {employeePickerOpen && <div className="ops-backdrop"><section className="ops-dialog attendance-employee-picker" role="dialog" aria-modal="true" aria-labelledby="attendance-update-title"><header><div><h2 id="attendance-update-title">Update attendance</h2><p>{company?.name} · {company?.branches.find((item) => item.id === branchId)?.name} · {month}</p></div><button className="icon-button" type="button" onClick={() => setEmployeePickerOpen(false)} aria-label="Close">×</button></header><p>Select an approved employee in this branch. Existing entries can be updated while the period is open.</p><div className="attendance-employee-picker-list">{employees.map((person) => { const row = byEmployee.get(person.id); return <button type="button" key={person.id} disabled={!entriesEditable} onClick={() => { setEmployeePickerOpen(false); openEditor(person) }}><span><strong>{person.first_name} {person.last_name}</strong><small>{person.employee_number} · {person.department || 'No department'}</small></span><span>{row ? `${row.actual_days_worked} worked · ${row.paid_leave_days + row.unpaid_leave_days} leave` : 'No entry · defaults to 22 scheduled days'}</span></button> })}</div></section></div>}
     {period && <section className="panel peopleops-panel"><div className="leave-list-heading"><div><div className="section-eyebrow">PERIOD AUDIT TRAIL</div><h2>Attendance history</h2></div></div>{history.length ? <ol className="attendance-history">{history.map((item) => <li key={item.id}><strong>{item.previous_status ?? 'Created'} → {item.new_status}</strong><span>{item.action} · {formatWorkspaceDateTime(item.occurred_at, preferences)}</span>{item.reason && <p>{item.reason}</p>}</li>)}</ol> : <div className="ops-empty">No attendance workflow changes recorded yet.</div>}</section>}
-    {editing && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true"><header><div><h2>Monthly attendance entry</h2><p>{editing.first_name} {editing.last_name} · {month}</p></div><button className="icon-button" onClick={() => setEditing(null)} aria-label="Close">×</button></header><form onSubmit={save}><div className="ops-date-pair"><label>Scheduled working days<input type="number" min="0" step="0.5" required value={form.scheduled} onChange={(event) => setForm({ ...form, scheduled: event.target.value })}/></label><label>Actual days worked<input type="number" min="0" step="0.5" required value={form.worked} onChange={(event) => setForm({ ...form, worked: event.target.value })}/></label><label>Paid leave days<input type="number" min="0" step="0.5" value={form.paid} onChange={(event) => setForm({ ...form, paid: event.target.value })}/></label><label>Unpaid leave days<input type="number" min="0" step="0.5" value={form.unpaid} onChange={(event) => setForm({ ...form, unpaid: event.target.value })}/></label><label>Other payable absence<input type="number" min="0" step="0.5" value={form.other} onChange={(event) => setForm({ ...form, other: event.target.value })}/></label></div><label>Correction note<textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Required context for a correction" rows={2}/></label><p><CalendarDays size={14}/> Entries are checked against scheduled days. Approved leave is summarized separately.</p><footer><button type="button" className="button-secondary" onClick={() => setEditing(null)}>Cancel</button><button className="button-primary" disabled={busy}><Check size={14}/> Save entry</button></footer></form></section></div>}
+    {editing && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-entry-title"><header><div><h2 id="attendance-entry-title">Monthly attendance entry</h2><p>{editing.first_name} {editing.last_name} · {month}</p></div><button className="icon-button" onClick={() => setEditing(null)} aria-label="Close">×</button></header><form onSubmit={save}><div className="ops-date-pair"><label>Scheduled working days<input type="number" min="0" max="31" step="0.5" required value={form.scheduled} onChange={(event) => setForm({ ...form, scheduled: event.target.value })}/></label><label>Actual days worked<input type="number" min="0" max="31" step="0.5" required value={form.worked} onChange={(event) => setForm({ ...form, worked: event.target.value })}/></label><label>Paid leave days taken<input type="number" min="0" max="31" step="0.5" value={form.paid} onChange={(event) => setForm({ ...form, paid: event.target.value })}/></label><label>Unpaid leave days taken<input type="number" min="0" max="31" step="0.5" value={form.unpaid} onChange={(event) => setForm({ ...form, unpaid: event.target.value })}/></label><label>Other payable absence<input type="number" min="0" max="31" step="0.5" value={form.other} onChange={(event) => setForm({ ...form, other: event.target.value })}/></label></div><label>Correction note<textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Required context for a correction" rows={2}/></label><p><CalendarDays size={14}/> New entries use an editable 22-day starting value; follow the approved branch schedule. Saving refreshes attendance totals. Leave balances still follow approved leave requests, and payroll checks attendance against approved leave.</p><footer><button type="button" className="button-secondary" onClick={() => setEditing(null)}>Cancel</button><button className="button-primary" disabled={busy}><Check size={14}/> Save entry</button></footer></form></section></div>}
     {correctionOpen && period && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title"><header><div><h2 id="attendance-correction-title">Request attendance correction</h2><p>{month} · {company?.name}</p></div><button className="icon-button" type="button" onClick={() => setCorrectionOpen(false)} aria-label="Close">×</button></header><form onSubmit={(event) => { event.preventDefault(); void transition('request-correction', correctionReason) }}><label>Reason for correction<textarea autoFocus required minLength={3} maxLength={1000} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} rows={4}/></label><p>Payroll run history is checked before reopening. After changes, submit the period for review by a different authorized reviewer.</p><footer><button type="button" className="button-secondary" disabled={busy} onClick={() => setCorrectionOpen(false)}>Cancel</button><button className="button-primary" disabled={busy || correctionReason.trim().length < 3}>{busy ? 'Requesting…' : 'Open correction'}</button></footer></form></section></div>}
   </div>
 }

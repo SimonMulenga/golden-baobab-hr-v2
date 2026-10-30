@@ -60,3 +60,15 @@
 @media(max-width:560px){.live-earning-form{grid-template-columns:1fr}.live-earning-list article .approval-actions{width:100%}.live-earning-list article .approval-actions button{flex:1}}
 .branch-calendar-workflow{margin-block:1rem;padding:1.1rem}.branch-calendar-workflow header h2{margin:0 0 .35rem}.branch-calendar-workflow header p,.branch-calendar-workflow>p{color:var(--muted-foreground);max-width:78ch}.branch-calendar-workflow form{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,.5fr) auto;gap:.75rem;align-items:end}.branch-calendar-workflow form label{display:grid;gap:.35rem;font-weight:600}.branch-calendar-workflow textarea,.branch-calendar-workflow input{width:100%;min-width:0;border:1px solid var(--border);border-radius:.55rem;padding:.65rem;background:var(--background);color:var(--foreground)}.branch-calendar-workflow form small{grid-column:1/-1;color:var(--muted-foreground)}.branch-calendar-record{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.75rem 0;border-bottom:1px solid var(--border)}.branch-calendar-record>span{color:var(--muted-foreground)}.branch-calendar-actions{display:flex;gap:.5rem;margin-left:auto}
 @media(max-width:760px){.branch-calendar-workflow form{grid-template-columns:1fr}.branch-calendar-workflow form small{grid-column:auto}.branch-calendar-actions{width:100%;margin-left:0}.branch-calendar-actions button{flex:1}}
+.live-inputs-draft-action>div:first-child{display:grid;gap:4px;flex:1 1 280px}
+.live-inputs-draft-action>div:first-child strong{color:var(--text-primary);font-size:16px}
+.payroll-run-choice-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}
+.payroll-run-choice-actions button{min-height:44px}
+.payroll-run-confirmation{width:min(520px,100%);padding:22px}
+.payroll-run-confirmation>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.payroll-run-confirmation h2{margin:0;font-size:19px;line-height:1.35}
+.payroll-run-confirmation header p{margin:5px 0 0;color:var(--text-muted);font-size:13px}
+.payroll-run-confirmation>p{margin:16px 0 10px;color:var(--text-primary);font-size:15px;line-height:1.5}
+.payroll-run-confirmation ul{display:grid;gap:8px;margin:0;padding-left:22px;color:var(--text-muted);font-size:14px;line-height:1.5}
+.payroll-run-confirmation footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
+@media(max-width:640px){.payroll-run-choice-actions{width:100%;display:grid}.payroll-run-choice-actions button{width:100%;min-height:46px}.payroll-run-confirmation{padding:18px}.payroll-run-confirmation footer{flex-direction:column-reverse}.payroll-run-confirmation footer button{width:100%;min-height:44px}}
