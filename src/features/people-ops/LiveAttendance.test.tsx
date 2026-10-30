@@ -42,7 +42,7 @@ describe('LIVE attendance workflow', () => {
 
   it('persists an employee monthly summary through the authorized RPC adapter', async () => {
     renderScreen()
-    fireEvent.click(await screen.findByRole('button', { name: 'Record' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Record entry' }))
     fireEvent.change(screen.getByLabelText('Scheduled working days'), { target: { value: '22' } })
     fireEvent.change(screen.getByLabelText('Actual days worked'), { target: { value: '20' } })
     fireEvent.change(screen.getByLabelText('Paid leave days'), { target: { value: '2' } })
@@ -57,7 +57,11 @@ describe('LIVE attendance workflow', () => {
     const records = await screen.findByRole('region', { name: 'Monthly attendance records' })
     expect(records).toHaveAttribute('tabindex', '0')
     expect(within(records).getByRole('table', { name: 'Employee attendance' })).toBeInTheDocument()
-    expect(within(records).getByRole('columnheader', { name: 'ACTION' })).toBeInTheDocument()
+    expect(within(records).getByRole('columnheader', { name: 'Entry status' })).toBeInTheDocument()
+    expect(within(records).getByRole('columnheader', { name: 'Action' })).toBeInTheDocument()
+    expect(within(records).getByText('Missing')).toBeInTheDocument()
+    expect(within(records).getByRole('button', { name: 'Record entry' })).toBeEnabled()
+    expect(screen.getByRole('region', { name: 'Attendance filters' })).toBeInTheDocument()
   })
 
   it('submits a recorded period and lets a separate reviewer approve it', async () => {
@@ -79,7 +83,7 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByRole('status')).toHaveTextContent(/reviewer must return it for correction/i)
+    expect(await screen.findByText(/reviewer must return it before entries can be changed/i)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
   })
 
@@ -90,7 +94,7 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByRole('status')).toHaveTextContent(/request an audited correction to reopen it/i)
+    expect(await screen.findByText(/request an audited correction to reopen it/i)).toHaveAttribute('role', 'status')
     expect(await screen.findByRole('button', { name: 'Correction unavailable' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
     expect(mocks.saveEntry).not.toHaveBeenCalled()
@@ -108,13 +112,13 @@ describe('LIVE attendance workflow', () => {
     fireEvent.change(screen.getByLabelText('Reason for correction'), { target: { value: 'Correct an approved attendance entry' } })
     fireEvent.click(screen.getByRole('button', { name: 'Open correction' }))
     await waitFor(() => expect(mocks.requestApprovedCorrection).toHaveBeenCalledWith(period.id, 'Correct an approved attendance entry'))
-    expect(await screen.findByText(/must be resubmitted for independent review/i)).toBeInTheDocument()
+    expect(await screen.findByText(/^Correction opened\./)).toBeInTheDocument()
   })
 
   it('does not display success when attendance persistence is denied', async () => {
     mocks.saveEntry.mockRejectedValue(new Error('permission denied'))
     renderScreen()
-    fireEvent.click(await screen.findByRole('button', { name: 'Record' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Record entry' }))
     fireEvent.change(screen.getByLabelText('Scheduled working days'), { target: { value: '22' } })
     fireEvent.change(screen.getByLabelText('Actual days worked'), { target: { value: '22' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))

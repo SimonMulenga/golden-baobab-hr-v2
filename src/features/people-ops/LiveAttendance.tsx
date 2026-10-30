@@ -122,23 +122,101 @@ export function LiveAttendance() {
     finally { setBusy(false) }
   }
 
-  return <div className="peopleops-screen">
-    <section className="welcome-row peopleops-heading"><div><div className="eyebrow"><span className="eyebrow-line"/>TIME & ATTENDANCE</div><h1>Monthly attendance</h1><p>Record attendance for approved employees, then submit the branch period for review.</p></div><div className="welcome-actions"><button className="button-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div></section>
-    <section className="panel peopleops-panel"><div className="peopleops-toolbar">
-      <label>Company<select aria-label="Attendance company" value={companyId} onChange={(event) => { const next = companies.find((item) => item.id === event.target.value); setCompanyId(event.target.value); setBranchId(next?.branches[0]?.id ?? ''); setPage(1) }}>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Branch<select aria-label="Attendance branch" value={branchId} onChange={(event) => { setBranchId(event.target.value); setPage(1) }}>{(company?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Attendance month<input type="month" aria-label="Attendance month" value={month} onChange={(event) => setMonth(event.target.value)}/></label>
-      {period && <span className={`ops-pill ops-${period.status.toLowerCase().replaceAll('_', '-')}`}>{period.status.replaceAll('_', ' ')}</span>}
-      {period?.status === 'DRAFT' || period?.status === 'RETURNED_FOR_CORRECTION' ? <button className="button-primary" disabled={busy || entries.length < total} onClick={() => void transition('submit')}><Send size={14}/> Submit period</button> : null}
-      {period?.status === 'SUBMITTED' ? <><button className="button-secondary" disabled={busy} onClick={() => void transition('return')}>Return for correction</button><button className="button-primary" disabled={busy} onClick={() => void transition('approve')}><Check size={14}/> Approve period</button></> : null}
-      {period?.status === 'APPROVED' && <button className="button-secondary" disabled={busy || correctionCapability !== 'available'} onClick={() => { setCorrectionReason(''); setCorrectionOpen(true) }}>{correctionCapability === 'checking' ? 'Checking correction access…' : correctionCapability === 'available' ? 'Request correction' : 'Correction unavailable'}</button>}
-    </div>
-    <div className="peopleops-kpis"><div><span>Approved employees · total</span><strong>{total}</strong></div><div><span>Recorded entries</span><strong>{entries.length}</strong></div><div><span>Scheduled days</span><strong>{summary.scheduled}</strong></div><div><span>Days worked</span><strong>{summary.worked}</strong></div><div><span>Paid / unpaid leave</span><strong>{summary.paid} / {summary.unpaid}</strong></div></div>
-    {period?.status === 'SUBMITTED' && <p role="status" className="live-notice">This attendance period is submitted and locked. A reviewer must return it for correction before entries can be changed.</p>}
-    {period?.status === 'APPROVED' && <p role="status" className="live-notice">This attendance period is approved and locked. Request an audited correction to reopen it; the corrected period must be resubmitted and independently reviewed. Reopening is blocked if a payroll run exists.</p>}
-    {notice && <p role="status" className="live-notice">{notice}</p>}{error && <p role="alert" className="live-error">{error}</p>}
-    <div className="table-scroll" role="region" aria-label="Monthly attendance records" tabIndex={0}><table className="peopleops-table" aria-label="Employee attendance"><thead><tr><th>EMPLOYEE</th><th>CONTRACT</th><th>SCHEDULED</th><th>WORKED</th><th>PAID LEAVE</th><th>UNPAID LEAVE</th><th>OTHER PAYABLE</th><th>ACTION</th></tr></thead><tbody>{employees.map((person) => { const row = byEmployee.get(person.id); return <tr key={person.id}><td><strong>{person.first_name} {person.last_name}</strong><small>{person.employee_number} · {person.department}</small></td><td>{person.contract_type}</td><td>{row?.scheduled_working_days ?? '—'}</td><td>{row?.actual_days_worked ?? '—'}</td><td>{row?.paid_leave_days ?? '—'}</td><td>{row?.unpaid_leave_days ?? '—'}</td><td>{row?.other_payable_absence_days ?? '—'}</td><td><button className="ops-action" disabled={!entriesEditable} onClick={() => openEditor(person)}>{entriesEditable ? row ? 'Correct' : 'Record' : 'Locked'}</button></td></tr> })}</tbody></table>{loading && <div className="ops-empty">Loading attendance…</div>}{!loading && !employees.length && <div className="ops-empty">No approved employees are visible in this branch.</div>}{!loading && employees.length > 0 && !period && <div className="ops-empty">No entries yet for this month. Recording an employee creates the monthly attendance period.</div>}</div>
-    <div className="peopleops-foot">Monthly entries appear in approval history. Attendance values do not automatically reduce pay; payroll rules determine the effect. <span><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={14}/></button> Page {page} <button disabled={page * pageSize >= total} onClick={() => setPage((value) => value + 1)}><ChevronRight size={14}/></button></span></div></section>
+  return <div className="peopleops-screen attendance-page">
+    <section className="welcome-row peopleops-heading attendance-page-heading">
+      <div>
+        <div className="eyebrow"><span className="eyebrow-line"/>TIME & ATTENDANCE</div>
+        <h1>Monthly attendance</h1>
+        <p>Review each employee’s monthly record, resolve missing entries and submit the branch period for approval.</p>
+      </div>
+      <div className="welcome-actions">
+        <button className="button-secondary" type="button" onClick={() => void load()} disabled={loading}>
+          <RefreshCw size={16}/> {loading ? 'Refreshing' : 'Refresh records'}
+        </button>
+      </div>
+    </section>
+
+    <section className="panel attendance-filter-panel" aria-label="Attendance filters">
+      <div className="attendance-filter-heading">
+        <div><h2>Attendance period</h2><p>Choose the company, branch and month to review.</p></div>
+        {period && <span className={`ops-pill ops-${period.status.toLowerCase().replaceAll('_', '-')}`}>{period.status.replaceAll('_', ' ')}</span>}
+      </div>
+      <div className="attendance-filter-grid">
+        <label>Company
+          <select aria-label="Attendance company" value={companyId} onChange={(event) => {
+            const next = companies.find((item) => item.id === event.target.value)
+            setCompanyId(event.target.value); setBranchId(next?.branches[0]?.id ?? ''); setPage(1)
+          }}>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        </label>
+        <label>Branch
+          <select aria-label="Attendance branch" value={branchId} onChange={(event) => { setBranchId(event.target.value); setPage(1) }}>
+            {(company?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </label>
+        <label>Month
+          <input type="month" aria-label="Attendance month" value={month} onChange={(event) => { setMonth(event.target.value); setPage(1) }}/>
+        </label>
+      </div>
+      {period && <div className="attendance-workflow-bar">
+        <div><strong>{period.status === 'APPROVED' ? 'Period approved' : period.status === 'SUBMITTED' ? 'Awaiting review' : period.status === 'RETURNED_FOR_CORRECTION' ? 'Returned for correction' : 'Draft period'}</strong>
+          <span>{entries.length} of {total} employee entries recorded</span></div>
+        <div className="attendance-workflow-actions">
+          {period.status === 'DRAFT' || period.status === 'RETURNED_FOR_CORRECTION' ? <button className="button-primary" type="button" disabled={busy || entries.length < total} onClick={() => void transition('submit')}><Send size={15}/> Submit for approval</button> : null}
+          {period.status === 'SUBMITTED' ? <><button className="button-secondary" type="button" disabled={busy} onClick={() => void transition('return')}>Return for correction</button><button className="button-primary" type="button" disabled={busy} onClick={() => void transition('approve')}><Check size={15}/> Approve period</button></> : null}
+          {period.status === 'APPROVED' && <button className="button-secondary" type="button" disabled={busy || correctionCapability !== 'available'} onClick={() => { setCorrectionReason(''); setCorrectionOpen(true) }}>{correctionCapability === 'checking' ? 'Checking correction access…' : correctionCapability === 'available' ? 'Request correction' : 'Correction unavailable'}</button>}
+        </div>
+      </div>}
+    </section>
+
+    <section className="attendance-summary" aria-label="Attendance summary">
+      <div><span>Approved employees</span><strong>{total}</strong></div>
+      <div><span>Entries recorded</span><strong>{entries.length} <small>of {total}</small></strong></div>
+      <div><span>Scheduled days</span><strong>{summary.scheduled}</strong></div>
+      <div><span>Days worked</span><strong>{summary.worked}</strong></div>
+      <div><span>Paid / unpaid leave</span><strong>{summary.paid} / {summary.unpaid}</strong></div>
+    </section>
+
+    {period?.status === 'SUBMITTED' && <p role="status" className="live-notice">This period is locked while under review. A reviewer must return it before entries can be changed.</p>}
+    {period?.status === 'APPROVED' && <p role="status" className="live-notice">This approved period is locked. Request an audited correction to reopen it; the changes must be resubmitted for independent review. Reopening is blocked if a payroll run exists.</p>}
+    {notice && <p role="status" className="live-notice">{notice}</p>}
+    {error && <p role="alert" className="live-error">{error}</p>}
+
+    <section className="panel attendance-records-panel" aria-labelledby="attendance-records-title">
+      <header className="attendance-records-heading">
+        <div><h2 id="attendance-records-title">Employee attendance</h2><p>Missing entries are marked clearly and must be recorded before submission.</p></div>
+        <span className="attendance-record-count">{employees.length ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}` : `0 of ${total}`} employees</span>
+      </header>
+      <div className="table-scroll attendance-table-scroll" role="region" aria-label="Monthly attendance records" tabIndex={0}>
+        <table className="peopleops-table attendance-table" aria-label="Employee attendance">
+          <thead><tr><th scope="col">Employee</th><th scope="col">Contract</th><th scope="col">Scheduled days</th><th scope="col">Days worked</th><th scope="col">Paid leave</th><th scope="col">Unpaid leave</th><th scope="col">Other payable</th><th scope="col">Entry status</th><th scope="col">Action</th></tr></thead>
+          <tbody>{employees.map((person) => {
+            const row = byEmployee.get(person.id)
+            return <tr key={person.id}>
+              <td className="attendance-employee-cell"><strong>{person.first_name} {person.last_name}</strong><small>{person.employee_number}{person.department ? ` · ${person.department}` : ''}</small></td>
+              <td>{person.contract_type || '—'}</td>
+              <td className="attendance-number-cell">{row?.scheduled_working_days ?? '—'}</td>
+              <td className="attendance-number-cell">{row?.actual_days_worked ?? '—'}</td>
+              <td className="attendance-number-cell">{row?.paid_leave_days ?? '—'}</td>
+              <td className="attendance-number-cell">{row?.unpaid_leave_days ?? '—'}</td>
+              <td className="attendance-number-cell">{row?.other_payable_absence_days ?? '—'}</td>
+              <td><span className={`attendance-entry-status ${row ? 'is-recorded' : 'is-missing'}`}><span aria-hidden="true"/>{row ? 'Recorded' : 'Missing'}</span></td>
+              <td><button className="ops-action" type="button" disabled={!entriesEditable} onClick={() => openEditor(person)}>{entriesEditable ? row ? 'Edit entry' : 'Record entry' : 'Locked'}</button></td>
+            </tr>
+          })}</tbody>
+        </table>
+        {loading && <div className="ops-empty" role="status">Loading attendance records…</div>}
+        {!loading && !employees.length && <div className="ops-empty">No approved employees are available in this branch.</div>}
+        {!loading && employees.length > 0 && !period && <div className="attendance-inline-note">No attendance period exists for this month yet. Record an entry to open the period.</div>}
+      </div>
+      <footer className="attendance-table-footer">
+        <p>Attendance is reviewed by period. Pay adjustments follow the approved payroll rules.</p>
+        <nav aria-label="Attendance employee pages">
+          <button type="button" aria-label="Previous employee page" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={17}/></button>
+          <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+          <button type="button" aria-label="Next employee page" disabled={page * pageSize >= total} onClick={() => setPage((value) => value + 1)}><ChevronRight size={17}/></button>
+        </nav>
+      </footer>
+    </section>
     {period && <section className="panel peopleops-panel"><div className="leave-list-heading"><div><div className="section-eyebrow">PERIOD AUDIT TRAIL</div><h2>Attendance history</h2></div></div>{history.length ? <ol className="attendance-history">{history.map((item) => <li key={item.id}><strong>{item.previous_status ?? 'Created'} → {item.new_status}</strong><span>{item.action} · {formatWorkspaceDateTime(item.occurred_at, preferences)}</span>{item.reason && <p>{item.reason}</p>}</li>)}</ol> : <div className="ops-empty">No attendance workflow changes recorded yet.</div>}</section>}
     {editing && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true"><header><div><h2>Monthly attendance entry</h2><p>{editing.first_name} {editing.last_name} · {month}</p></div><button className="icon-button" onClick={() => setEditing(null)} aria-label="Close">×</button></header><form onSubmit={save}><div className="ops-date-pair"><label>Scheduled working days<input type="number" min="0" step="0.5" required value={form.scheduled} onChange={(event) => setForm({ ...form, scheduled: event.target.value })}/></label><label>Actual days worked<input type="number" min="0" step="0.5" required value={form.worked} onChange={(event) => setForm({ ...form, worked: event.target.value })}/></label><label>Paid leave days<input type="number" min="0" step="0.5" value={form.paid} onChange={(event) => setForm({ ...form, paid: event.target.value })}/></label><label>Unpaid leave days<input type="number" min="0" step="0.5" value={form.unpaid} onChange={(event) => setForm({ ...form, unpaid: event.target.value })}/></label><label>Other payable absence<input type="number" min="0" step="0.5" value={form.other} onChange={(event) => setForm({ ...form, other: event.target.value })}/></label></div><label>Correction note<textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Required context for a correction" rows={2}/></label><p><CalendarDays size={14}/> Entries are checked against scheduled days. Approved leave is summarized separately.</p><footer><button type="button" className="button-secondary" onClick={() => setEditing(null)}>Cancel</button><button className="button-primary" disabled={busy}><Check size={14}/> Save entry</button></footer></form></section></div>}
     {correctionOpen && period && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title"><header><div><h2 id="attendance-correction-title">Request attendance correction</h2><p>{month} · {company?.name}</p></div><button className="icon-button" type="button" onClick={() => setCorrectionOpen(false)} aria-label="Close">×</button></header><form onSubmit={(event) => { event.preventDefault(); void transition('request-correction', correctionReason) }}><label>Reason for correction<textarea autoFocus required minLength={3} maxLength={1000} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} rows={4}/></label><p>Payroll run history is checked before reopening. After changes, submit the period for review by a different authorized reviewer.</p><footer><button type="button" className="button-secondary" disabled={busy} onClick={() => setCorrectionOpen(false)}>Cancel</button><button className="button-primary" disabled={busy || correctionReason.trim().length < 3}>{busy ? 'Requesting…' : 'Open correction'}</button></footer></form></section></div>}
