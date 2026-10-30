@@ -119,7 +119,7 @@ export function LivePayslips() {
 
   return <div className="live-payslips">
     <header className="page-heading"><div><div className="eyebrow">FINALIZED PAYROLL RECORDS</div><h1>Payslips</h1><p>View and print payslips from immutable finalized payroll lines.</p></div></header>
-    <div className="live-data-notice"><ShieldCheck size={15}/> Payslip details are read through payroll and employee row-level permissions. Figures come from the finalized run version; this screen does not recalculate payroll.</div>
+    <div className="live-data-notice"><ShieldCheck size={15}/> Payslip access follows your role and company access. Figures match finalized payroll and are not recalculated here.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="live-payslip-notice" role="status">{notice}</div>}
     <section className="panel live-payslip-filters" aria-label="Payslip filters">
       <label>Company<select aria-label="Payslip company" value={companyId} onChange={(event) => { setLoadingRuns(Boolean(event.target.value)); setLoadingItems(false); setRuns([]); setRunId(''); setItems([]); setEmployees([]); setCompanyId(event.target.value); setPage(1) }}><option value="">Select company</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>

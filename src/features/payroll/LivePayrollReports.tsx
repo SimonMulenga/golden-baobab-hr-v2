@@ -61,7 +61,7 @@ export function LivePayrollReports({ mode = 'payroll' }: { mode?: ReportMode }) 
         const people = await api().employees.byIds(result.items.map((item) => item.employee_id))
         if (!cancelled) { setItems(result.items); setEmployees(people); setTotal(result.total) }
       })
-      .catch(() => { if (!cancelled) setError('The finalized payroll register could not be read under payroll row-level permissions.') })
+      .catch(() => { if (!cancelled) setError('Payroll reports are unavailable for your access to this company. Check the selected company or ask an administrator to review your access.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [selectedRunId, selectedRunVersion, page])
