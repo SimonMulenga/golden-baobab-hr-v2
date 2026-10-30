@@ -14,7 +14,7 @@ export function payrollInputLoadGuidance(error: unknown): string {
     return 'Attendance is not ready for this payroll period. Create the attendance period for these exact dates, complete every employee entry, then submit and approve it.'
   }
   if (['PGRST202', '42883', 'PGRST203'].includes(code) || text.includes('could not find the function') || text.includes('schema cache')) {
-    return 'The payroll input service is unavailable in this database version. Confirm the payroll RPC migration is applied, then refresh the application.'
+    return 'Payroll inputs are not available yet. Ask your administrator to update the payroll service, then refresh and try again.'
   }
   if (code === '22023' || text.includes('valid payroll period')) {
     return 'Choose a valid payroll month and confirm its start and end dates.'
@@ -24,8 +24,8 @@ export function payrollInputLoadGuidance(error: unknown): string {
 
 export function payrollWarningGuidance(code: string): string {
   const messages: Record<string, string> = {
-    MISSING_EFFECTIVE_COMPENSATION: 'No compensation record covers this entire pay period.',
-    COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD: 'Compensation is not defined for this entire pay period exactly once. Check the employee’s approved compensation effective dates. If the employee started during this period, payroll is blocked until an approved partial-month pay rule is configured; do not change the effective date to force a full month of pay.',
+    MISSING_EFFECTIVE_COMPENSATION: 'No approved salary rate applies to this employee during the pay period. Review the employment start date and approved compensation history.',
+    COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD: 'Approved compensation does not cover each eligible scheduled workday exactly once. Review the employee’s start date, approved salary effective dates and branch work calendar. For an employee who joined during the month, scheduled-day proration uses the approved calendar; do not change dates to force a full month of pay.',
     EARNING_INPUTS_AWAITING_APPROVAL: 'Variable earnings are awaiting separate HR approval.',
     CROSS_PERIOD_LEAVE_REQUIRES_REVIEW: 'Approved leave crosses the payroll period boundary and needs HR review.',
     APPROVED_LEAVE_NOT_RECONCILED_WITH_ATTENDANCE: 'Approved leave days do not match the attendance entry.',

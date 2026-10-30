@@ -9,17 +9,18 @@ describe('payroll input guidance', () => {
     expect(payrollInputLoadGuidance({ code: '22023', message: 'An approved attendance period matching the payroll dates is required.' })).toContain('submit and approve it')
   })
   it('points to database deployment when the payroll RPC is missing', () => {
-    expect(payrollInputLoadGuidance({ code: 'PGRST202', message: 'Could not find the function in the schema cache' })).toContain('RPC migration')
+    expect(payrollInputLoadGuidance({ code: 'PGRST202', message: 'Could not find the function in the schema cache' })).toContain('update the payroll service')
   })
   it('maps known warning codes to actionable text and safely handles unknown codes', () => {
-    expect(payrollWarningGuidance('MISSING_EFFECTIVE_COMPENSATION')).toContain('covers this entire pay period')
+    expect(payrollWarningGuidance('MISSING_EFFECTIVE_COMPENSATION')).toContain('approved salary rate applies')
     expect(payrollWarningGuidance('INTERNAL_UNKNOWN')).not.toContain('INTERNAL_UNKNOWN')
   })
-  it('explains why a mid-period starter is blocked without suggesting a full-month workaround', () => {
+  it('explains compensation gaps using the approved scheduled-day proration workflow', () => {
     const guidance = payrollWarningGuidance('COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD')
-    expect(guidance).toContain('approved compensation effective dates')
-    expect(guidance).toContain('approved partial-month pay rule')
-    expect(guidance).toContain('do not change the effective date')
+    expect(guidance).toContain('approved salary effective dates')
+    expect(guidance).toContain('scheduled-day proration uses the approved calendar')
+    expect(guidance).toContain('do not change dates to force a full month of pay')
+    expect(guidance).not.toContain('blocked until an approved partial-month pay rule is configured')
   })
   it('explains branch calendar, attendance, compensation and allowance proration blockers', () => {
     expect(payrollWarningGuidance('MISSING_APPROVED_BRANCH_WORK_CALENDAR')).toContain('approved working calendar')

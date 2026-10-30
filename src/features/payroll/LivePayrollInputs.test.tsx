@@ -51,11 +51,31 @@ describe('LIVE persistent payroll workflow', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
+  it('uses business-facing payroll guidance instead of implementation banners', () => {
+    renderScreen()
+    expect(screen.getByText('Payroll controls')).toBeInTheDocument()
+    expect(screen.getByText(/approved payment channel/i)).toBeInTheDocument()
+    expect(screen.queryByText(/LIVE MODE|LIVE SUPABASE WORKSPACE|row-level policies|PostgreSQL/i)).not.toBeInTheDocument()
+  })
+
+  it('explains compensation coverage issues without stale partial-month instructions', async () => {
+    mocks.previewInputs.mockResolvedValue({
+      ...inputs,
+      items: [{ ...inputs.items[0], input_warnings: ['COMPENSATION_NOT_UNAMBIGUOUS_FOR_FULL_PERIOD'] }],
+    })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load approved inputs' }))
+    expect(await screen.findByText(/scheduled-day proration uses the approved calendar/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create or open draft payroll' })).toBeDisabled()
+    expect(screen.queryByText(/blocked until an approved partial-month pay rule is configured/i)).not.toBeInTheDocument()
+  })
+
   it('loads authorized inputs, persists a draft, calculates and shows the database breakdown', async () => {
     renderScreen()
     await loadAndCreate()
     fireEvent.click(screen.getByRole('button', { name: 'Calculate payroll' }))
-    expect(await screen.findByText('Calculation version 1 is persisted and ready for submission.')).toBeInTheDocument()
+    expect(await screen.findByText('Payroll calculation saved as version 1 and is ready for review.')).toBeInTheDocument()
     expect(screen.getAllByText('K19,619.60').length).toBeGreaterThan(0)
     expect(screen.getAllByText('K4,885.25').length).toBeGreaterThan(0)
     expect(screen.getAllByText('K13,602.45').length).toBeGreaterThan(0)
@@ -102,7 +122,7 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load approved inputs' }))
-    expect(await screen.findByText(/No payroll inputs are available/i)).toBeInTheDocument()
+    expect(await screen.findByText(/No employees are ready for this period/i)).toBeInTheDocument()
     expect(screen.queryByText('Synthetic Employee')).not.toBeInTheDocument()
   })
 
