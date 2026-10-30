@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
-const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
+const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), changeCapabilities: vi.fn(), requestApprovedChange: vi.fn(), pendingChangeRequests: vi.fn(), reviewChangeRequest: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
 const workspaceMocks = vi.hoisted(() => ({ companies: [] as unknown[], activeCompanyId: 'company-synthetic', setActiveCompany: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => 
   jobRoles: vi.fn().mockResolvedValue([{ id: 'job-role-1', department_id: 'department-1', title: 'Analyst', status: 'ACTIVE' }]),
 } }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
-  useWorkspace: () => ({ companies: workspaceMocks.companies, activeCompanyId: workspaceMocks.activeCompanyId, setActiveCompany: workspaceMocks.setActiveCompany }),
+  useWorkspace: () => ({ companies: workspaceMocks.companies, activeCompanyId: workspaceMocks.activeCompanyId, setActiveCompany: workspaceMocks.setActiveCompany, preferences: {} }),
   useCompanySelection: () => ({ companyId: workspaceMocks.activeCompanyId, company: (workspaceMocks.companies as { id: string }[]).find((item) => item.id === workspaceMocks.activeCompanyId), setCompanyId: vi.fn() }),
   formatWorkspaceDate: (value: string | number | Date) => new Date(value).toLocaleDateString('en-GB'),
   formatWorkspaceDateTime: (value: string | number | Date) => new Date(value).toLocaleString('en-GB'),
@@ -55,6 +55,10 @@ describe('LIVE employee screens', () => {
     serviceMocks.employmentHistory.mockResolvedValue([])
     serviceMocks.setEmploymentStatus.mockResolvedValue(undefined)
     serviceMocks.reviewSubmission.mockResolvedValue('employee-synthetic-1')
+    serviceMocks.changeCapabilities.mockResolvedValue({ can_request_employee: false, can_request_compensation: false, can_review: false, has_pending_request: false })
+    serviceMocks.requestApprovedChange.mockResolvedValue('change-synthetic-1')
+    serviceMocks.pendingChangeRequests.mockResolvedValue([])
+    serviceMocks.reviewChangeRequest.mockResolvedValue('change-synthetic-1')
     serviceMocks.createDraft.mockResolvedValue('employee-created-synthetic')
     serviceMocks.updateDraft.mockResolvedValue('employee-synthetic-1')
     serviceMocks.submitForHrApproval.mockResolvedValue('employee-created-synthetic')
@@ -83,6 +87,52 @@ describe('LIVE employee screens', () => {
     fireEvent.change(screen.getByPlaceholderText('Document the reason for this change'), { target: { value: 'Synthetic policy review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suspend' }))
     await waitFor(() => expect(serviceMocks.setEmploymentStatus).toHaveBeenCalledWith(employee.id, 'SUSPENDED', 'Synthetic policy review'))
+  })
+
+  it('shows approved-record employment and compensation actions only when existing capabilities allow them', async () => {
+    serviceMocks.byId.mockResolvedValue({ ...employee, approval_status: 'APPROVED' })
+    serviceMocks.changeCapabilities.mockResolvedValue({ can_request_employee: true, can_request_compensation: true, can_review: false, has_pending_request: false })
+    renderProfileRoute()
+    expect(await screen.findByRole('heading', { name: 'Edit employee or request a salary change' })).toBeInTheDocument()
+    expect(screen.getByLabelText('First name')).toBeInTheDocument()
+    expect(screen.getByLabelText('Gender')).toBeInTheDocument()
+    expect(screen.getByLabelText('New job title')).toBeInTheDocument()
+    expect(screen.getByLabelText('Basic pay (ZMW)')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Updated' } })
+    fireEvent.change(screen.getByLabelText('Gender'), { target: { value: 'FEMALE' } })
+    fireEvent.change(screen.getByLabelText('Residential address'), { target: { value: 'Synthetic updated address' } })
+    fireEvent.change(screen.getByLabelText('New job title'), { target: { value: 'Senior Analyst' } })
+    fireEvent.change(screen.getByLabelText('Reason for change'), { target: { value: 'Synthetic promotion' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for independent review' }))
+    await waitFor(() => expect(serviceMocks.requestApprovedChange).toHaveBeenCalledWith(employee.id, {
+      first_name: 'Updated', gender: 'FEMALE', private_details: { residential_address: 'Synthetic updated address' }, job_title: 'Senior Analyst',
+    }, {}, 'Synthetic promotion'))
+    expect(await screen.findByText(/has not been changed yet/)).toBeInTheDocument()
+  })
+
+  it('does not render approved-record edit controls when database capabilities deny access', async () => {
+    serviceMocks.byId.mockResolvedValue({ ...employee, approval_status: 'APPROVED' })
+    renderProfileRoute()
+    await screen.findByRole('heading', { name: 'Employment status' })
+    expect(screen.queryByRole('heading', { name: 'Edit employee or request a salary change' })).not.toBeInTheDocument()
+    expect(serviceMocks.requestApprovedChange).not.toHaveBeenCalled()
+  })
+
+  it('submits salary changes with an effective date and explicit allowance proration choice', async () => {
+    serviceMocks.byId.mockResolvedValue({ ...employee, approval_status: 'APPROVED' })
+    serviceMocks.changeCapabilities.mockResolvedValue({ can_request_employee: true, can_request_compensation: true, can_review: false, has_pending_request: false })
+    renderProfileRoute()
+    expect(await screen.findByText('Request salary change')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-11-01' } })
+    fireEvent.change(screen.getByLabelText('Basic pay (ZMW)'), { target: { value: '7200' } })
+    fireEvent.change(screen.getByLabelText('Transport allowance (ZMW)'), { target: { value: '600' } })
+    fireEvent.click(screen.getByLabelText('Prorate transport allowance by scheduled days'))
+    fireEvent.change(screen.getByLabelText('Reason for change'), { target: { value: 'Synthetic annual review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for independent review' }))
+    await waitFor(() => expect(serviceMocks.requestApprovedChange).toHaveBeenCalledWith(employee.id, {}, {
+      effective_from: '2026-11-01', basic_pay: 7200, transport_allowance: 600,
+      allowance_proration_rules: { transport_allowance: 'SCHEDULED_DAYS' },
+    }, 'Synthetic annual review'))
   })
 
   it('requests the submitted review queue and invokes the trusted approval action', async () => {
@@ -127,6 +177,7 @@ describe('LIVE employee screens', () => {
     for (const [label, value] of Object.entries(values)) fireEvent.change(screen.getByLabelText(label), { target: { value } })
     fireEvent.change(screen.getByLabelText('Company *'), { target: { value: 'company-synthetic' } })
     fireEvent.change(screen.getByLabelText('Workplace branch *'), { target: { value: 'branch-synthetic' } })
+    fireEvent.click(screen.getByLabelText('Prorate housing allowance by scheduled days'))
     fireEvent.submit(screen.getByRole('button', { name: 'Save and submit for review' }).closest('form')!)
     await waitFor(() => expect(serviceMocks.createDraft).toHaveBeenCalledTimes(1))
     const input = serviceMocks.createDraft.mock.calls[0][0]
@@ -136,6 +187,7 @@ describe('LIVE employee screens', () => {
     expect(input.privateDetails.identity_document_type).toBe('NRC')
     expect(input.privateDetails.bank_account_number).toBe('SYN-ACCT-2001')
     expect(input.compensation.basic_pay).toBe(6000)
+    expect(input.compensation.allowance_proration_rules).toEqual({ housing_allowance: 'SCHEDULED_DAYS' })
     expect(serviceMocks.submitForHrApproval).toHaveBeenCalledWith('employee-created-synthetic')
     expect(await screen.findByRole('status')).toHaveTextContent('submitted for HR approval')
   })

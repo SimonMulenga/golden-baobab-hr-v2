@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Building2, LoaderCircle, ShieldCheck, UserPlus, UserRoundMinus } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
-import { createLiveBusinessServices, type CompanyAdminRecord, type CompanyPayrollApproverRecord, type CompanyPayrollPreparerRecord, type PortfolioMemberRecord } from '../../services/live-business-services'
+import { createLiveBusinessServices, type CompanyAdminRecord, type CompanyPayrollApproverRecord, type CompanyPayrollPreparerRecord, type CompanyPayrollReviewerRecord, type PortfolioMemberRecord } from '../../services/live-business-services'
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import './live-user-admin.css'
 import './live-branch-picker.css'
@@ -12,8 +12,10 @@ export function LiveUserAdmin() {
   const [members, setMembers] = useState<CompanyAdminRecord[]>([])
   const [payrollApprovers, setPayrollApprovers] = useState<CompanyPayrollApproverRecord[]>([])
   const [payrollPreparers, setPayrollPreparers] = useState<CompanyPayrollPreparerRecord[]>([])
+  const [payrollReviewers, setPayrollReviewers] = useState<CompanyPayrollReviewerRecord[]>([])
   const [payrollApproverReady, setPayrollApproverReady] = useState(false)
   const [payrollPreparerReady, setPayrollPreparerReady] = useState(false)
+  const [payrollReviewerReady, setPayrollReviewerReady] = useState(false)
   const [portfolioMembers, setPortfolioMembers] = useState<PortfolioMemberRecord[]>([])
   const [userId, setUserId] = useState('')
   const [portfolioRole, setPortfolioRole] = useState<PortfolioMemberRecord['role']>('BRANCH_MANAGER')
@@ -29,7 +31,7 @@ export function LiveUserAdmin() {
   const selectedCompany = companies.find((company) => company.id === companyId) ?? (!companyId ? companies[0] : undefined)
 
   const load = useCallback(async () => {
-    if (!selectedCompany?.portfolioId) { setMembers([]); setPayrollApprovers([]); setPayrollPreparers([]); setPayrollApproverReady(false); setPayrollPreparerReady(false); return }
+    if (!selectedCompany?.portfolioId) { setMembers([]); setPayrollApprovers([]); setPayrollPreparers([]); setPayrollReviewers([]); setPayrollApproverReady(false); setPayrollPreparerReady(false); setPayrollReviewerReady(false); return }
     setLoading(true); setError('')
     try {
       const services = createLiveBusinessServices(getSupabaseClient())
@@ -43,6 +45,10 @@ export function LiveUserAdmin() {
         setPayrollPreparers(await services.companyPayrollPreparers.list(selectedCompany.portfolioId, selectedCompany.id))
         setPayrollPreparerReady(true)
       } catch { setPayrollPreparers([]); setPayrollPreparerReady(false) }
+      try {
+        setPayrollReviewers(await services.companyPayrollReviewers.list(selectedCompany.portfolioId, selectedCompany.id))
+        setPayrollReviewerReady(true)
+      } catch { setPayrollReviewers([]); setPayrollReviewerReady(false) }
     } catch {
       setMembers([])
       setError('Company access could not be loaded. Your account may not have users.manage permission for this company.')
@@ -106,6 +112,30 @@ export function LiveUserAdmin() {
       await createLiveBusinessServices(getSupabaseClient()).companyPayrollApprovers.revoke(selectedCompany.portfolioId, selectedCompany.id, member.user_id, reason.trim())
       setNotice('Company payroll approval access was revoked and audited.'); await load()
     } catch { setError('Payroll approver access could not be revoked. Verify company-scoped users.manage permission.') }
+    finally { setBusy(false) }
+  }
+
+  const assignPayrollReviewer = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(''); setNotice('')
+    if (!selectedCompany?.portfolioId || !userId.trim()) { setBusy(false); setError("Select a company and enter an activated user's account UUID."); return }
+    try {
+      if (!payrollReviewerReady) throw new Error('Company-scoped payroll reviewer migration is unavailable.')
+      await createLiveBusinessServices(getSupabaseClient()).companyPayrollReviewers.assign(selectedCompany.portfolioId, selectedCompany.id, userId.trim())
+      setUserId(''); setNotice('Company-scoped Payroll Reviewer access was assigned and audited.'); await load()
+    } catch { setError('Payroll reviewer access was not assigned. Verify the activated account and company-scoped users.manage permission.') }
+    finally { setBusy(false) }
+  }
+
+  const revokePayrollReviewer = async (member: CompanyPayrollReviewerRecord) => {
+    if (!selectedCompany?.portfolioId) return
+    const reason = window.prompt(`Reason for removing company payroll reviewer access for ${member.email ?? member.user_id}?`)
+    if (!reason?.trim()) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      if (!payrollReviewerReady) throw new Error('Company-scoped payroll reviewer migration is unavailable.')
+      await createLiveBusinessServices(getSupabaseClient()).companyPayrollReviewers.revoke(selectedCompany.portfolioId, selectedCompany.id, member.user_id, reason.trim())
+      setNotice('Company payroll reviewer access was revoked and audited.'); await load()
+    } catch { setError('Payroll reviewer access could not be revoked. Verify company-scoped users.manage permission.') }
     finally { setBusy(false) }
   }
 
@@ -194,8 +224,10 @@ export function LiveUserAdmin() {
     <section className="panel admin-table-panel"><header><div><div className="section-eyebrow">COMPANY SCOPE</div><h2>Choose a company</h2></div><label className="live-admin-company"><Building2 size={15}/><select aria-label="Company" value={companyId} onChange={(event) => setCompanyId(event.target.value)}><option value="">Select company</option>{companies.map((company) => <option value={company.id} key={company.id}>{company.name}</option>)}</select></label></header>
       {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void sendInvitation(event)}><label>Invite email address<input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="person@company.com" required /></label><label>Role<select value={inviteRole} onChange={(event) => { setInviteRole(event.target.value); setInviteBranches([]) }}><option value="COMPANY_ADMIN">Company Administrator</option><option value="OVERALL_HR_MANAGER">Overall HR Manager</option><option value="BRANCH_MANAGER">Branch Manager</option><option value="PAYROLL_PROCESSOR">Payroll Processor</option><option value="PORTFOLIO_ADMIN">Portfolio Administrator</option></select></label>{['BRANCH_MANAGER', 'PAYROLL_PROCESSOR'].includes(inviteRole) && <fieldset className="live-branch-picker"><legend>Assigned branches</legend>{selectedCompany.branches.filter((branch) => branch.status === 'Active').map((branch) => <label key={branch.id}><input type="checkbox" checked={inviteBranches.includes(branch.id)} onChange={(event) => setInviteBranches((current) => event.target.checked ? [...current, branch.id] : current.filter((id) => id !== branch.id))}/>{branch.name}</label>)}</fieldset>}<button className="button-primary" disabled={busy}><UserPlus size={15}/>{busy ? 'Sending…' : 'Send invitation'}</button><small>The user receives an activation link. Role access is assigned only after the trusted function verifies your company or portfolio authority.</small></form>}
       {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void assign(event)}><label>Company administrator account UUID<input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Account ID" required minLength={36} maxLength={36} pattern="[0-9a-fA-F-]{36}" /></label><button className="button-primary" disabled={busy}><UserPlus size={15}/>{busy ? 'Saving…' : 'Assign Company Administrator'}</button><small>Use this only when the account is already activated and its invitation is complete.</small></form>}
-      {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void assignPayrollApprover(event)}><label>Company payroll approver account UUID<input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Account ID" required minLength={36} maxLength={36} pattern="[0-9a-fA-F-]{36}" /></label><button className="button-primary" disabled={busy || !payrollApproverReady}><ShieldCheck size={15}/>{busy ? 'Saving…' : 'Assign Company Payroll Approver'}</button><small>{payrollApproverReady ? `This role is limited to ${selectedCompany.name}; it does not grant access to other companies in the portfolio.` : 'Role assignment is disabled until the company-scoped approver migration is available.'}</small></form>}
+      {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void assignPayrollApprover(event)}><label>Company payroll approver account UUID<input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Account ID" required minLength={36} maxLength={36} pattern="[0-9a-fA-F-]{36}" /></label><button className="button-primary" disabled={busy || !payrollApproverReady}><ShieldCheck size={15}/>{busy ? 'Saving…' : 'Assign Company Payroll Approver'}</button><small>{payrollApproverReady ? `This existing role is limited to ${selectedCompany.name} and includes payroll finalization. Use Payroll Reviewer for approval without finalization.` : 'Role assignment is disabled until the company-scoped approver migration is available.'}</small></form>}
       {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void assignPayrollPreparer(event)}><label>Company HR/payroll preparer account UUID<input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Account ID" required minLength={36} maxLength={36} pattern="[0-9a-fA-F-]{36}" /></label><button className="button-primary" disabled={busy || !payrollPreparerReady}><UserPlus size={15}/>{busy ? 'Saving…' : 'Assign Company HR/Payroll Preparer'}</button><small>{payrollPreparerReady ? `Can manage HR and payroll preparation for ${selectedCompany.name}; cannot approve or finalize payroll.` : 'Role assignment is disabled until the company-scoped preparer migration is available.'}</small></form>}
+      {selectedCompany && <form className="live-admin-assign" onSubmit={(event) => void assignPayrollReviewer(event)}><label>Company payroll reviewer account UUID<input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Account ID" required minLength={36} maxLength={36} pattern="[0-9a-fA-F-]{36}" /></label><button className="button-primary" disabled={busy || !payrollReviewerReady}><ShieldCheck size={15}/>{busy ? 'Saving…' : 'Assign Company Payroll Reviewer'}</button><small>{payrollReviewerReady ? `Can view, review and approve payroll for ${selectedCompany.name}; cannot prepare, submit, or finalize payroll.` : 'Role assignment is disabled until the restricted payroll reviewer migration is available.'}</small></form>}
+      {payrollReviewers.length > 0 && <div className="table-scroll"><table className="admin-table"><thead><tr><th>COMPANY PAYROLL REVIEWER</th><th>ASSIGNED</th><th>STATUS</th><th/></tr></thead><tbody>{payrollReviewers.map((member) => <tr key={member.user_id}><td><strong>{member.display_name || 'Activated user'}</strong><small>{member.email}</small></td><td>{formatWorkspaceDate(member.created_at, preferences)}</td><td><span className={`admin-status ${member.revoked_at ? 'inactive' : 'active'}`}>{member.revoked_at ? 'Revoked' : 'Active'}</span></td><td>{!member.revoked_at && <button className="admin-link" disabled={busy} onClick={() => void revokePayrollReviewer(member)}><UserRoundMinus size={14}/> Revoke reviewer role</button>}</td></tr>)}</tbody></table></div>}
       {payrollPreparers.length > 0 && <div className="table-scroll"><table className="admin-table"><thead><tr><th>COMPANY HR/PAYROLL PREPARER</th><th>ASSIGNED</th><th>STATUS</th><th/></tr></thead><tbody>{payrollPreparers.map((member) => <tr key={member.user_id}><td><strong>{member.display_name || 'Activated user'}</strong><small>{member.email}</small></td><td>{formatWorkspaceDate(member.created_at, preferences)}</td><td><span className={`admin-status ${member.revoked_at ? 'inactive' : 'active'}`}>{member.revoked_at ? 'Revoked' : 'Active'}</span></td><td>{!member.revoked_at && <button className="admin-link" disabled={busy} onClick={() => void revokePayrollPreparer(member)}><UserRoundMinus size={14}/> Revoke preparer role</button>}</td></tr>)}</tbody></table></div>}
       {payrollApprovers.length > 0 && <div className="table-scroll"><table className="admin-table"><thead><tr><th>COMPANY PAYROLL APPROVER</th><th>ASSIGNED</th><th>STATUS</th><th/></tr></thead><tbody>{payrollApprovers.map((member) => <tr key={member.user_id}><td><strong>{member.display_name || 'Activated user'}</strong><small>{member.email}</small></td><td>{formatWorkspaceDate(member.created_at, preferences)}</td><td><span className={`admin-status ${member.revoked_at ? 'inactive' : 'active'}`}>{member.revoked_at ? 'Revoked' : 'Active'}</span></td><td>{!member.revoked_at && <button className="admin-link" disabled={busy} onClick={() => void revokePayrollApprover(member)}><UserRoundMinus size={14}/> Revoke approval role</button>}</td></tr>)}</tbody></table></div>}
       {loading ? <div className="employee-empty" role="status"><LoaderCircle size={16}/> Loading company access…</div> : members.length ? <div className="table-scroll"><table className="admin-table"><thead><tr><th>ACCOUNT</th><th>ROLE</th><th>ASSIGNED</th><th>STATUS</th><th/></tr></thead><tbody>{members.map((member) => <tr key={member.user_id}><td><strong>{member.display_name || 'Activated user'}</strong><small>{member.email || member.user_id}</small></td><td>{member.role.replaceAll('_', ' ')}</td><td>{formatWorkspaceDate(member.created_at, preferences)}</td><td><span className={`admin-status ${member.revoked_at ? 'inactive' : 'active'}`}>{member.revoked_at ? 'Revoked' : 'Active'}</span></td><td>{!member.revoked_at && <button className="admin-link" disabled={busy} onClick={() => void revoke(member)}><UserRoundMinus size={14}/> Remove access</button>}</td></tr>)}</tbody></table></div> : !error && <div className="employee-empty"><strong>No company administrator assignments</strong><span>No access assignments are available to display.</span></div>}

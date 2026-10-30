@@ -31,6 +31,23 @@ describe('live Supabase business service adapter', () => {
     await expect(services.employees.supportsDraftImportUpdates('portfolio-1', 'company-1', 'branch-1')).resolves.toBe(false)
   })
 
+  it('uses only the audited employee change RPCs for requests and independent review', async () => {
+    const capabilities = { can_request_employee: true, can_request_compensation: false, can_review: true }
+    const request = { id: 'change-1' }
+    const rpc = vi.fn(async (name: string) => ({ data: name === 'employee_change_capabilities' ? capabilities : name === 'employee_change_requests_list' ? [request] : 'change-1', error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.changeCapabilities('employee-1')).resolves.toEqual(capabilities)
+    await expect(services.employees.requestApprovedChange('employee-1', { job_title: 'Synthetic Analyst' }, {}, 'Synthetic role update')).resolves.toBe('change-1')
+    await expect(services.employees.pendingChangeRequests()).resolves.toEqual([request])
+    await expect(services.employees.reviewChangeRequest('change-1', 'APPROVE')).resolves.toBe('change-1')
+    expect(rpc.mock.calls).toEqual([
+      ['employee_change_capabilities', { p_employee_id: 'employee-1' }],
+      ['employee_change_request_create', { p_employee_id: 'employee-1', p_employment_changes: { job_title: 'Synthetic Analyst' }, p_compensation_change: {}, p_reason: 'Synthetic role update' }],
+      ['employee_change_requests_list', {}],
+      ['employee_change_request_review', { p_request_id: 'change-1', p_decision: 'APPROVE', p_reason: null }],
+    ])
+  })
+
   it('reads payslip delivery history through a redacted permission-checked RPC', async () => {
     const delivery = { id: 'delivery-1', document_id: 'document-1', status: 'FAILED', attempts: 1,
       last_error_code: 'SYNTHETIC_FAILURE', created_at: '2026-10-28T12:00:00Z', updated_at: '2026-10-28T12:01:00Z', sent_at: null }
@@ -60,6 +77,21 @@ describe('live Supabase business service adapter', () => {
     expect(from).toHaveBeenCalledWith('payroll_runs')
     expect(filters.mock.calls).toEqual([['company_id', 'company-1'], ['branch_id', 'branch-1'], ['status', 'FINALIZED']])
     expect(range).toHaveBeenCalledWith(25, 49)
+  })
+
+  it('uses scoped database RPCs for work-calendar requests and independent review', async () => {
+    const rpc = vi.fn(async (name: string) => ({
+      data: name === 'branch_work_calendar_capabilities' ? { can_manage: true } : 'calendar-synthetic-1', error: null,
+    }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.payroll.workCalendarCapabilities('company-1', 'branch-1')).resolves.toEqual({ can_manage: true })
+    await expect(services.payroll.requestWorkCalendar({ companyId: 'company-1', branchId: 'branch-1', periodStart: '2026-10-01', periodEnd: '2026-10-31', scheduledWorkDates: ['2026-10-01'], reason: 'Synthetic test calendar' })).resolves.toBe('calendar-synthetic-1')
+    await expect(services.payroll.reviewWorkCalendar('calendar-synthetic-1', 'APPROVE')).resolves.toBe('calendar-synthetic-1')
+    expect(rpc.mock.calls).toEqual([
+      ['branch_work_calendar_capabilities', { p_company_id: 'company-1', p_branch_id: 'branch-1' }],
+      ['branch_work_calendar_request', { p_company_id: 'company-1', p_branch_id: 'branch-1', p_period_start: '2026-10-01', p_period_end: '2026-10-31', p_scheduled_work_dates: ['2026-10-01'], p_reason: 'Synthetic test calendar' }],
+      ['branch_work_calendar_review', { p_calendar_id: 'calendar-synthetic-1', p_decision: 'APPROVE', p_reason: null }],
+    ])
   })
 
   it('filters employee pages by a selected company department within RLS-visible rows', async () => {
@@ -98,6 +130,19 @@ describe('live Supabase business service adapter', () => {
       ['assign_company_payroll_approver', { p_portfolio_id: 'portfolio-1', p_company_id: 'qa-company', p_user_id: 'qa-approver' }],
       ['company_payroll_approver_members', { p_portfolio_id: 'portfolio-1', p_company_id: 'qa-company' }],
       ['revoke_company_payroll_approver', { p_portfolio_id: 'portfolio-1', p_company_id: 'qa-company', p_user_id: 'qa-approver', p_reason: 'QA teardown' }],
+    ]);
+  });
+
+  it('routes restricted payroll reviewer administration through company-scoped RPCs', async () => {
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
+    await services.companyPayrollReviewers.assign('portfolio-1', 'company-1', 'qa-reviewer');
+    await services.companyPayrollReviewers.list('portfolio-1', 'company-1');
+    await services.companyPayrollReviewers.revoke('portfolio-1', 'company-1', 'qa-reviewer', 'QA teardown');
+    expect(rpc.mock.calls).toEqual([
+      ['assign_company_payroll_reviewer', { p_portfolio_id: 'portfolio-1', p_company_id: 'company-1', p_user_id: 'qa-reviewer' }],
+      ['company_payroll_reviewer_members', { p_portfolio_id: 'portfolio-1', p_company_id: 'company-1' }],
+      ['revoke_company_payroll_reviewer', { p_portfolio_id: 'portfolio-1', p_company_id: 'company-1', p_user_id: 'qa-reviewer', p_reason: 'QA teardown' }],
     ]);
   });
 

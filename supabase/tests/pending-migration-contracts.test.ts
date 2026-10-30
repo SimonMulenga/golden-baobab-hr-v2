@@ -87,3 +87,32 @@ describe('department activation migration security contract', () => {
     expect(sql).toContain('grant execute on function public.department_activate(uuid) to authenticated')
   })
 })
+
+describe('controlled employee import update migration security contract', () => {
+  it('preserves import-job rows while constraining the updated-row counter', () => {
+    const sql = migration('20261029003600_controlled_employee_import_updates.sql')
+    expect(sql).toMatch(/alter table public\.employee_import_jobs[\s\S]*add column updated_rows integer not null default 0[\s\S]*check \(updated_rows between 0 and total_rows\)/i)
+    expect(sql).not.toMatch(/drop table|truncate|delete from public\.employee_import_jobs|disable row level security/i)
+  })
+
+  it('limits safe updates to creator-owned drafts in the selected company and branch', () => {
+    const sql = migration('20261029003600_controlled_employee_import_updates.sql')
+    expect(sql).toContain("'SAFE_UPSERT_DRAFT'")
+    expect(sql).toMatch(/e\.portfolio_id=p_portfolio_id and e\.company_id=p_company_id[\s\S]*e\.workplace_branch_id<>p_branch_id[\s\S]*e\.created_by<>auth\.uid\(\)/i)
+    expect(sql).toMatch(/approval_status not in \('DRAFT','RETURNED_FOR_CORRECTION'\)/i)
+    expect(sql).toContain('public.employee_update_draft')
+    expect(sql).toContain('public.employee_submit_for_hr_approval')
+  })
+
+  it('keeps idempotency, bounded batches, permission checks and grants', () => {
+    const sql = migration('20261029003600_controlled_employee_import_updates.sql')
+    expect(sql).toContain('pg_advisory_xact_lock')
+    expect(sql).toContain('request_sha256')
+    expect(sql).toMatch(/jsonb_array_length\(p_rows\) > 5000/i)
+    expect(sql).toContain("has_permission('employee.import'")
+    expect(sql).toContain("has_permission('employee.create'")
+    expect(sql).toContain('revoke all on function public.employee_import_atomic(uuid,uuid,uuid,text,jsonb) from public,anon')
+    expect(sql).toContain('grant execute on function public.employee_import_atomic(uuid,uuid,uuid,text,jsonb) to authenticated')
+    expect(sql).toContain('grant execute on function public.employee_import_supports_draft_updates(uuid,uuid,uuid) to authenticated')
+  })
+})

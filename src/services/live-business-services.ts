@@ -71,6 +71,14 @@ export type PayrollPreviewItem = {
   salary_frequency: string | null;
   compensation_effective_from: string | null;
   basic_pay: number | null;
+  basic_salary_proration?: {
+    eligible_scheduled_days?: number;
+    total_scheduled_days?: number;
+    basic_pay?: number;
+    valid_compensation?: boolean;
+    segments?: Array<{ effective_from: string; effective_to: string | null; monthly_basic_pay: number; eligible_scheduled_days: number; prorated_basic_pay: number }>;
+    rounding?: string;
+  } | null;
   housing_allowance: number | null;
   meal_allowance: number | null;
   transport_allowance: number | null;
@@ -98,6 +106,13 @@ export type PayrollPreviewItem = {
 export type PayrollPreviewInputs = {
   portfolio_id: string; company_id: string; branch_id: string; period_start: string; period_end: string;
   attendance_period_id: string; attendance_approved_at: string; items: PayrollPreviewItem[]; earning_inputs: PayrollEarningInputRecord[];
+};
+
+export type BranchWorkCalendarRecord = {
+  id: string; company_id: string; branch_id: string; period_start: string; period_end: string;
+  scheduled_work_dates: string[]; status: 'PENDING' | 'APPROVED' | 'RETURNED' | 'SUPERSEDED';
+  reason: string; requested_by: string; reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null;
+  created_at: string;
 };
 
 export type PayrollEarningInputRecord = {
@@ -233,9 +248,22 @@ export type AttendanceEntryInput = {
   unpaidLeaveDays: number; payableAbsenceDays: number; contractType: string; correctionNote?: string;
 };
 export type EmployeeReviewDecision = 'APPROVE' | 'REJECT' | 'RETURN';
+export type EmployeeChangeCapabilities = {
+  can_request_employee: boolean; can_request_compensation: boolean; can_review: boolean; has_pending_request: boolean;
+  latest_request?: { status: 'PENDING' | 'APPROVED' | 'RETURNED' | 'REJECTED'; requested_at: string; reviewed_at: string | null; review_reason: string | null } | null;
+};
+export type EmployeeChangeRequestRecord = {
+  id: string; employee_id: string; company_id: string; branch_id: string;
+  employee_number: string; first_name: string; last_name: string; status: 'PENDING';
+  reason: string; review_reason: string | null; employment_changes: Record<string, unknown>;
+  compensation_change: Record<string, unknown>; has_compensation_change: boolean;
+  requested_by: string; requested_at: string;
+};
+export type EmployeeChangeDecision = 'APPROVE' | 'RETURN' | 'REJECT';
 export type PayrollReviewAction = 'START_REVIEW' | 'APPROVE' | 'RETURN' | 'REJECT';
 export type EmployeeApprovalFilter = EmployeeDirectoryRecord['approval_status'];
-export type JsonObject = Record<string, string | number | boolean | null>;
+export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+export interface JsonObject { [key: string]: JsonValue }
 export type EmployeeDraftInput = {
   portfolioId: string;
   companyId: string;
@@ -278,6 +306,7 @@ export type EmploymentHistoryRecord = {
 };
 export type CompanyAdminRecord = { user_id: string; email: string; display_name: string | null; role: 'COMPANY_ADMIN'; created_at: string; revoked_at: string | null };
 export type CompanyPayrollApproverRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_APPROVER' };
+export type CompanyPayrollReviewerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_REVIEWER' };
 export type CompanyPayrollPreparerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_PREPARER' };
 export type PortfolioMemberRecord = { user_id: string; email: string; display_name: string | null; role: 'PORTFOLIO_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; created_at: string; revoked_at: string | null; branch_ids: string[] };
 export type DeductionRequestInput = {
@@ -303,6 +332,10 @@ export interface LiveBusinessServices {
     updateDraft(employeeId: string, input: Pick<EmployeeDraftInput, 'employee' | 'privateDetails' | 'compensation'>): Promise<string>;
     submitForHrApproval(employeeId: string): Promise<string>;
     reviewSubmission(employeeId: string, decision: EmployeeReviewDecision, reason?: string): Promise<string>;
+    changeCapabilities(employeeId: string): Promise<EmployeeChangeCapabilities>;
+    requestApprovedChange(employeeId: string, employmentChanges: Record<string, unknown>, compensationChange: Record<string, unknown>, reason: string): Promise<string>;
+    pendingChangeRequests(): Promise<EmployeeChangeRequestRecord[]>;
+    reviewChangeRequest(requestId: string, decision: EmployeeChangeDecision, reason?: string): Promise<string>;
     importBatch(input: { portfolioId: string; companyId: string; branchId: string; idempotencyKey: string; rows: EmployeeImportBatchInput[] }): Promise<EmployeeImportJobResult>;
     importHistory(portfolioId: string, companyId: string, branchId: string, page?: number): Promise<PageResult<EmployeeImportJobRecord>>;
     supportsDraftImportUpdates(portfolioId: string, companyId: string, branchId: string): Promise<boolean>;
@@ -314,6 +347,11 @@ export interface LiveBusinessServices {
   };
   companyPayrollApprovers: {
     list(portfolioId: string, companyId: string): Promise<CompanyPayrollApproverRecord[]>;
+    assign(portfolioId: string, companyId: string, userId: string): Promise<void>;
+    revoke(portfolioId: string, companyId: string, userId: string, reason: string): Promise<void>;
+  };
+  companyPayrollReviewers: {
+    list(portfolioId: string, companyId: string): Promise<CompanyPayrollReviewerRecord[]>;
     assign(portfolioId: string, companyId: string, userId: string): Promise<void>;
     revoke(portfolioId: string, companyId: string, userId: string, reason: string): Promise<void>;
   };
@@ -347,6 +385,10 @@ export interface LiveBusinessServices {
     list(request?: PageRequest & { companyId?: string; branchId?: string; status?: string }): Promise<PageResult<PayrollRunRecord>>;
     byId(runId: string): Promise<PayrollRunRecord>;
     previewInputs(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string }): Promise<PayrollPreviewInputs>;
+    workCalendarCapabilities(companyId: string, branchId: string): Promise<{ can_manage: boolean }>;
+    listWorkCalendars(companyId: string, branchId: string, periodStart: string, periodEnd: string): Promise<BranchWorkCalendarRecord[]>;
+    requestWorkCalendar(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string; scheduledWorkDates: string[]; reason: string }): Promise<string>;
+    reviewWorkCalendar(calendarId: string, decision: 'APPROVE' | 'RETURN', reason?: string): Promise<string>;
     createEarningInput(input: { companyId: string; branchId: string; employeeId: string; periodStart: string; periodEnd: string; earningType: Exclude<PayrollEarningInputRecord['earning_type'], 'OVERTIME'>; amount: number; taxableForPaye: boolean; sourceReference: string; description: string; idempotencyKey: string }): Promise<string>;
     createOvertimeInput(input: { companyId: string; branchId: string; employeeId: string; periodStart: string; periodEnd: string; workDate: string; weekStart: string; hours: number; dayType: 'ORDINARY' | 'REST_DAY' | 'PUBLIC_HOLIDAY'; weeklyHours: number; outsideNormalWorkWeek: boolean; sourceReference: string; description: string; idempotencyKey: string }): Promise<string>;
     setOvertimeDivisor(employeeId: string, effectiveFrom: string, divisor: 176 | 208 | 240): Promise<string>;
@@ -469,6 +511,23 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_employee_id: employeeId, p_decision: decision, p_reason: reason ?? null,
         }));
       },
+      async changeCapabilities(employeeId) {
+        return unwrap(await client.rpc('employee_change_capabilities', { p_employee_id: employeeId })) as EmployeeChangeCapabilities;
+      },
+      async requestApprovedChange(employeeId, employmentChanges, compensationChange, reason) {
+        return unwrap(await client.rpc('employee_change_request_create', {
+          p_employee_id: employeeId, p_employment_changes: employmentChanges,
+          p_compensation_change: compensationChange, p_reason: reason,
+        }));
+      },
+      async pendingChangeRequests() {
+        return unwrap(await client.rpc('employee_change_requests_list', {})) as EmployeeChangeRequestRecord[];
+      },
+      async reviewChangeRequest(requestId, decision, reason) {
+        return unwrap(await client.rpc('employee_change_request_review', {
+          p_request_id: requestId, p_decision: decision, p_reason: reason ?? null,
+        }));
+      },
       async importBatch(input) {
         const rows = input.rows.map(({ line, operation, employee, privateDetails, compensation }) => ({
           line, operation, employee, private_details: privateDetails, compensation,
@@ -531,6 +590,21 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
       },
       async revoke(portfolioId, companyId, userId, reason) {
         const result = await client.rpc('revoke_company_payroll_approver', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_reason: reason });
+        if (result.error) throw result.error;
+      },
+    },
+    companyPayrollReviewers: {
+      async list(portfolioId, companyId) {
+        const result = await client.rpc('company_payroll_reviewer_members', { p_portfolio_id: portfolioId, p_company_id: companyId });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as CompanyPayrollReviewerRecord[];
+      },
+      async assign(portfolioId, companyId, userId) {
+        const result = await client.rpc('assign_company_payroll_reviewer', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId });
+        if (result.error) throw result.error;
+      },
+      async revoke(portfolioId, companyId, userId, reason) {
+        const result = await client.rpc('revoke_company_payroll_reviewer', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_reason: reason });
         if (result.error) throw result.error;
       },
     },
@@ -682,6 +756,31 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_company_id: input.companyId, p_branch_id: input.branchId,
           p_period_start: input.periodStart, p_period_end: input.periodEnd,
         })) as PayrollPreviewInputs;
+      },
+      async workCalendarCapabilities(companyId, branchId) {
+        return unwrap(await client.rpc('branch_work_calendar_capabilities', {
+          p_company_id: companyId, p_branch_id: branchId,
+        })) as { can_manage: boolean };
+      },
+      async listWorkCalendars(companyId, branchId, periodStart, periodEnd) {
+        const result = await client.from('branch_work_calendars')
+          .select('id,company_id,branch_id,period_start,period_end,scheduled_work_dates,status,reason,requested_by,reviewed_by,reviewed_at,review_reason,created_at')
+          .eq('company_id', companyId).eq('branch_id', branchId)
+          .eq('period_start', periodStart).eq('period_end', periodEnd)
+          .order('created_at', { ascending: false });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as BranchWorkCalendarRecord[];
+      },
+      async requestWorkCalendar(input) {
+        return unwrap(await client.rpc('branch_work_calendar_request', {
+          p_company_id: input.companyId, p_branch_id: input.branchId, p_period_start: input.periodStart,
+          p_period_end: input.periodEnd, p_scheduled_work_dates: input.scheduledWorkDates, p_reason: input.reason,
+        }));
+      },
+      async reviewWorkCalendar(calendarId, decision, reason) {
+        return unwrap(await client.rpc('branch_work_calendar_review', {
+          p_calendar_id: calendarId, p_decision: decision, p_reason: reason ?? null,
+        }));
       },
       async createEarningInput(input) {
         return unwrap(await client.rpc('payroll_earning_input_create', {

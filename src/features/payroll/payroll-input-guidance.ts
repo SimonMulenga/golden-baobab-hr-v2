@@ -32,6 +32,12 @@ export function payrollWarningGuidance(code: string): string {
     OVERLAPPING_APPROVED_LEAVE: 'Overlapping approved leave requests need correction.',
     MISSING_APPROVED_ATTENDANCE_ENTRY: 'An approved attendance entry is missing.',
     NON_MONTHLY_FREQUENCY_REQUIRES_CALCULATION_RULE: 'This salary frequency needs a supported payroll calculation rule.',
+    MISSING_APPROVED_BRANCH_WORK_CALENDAR: 'There is no approved working calendar for this branch and month. Ask an authorized administrator to submit and approve the branch schedule before preparing payroll.',
+    ATTENDANCE_SCHEDULE_MISMATCH: 'The approved attendance schedule does not match the employee’s eligible working days in the approved branch calendar. Correct attendance and obtain approval again.',
+    COMPENSATION_GAP_FOR_SCHEDULED_DAYS: 'Approved compensation does not cover every eligible scheduled workday. Add a correctly effective-dated compensation version through the approval workflow.',
+    OVERLAPPING_COMPENSATION_FOR_SCHEDULED_DAYS: 'More than one compensation version applies to an eligible scheduled workday. Resolve the overlapping effective dates before calculating payroll.',
+    ALLOWANCE_PRORATION_RULE_REQUIRED: 'A non-zero allowance needs an explicit scheduled-days proration rule for this partial month or compensation change.',
+    ALLOWANCE_TAX_TREATMENT_CHANGED_DURING_PERIOD: 'Allowance tax treatment changes during this month. HR review is required before payroll can be calculated.',
   }
   return messages[code] ?? 'This employee has a payroll input that needs review.'
 }

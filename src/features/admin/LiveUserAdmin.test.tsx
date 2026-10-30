@@ -5,10 +5,11 @@ import '@testing-library/jest-dom/vitest'
 const mocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
 const payrollApproverMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
 const payrollPreparerMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
+const payrollReviewerMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), revoke: vi.fn() }))
 const portfolioMocks = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn(), replaceBranchAssignments: vi.fn(), revoke: vi.fn() }))
 const functionMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({ functions: functionMocks }) }))
-vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ companyAdmins: { ...mocks }, companyPayrollApprovers: { ...payrollApproverMocks }, companyPayrollPreparers: { ...payrollPreparerMocks }, portfolioUsers: { ...portfolioMocks } }) }))
+vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ companyAdmins: { ...mocks }, companyPayrollApprovers: { ...payrollApproverMocks }, companyPayrollPreparers: { ...payrollPreparerMocks }, companyPayrollReviewers: { ...payrollReviewerMocks }, portfolioUsers: { ...portfolioMocks } }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
   useWorkspace: () => ({ companies: [{ id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }], preferences: null }),
   useCompanySelection: () => ({ companyId: 'company-demo', company: { id: 'company-demo', portfolioId: 'portfolio-demo', name: 'Synthetic Company', branches: [{ id: 'branch-demo', name: 'Demo Branch', status: 'Active' }] }, setCompanyId: vi.fn() }),
@@ -29,6 +30,9 @@ describe('LIVE company administrator management', () => {
     payrollPreparerMocks.list.mockResolvedValue([])
     payrollPreparerMocks.assign.mockResolvedValue(undefined)
     payrollPreparerMocks.revoke.mockResolvedValue(undefined)
+    payrollReviewerMocks.list.mockResolvedValue([])
+    payrollReviewerMocks.assign.mockResolvedValue(undefined)
+    payrollReviewerMocks.revoke.mockResolvedValue(undefined)
     portfolioMocks.list.mockResolvedValue([])
     portfolioMocks.assign.mockResolvedValue(undefined)
     portfolioMocks.replaceBranchAssignments.mockResolvedValue(undefined)
@@ -86,6 +90,7 @@ describe('LIVE company administrator management', () => {
     render(<LiveUserAdmin />)
     const roleButton = await screen.findByRole('button', { name: 'Assign Company Payroll Approver' })
     await waitFor(() => expect(roleButton).toBeEnabled())
+    expect(screen.getByText(/includes payroll finalization/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Company payroll approver account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
     fireEvent.click(roleButton)
     await waitFor(() => expect(payrollApproverMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '88888888-8888-4888-8888-888888888888'))
@@ -98,5 +103,14 @@ describe('LIVE company administrator management', () => {
     fireEvent.change(screen.getByLabelText('Company HR/payroll preparer account UUID'), { target: { value: '99999999-9999-4999-8999-999999999999' } })
     fireEvent.click(roleButton)
     await waitFor(() => expect(payrollPreparerMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '99999999-9999-4999-8999-999999999999'))
+  })
+
+  it('offers the restricted payroll reviewer role through the company-scoped workflow', async () => {
+    render(<LiveUserAdmin />)
+    const roleButton = await screen.findByRole('button', { name: 'Assign Company Payroll Reviewer' })
+    await waitFor(() => expect(roleButton).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('Company payroll reviewer account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
+    fireEvent.click(roleButton)
+    await waitFor(() => expect(payrollReviewerMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '88888888-8888-4888-8888-888888888888'))
   })
 })

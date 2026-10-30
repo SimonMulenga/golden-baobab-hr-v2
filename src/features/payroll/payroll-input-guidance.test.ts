@@ -21,4 +21,11 @@ describe('payroll input guidance', () => {
     expect(guidance).toContain('approved partial-month pay rule')
     expect(guidance).toContain('do not change the effective date')
   })
+  it('explains branch calendar, attendance, compensation and allowance proration blockers', () => {
+    expect(payrollWarningGuidance('MISSING_APPROVED_BRANCH_WORK_CALENDAR')).toContain('approved working calendar')
+    expect(payrollWarningGuidance('ATTENDANCE_SCHEDULE_MISMATCH')).toContain('Correct attendance')
+    expect(payrollWarningGuidance('COMPENSATION_GAP_FOR_SCHEDULED_DAYS')).toContain('every eligible scheduled workday')
+    expect(payrollWarningGuidance('OVERLAPPING_COMPENSATION_FOR_SCHEDULED_DAYS')).toContain('overlapping effective dates')
+    expect(payrollWarningGuidance('ALLOWANCE_PRORATION_RULE_REQUIRED')).toContain('explicit scheduled-days proration rule')
+  })
 })

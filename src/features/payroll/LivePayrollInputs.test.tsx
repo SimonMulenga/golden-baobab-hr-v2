@@ -106,6 +106,20 @@ describe('LIVE persistent payroll workflow', () => {
     expect(screen.queryByText('Synthetic Employee')).not.toBeInTheDocument()
   })
 
+  it('shows the server-provided scheduled-day proration breakdown for partial-month pay', async () => {
+    mocks.previewInputs.mockResolvedValue({ ...inputs, items: [{ ...inputs.items[0], basic_pay: 2250, basic_salary_proration: {
+      eligible_scheduled_days: 11, total_scheduled_days: 22, basic_pay: 2250, valid_compensation: true,
+      segments: [{ effective_from: '2026-10-01', effective_to: null, monthly_basic_pay: 4500, eligible_scheduled_days: 11, prorated_basic_pay: 2250 }],
+      rounding: 'PostgreSQL NUMERIC round to 2 decimal places (half away from zero)',
+    } }] })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load approved inputs' }))
+    await screen.findByText('Synthetic Employee')
+    expect(screen.getByText('K2,250.00')).toBeInTheDocument()
+    expect(screen.getByText('Scheduled-day proration: 11 / 22 days')).toBeInTheDocument()
+  })
+
   it('requires explicit reason for returned or rejected payroll', async () => {
     renderScreen()
     await loadAndCreate()
