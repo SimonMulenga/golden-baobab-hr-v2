@@ -49,3 +49,20 @@
   .app-shell main .live-reconciliation-table table{min-width:780px}
   .app-shell main .live-report-table .table-scroll{overflow-x:auto}
 }
+
+/* Shared readability baseline for every live module. */
+.app-shell { font-size: 15px; line-height: 1.5; }
+.app-shell .side-nav .nav-link { font-size: 15px; line-height: 1.45; }
+.app-shell .nav-label,
+.app-shell .section-eyebrow,
+.app-shell .eyebrow { font-size: 13px; letter-spacing: .07em; }
+.app-shell main label { font-size: 14px; line-height: 1.45; }
+.app-shell main input,
+.app-shell main select,
+.app-shell main textarea,
+.app-shell main button { font-size: 15px; }
+.app-shell main th,
+.app-shell main td { font-size: 14px; line-height: 1.45; }
+.app-shell main th { font-weight: 650; }
+.app-shell main small { font-size: 13px; line-height: 1.45; }
+.app-shell .company-context { cursor: default; }

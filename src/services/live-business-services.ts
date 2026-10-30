@@ -123,7 +123,7 @@ export type PayrollEarningInputRecord = {
   overtime_work_date?: string | null; overtime_week_start?: string | null; overtime_weekly_hours?: number | null;
   overtime_hourly_divisor?: 176 | 208 | 240 | null; overtime_hourly_rate?: number | null;
   overtime_multiplier?: number | null; overtime_watchperson?: boolean | null;
-  status: 'SUBMITTED' | 'APPROVED' | 'REJECTED'; created_by: string; approved_by: string | null; created_at: string;
+  status: 'RECORDED' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'; created_by: string; approved_by: string | null; created_at: string;
 };
 
 export type PayrollCalculationItem = {

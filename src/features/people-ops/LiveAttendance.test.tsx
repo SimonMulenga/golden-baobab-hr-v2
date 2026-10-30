@@ -103,7 +103,7 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByText(/reviewer must return it before entries can be changed/i)).toHaveAttribute('role', 'status')
+    expect(await screen.findByText(/previous workflow and is locked while under review/i)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
   })
 

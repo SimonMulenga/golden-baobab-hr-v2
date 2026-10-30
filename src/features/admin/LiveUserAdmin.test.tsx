@@ -52,7 +52,7 @@ describe('LIVE company administrator management', () => {
     vi.spyOn(window, 'prompt').mockReturnValue('Synthetic access review')
     render(<LiveUserAdmin />)
     expect(await screen.findByText('demo@example.invalid')).toBeInTheDocument()
-    expect(screen.getByText(/Invitations send a real email/)).toBeInTheDocument()
+    expect(screen.getByText(/Invitations send an email/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Remove access/ }))
     await waitFor(() => expect(mocks.revoke).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '77777777-7777-4777-8777-777777777777', 'Synthetic access review'))
   })
@@ -80,37 +80,18 @@ describe('LIVE company administrator management', () => {
   it('assigns a branch-scoped manager role only to selected branches via the live adapter', async () => {
     render(<LiveUserAdmin />)
     expect(await screen.findByText('HR and branch roles')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Portfolio role account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
+    fireEvent.change(screen.getByLabelText('User account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
     fireEvent.click(screen.getByLabelText('Demo Branch'))
     fireEvent.click(screen.getByRole('button', { name: 'Save role assignment' }))
     await waitFor(() => expect(portfolioMocks.assign).toHaveBeenCalledWith('portfolio-demo', '88888888-8888-4888-8888-888888888888', 'BRANCH_MANAGER', ['branch-demo']))
   })
 
-  it('assigns company payroll approval through the company-scoped workflow', async () => {
+  it('offers only the three client account roles for new invitations', async () => {
     render(<LiveUserAdmin />)
-    const roleButton = await screen.findByRole('button', { name: 'Assign Company Payroll Approver' })
-    await waitFor(() => expect(roleButton).toBeEnabled())
-    expect(screen.getByText(/includes payroll finalization/)).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Company payroll approver account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
-    fireEvent.click(roleButton)
-    await waitFor(() => expect(payrollApproverMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '88888888-8888-4888-8888-888888888888'))
-  })
-
-  it('assigns HR and payroll preparation without approval through the company-scoped workflow', async () => {
-    render(<LiveUserAdmin />)
-    const roleButton = await screen.findByRole('button', { name: 'Assign Company HR/Payroll Preparer' })
-    await waitFor(() => expect(roleButton).toBeEnabled())
-    fireEvent.change(screen.getByLabelText('Company HR/payroll preparer account UUID'), { target: { value: '99999999-9999-4999-8999-999999999999' } })
-    fireEvent.click(roleButton)
-    await waitFor(() => expect(payrollPreparerMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '99999999-9999-4999-8999-999999999999'))
-  })
-
-  it('offers the restricted payroll reviewer role through the company-scoped workflow', async () => {
-    render(<LiveUserAdmin />)
-    const roleButton = await screen.findByRole('button', { name: 'Assign Company Payroll Reviewer' })
-    await waitFor(() => expect(roleButton).toBeEnabled())
-    fireEvent.change(screen.getByLabelText('Company payroll reviewer account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
-    fireEvent.click(roleButton)
-    await waitFor(() => expect(payrollReviewerMocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '88888888-8888-4888-8888-888888888888'))
+    const role = await screen.findByLabelText('Role')
+    expect(Array.from((role as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
+      'Overall HR Manager', 'Branch Manager', 'Company Administrator',
+    ])
+    expect(screen.queryByRole('button', { name: /Assign Company Payroll (Approver|Reviewer)|Assign Company HR\/Payroll Preparer/ })).not.toBeInTheDocument()
   })
 })
