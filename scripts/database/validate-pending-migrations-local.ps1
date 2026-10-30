@@ -26,6 +26,7 @@ $migration041 = Join-Path $repoRoot 'supabase\migrations\20261030004100_company_
 $migration042 = Join-Path $repoRoot 'supabase\migrations\20261030004200_simplified_branch_payroll_and_inputs.sql'
 $migration043 = Join-Path $repoRoot 'supabase\migrations\20261030004300_retire_calendar_rpcs_and_restrict_internal_trigger.sql'
 $migration044 = Join-Path $repoRoot 'supabase\migrations\20261030004400_honor_editable_attendance_schedule.sql'
+$migration045 = Join-Path $repoRoot 'supabase\migrations\20261030004500_simplify_attendance_and_leave_approvals.sql'
 $bin = 'C:\Program Files\PostgreSQL\18\bin'
 $initdb = Join-Path $bin 'initdb.exe'
 $pgCtl = Join-Path $bin 'pg_ctl.exe'
@@ -248,7 +249,7 @@ select 'rls|'||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamesp
   $baselinePath = Join-Path $workRoot 'baseline.sql'
   [IO.File]::WriteAllText($baselinePath, $baselineSql, [Text.UTF8Encoding]::new($false))
   $baselineOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$baselinePath) 'baseline-checks' 20 (Join-Path $workRoot 'baseline-checks')
-  if ($baselineOutput -notmatch 'history\|(?<count>40|41)\|20261028000100\|(?<last>20261030004000|20261030004100)') { throw 'Fresh archive does not contain the expected migration history through 040 or 041.' }
+  if ($baselineOutput -notmatch 'history\|(?<count>40|41|43|44)\|20261028000100\|(?<last>20261030004000|20261030004100|20261030004300|20261030004400)') { throw 'Archive migration history does not match a supported baseline through 040, 041, 043 or 044.' }
   $baselineHistoryCount = [int]$Matches.count
   $baselineHistoryLast = $Matches.last
   $baselineRows = @{}
@@ -333,8 +334,10 @@ select 'privileges|'||has_function_privilege('authenticated','public.employee_ch
   $newObjectsPath = Join-Path $workRoot 'new-object-checks.sql'
   [IO.File]::WriteAllText($newObjectsPath, $newObjectsSql, [Text.UTF8Encoding]::new($false))
   $newObjectsResult = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$newObjectsPath) 'new-object-checks' 20 (Join-Path $workRoot 'new-object-checks')) -replace "`r", ''
+  $calendarRpcAvailable = $baselineHistoryLast -in @('20261030004000','20261030004100')
+  $expectedNewObjectPrivileges = if ($calendarRpcAvailable) { '(?m)^privileges\|true\|false\|true\|false\|true\|false\|true\|false$' } else { '(?m)^privileges\|true\|false\|true\|false\|true\|false\|false\|false$' }
   if ($newObjectsResult -notmatch '(?m)^true\|true\|true\|true\|true\|true\|true\|true\|true$' -or
-      $newObjectsResult -notmatch '(?m)^privileges\|true\|false\|true\|false\|true\|false\|true\|false$') {
+      $newObjectsResult -notmatch $expectedNewObjectPrivileges) {
     throw 'Migration object, RPC grant, or anonymous-denial verification failed.'
   }
 
@@ -353,14 +356,22 @@ select (to_regprocedure('public.assign_company_payroll_reviewer(uuid,uuid,uuid)'
   $result041 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check041Path) 'check-041' 15 (Join-Path $workRoot 'check-041')).Trim()
   if ($result041 -ne 'true|true|true|true|false|true|true|true') { throw 'Migration 041 reviewer/calendar RPC, grant, or permission verification failed.' }
 
-  $workflowPath = Join-Path $repoRoot 'supabase\tests\pending-migration-037-040-workflows.sql'
-  $workflowOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-f',$workflowPath) 'rollback-workflow-037-041' 90 (Join-Path $workRoot 'rollback-workflow-037-041')
-  if ($workflowOutput -match '(?m)^FAIL$' -or $workflowOutput -notmatch 'PASS migration 037-041 synthetic workflow assertions passed') {
-    throw 'Rollback-only synthetic migration 037-041 workflow assertions reported a failure.'
+  $rollbackWorkflowStatus = 'skipped-existing-043-calendar-RPCs-retired'
+  if ($baselineHistoryLast -in @('20261030004000','20261030004100')) {
+    $workflowPath = Join-Path $repoRoot 'supabase\tests\pending-migration-037-040-workflows.sql'
+    $workflowOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-f',$workflowPath) 'rollback-workflow-037-041' 90 (Join-Path $workRoot 'rollback-workflow-037-041')
+    if ($workflowOutput -match '(?m)^FAIL$' -or $workflowOutput -notmatch 'PASS migration 037-041 synthetic workflow assertions passed') {
+      throw 'Rollback-only synthetic migration 037-041 workflow assertions reported a failure.'
+    }
+    $rollbackWorkflowStatus = '037-041-passed'
+  } else {
+    Write-Output 'ROLLBACK_WORKFLOW_SKIPPED base already contains migration 043; calendar RPCs are intentionally retired.'
   }
 
-  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration042) 'migration-042' 90 (Join-Path $workRoot 'migration-042') | Out-Null
-  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=042'
+  if ($baselineHistoryLast -in @('20261030004000','20261030004100')) {
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration042) 'migration-042' 90 (Join-Path $workRoot 'migration-042') | Out-Null
+    Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=042'
+  } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=042' }
 
   $check042 = @"
 select (to_regprocedure('public.payroll_preview_inputs(uuid,uuid,date,date)') is not null)::text
@@ -384,8 +395,10 @@ select (to_regprocedure('public.payroll_preview_inputs(uuid,uuid,date,date)') is
     throw 'Migration 042 branch payroll permission boundary failed verification.'
   }
 
-  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration043) 'migration-043' 60 (Join-Path $workRoot 'migration-043') | Out-Null
-  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=043'
+  if ($baselineHistoryLast -in @('20261030004000','20261030004100')) {
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration043) 'migration-043' 60 (Join-Path $workRoot 'migration-043') | Out-Null
+    Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=043'
+  } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=043' }
 
   $check043 = @"
 select has_function_privilege('authenticated','public.branch_work_calendar_request(uuid,uuid,date,date,date[],text)','EXECUTE')::text
@@ -406,8 +419,23 @@ select has_function_privilege('authenticated','public.branch_work_calendar_reque
     throw 'Migration 043 did not revoke client RPC/helper execution while preserving historical calendar data and the earning trigger.'
   }
 
-  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration044) 'migration-044' 60 (Join-Path $workRoot 'migration-044') | Out-Null
-  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=044'
+  if ($baselineHistoryLast -ne '20261030004400') {
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration044) 'migration-044' 60 (Join-Path $workRoot 'migration-044') | Out-Null
+    Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=044'
+  } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=044' }
+
+  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration045) 'migration-045' 90 (Join-Path $workRoot 'migration-045') | Out-Null
+  $check045 = @"
+select has_function_privilege('authenticated','public.attendance_submit_period(uuid)','EXECUTE')::text
+||'|'||has_function_privilege('authenticated','public.attendance_review_period(uuid,text,text)','EXECUTE')::text
+||'|'||has_function_privilege('authenticated','public.leave_create_request_calculated(uuid,uuid,uuid,uuid,uuid,date,date,text,text)','EXECUTE')::text
+||'|'||(position('APPROVED' in pg_get_functiondef('public.leave_create_request_calculated(uuid,uuid,uuid,uuid,uuid,date,date,text,text)'::regprocedure))>0)::text
+||'|'||(position('Only cancellation' in pg_get_functiondef('public.leave_request_transition(uuid,text,text)'::regprocedure))>0)::text;
+"@
+  $check045Path = Join-Path $workRoot 'check-045.sql'
+  [IO.File]::WriteAllText($check045Path, $check045, [Text.UTF8Encoding]::new($false))
+  $result045 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check045Path) 'check-045' 15 (Join-Path $workRoot 'check-045')).Trim()
+  if ($result045 -ne 'false|true|true|true|true') { throw 'Migration 045 attendance/leave simplification grants or RPC behavior did not verify.' }
   $check044 = @"
 select (position('ATTENDANCE_SCHEDULE_MISMATCH' in pg_get_functiondef('public.payroll_preview_inputs(uuid,uuid,date,date)'::regprocedure)) = 0)::text
 ||'|'||has_function_privilege('authenticated','public.payroll_preview_inputs(uuid,uuid,date,date)','EXECUTE')::text
@@ -445,7 +473,7 @@ select 'history|'||count(*) from supabase_migrations.schema_migrations;
   if ([int]$afterRows['policy_count'] -ne [int]$baselineRows['policy_count']) { throw 'Migration 041 unexpectedly changed the public policy count.' }
   if ([int]$afterRows['history'] -ne $baselineHistoryCount) { throw 'Local raw SQL validation unexpectedly changed the restored migration history.' }
 
-  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=042-044 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true audit_history_fingerprint_unchanged=true prior_rls_preserved=true rollback_workflows=passed logs=$workRoot"
+  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=042-045 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true audit_history_fingerprint_unchanged=true prior_rls_preserved=true rollback_workflows=$rollbackWorkflowStatus migration045_runtime_fixture_tests=not_run logs=$workRoot"
   Write-Output 'This validates migration SQL and structural preservation on an isolated local PostgreSQL database; Supabase-managed and signed Auth HTTP behavior remains to be tested.'
 } finally {
   foreach ($name in @('PGHOST','PGPORT','PGUSER','PGDATABASE','PGSSLMODE','PGCONNECT_TIMEOUT','PGAPPNAME')) {

@@ -84,16 +84,18 @@ describe('LIVE attendance workflow', () => {
     expect(screen.getByRole('region', { name: 'Attendance filters' })).toBeInTheDocument()
   })
 
-  it('submits a recorded period and lets a separate reviewer approve it', async () => {
+  it('does not ask for a separate attendance approval and can return a legacy submission for editing', async () => {
     const period = { id: 'period-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
       period_start: '2026-10-01', period_end: '2026-10-31', status: 'SUBMITTED', created_by: 'branch-manager', reviewed_by: null, reviewed_at: null, review_reason: null }
     mocks.periods.mockResolvedValue({ items: [period], total: 1 })
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve period' }))
-    await waitFor(() => expect(mocks.reviewPeriod).toHaveBeenCalledWith(period.id, 'APPROVE', undefined))
-    expect(await screen.findByText('Attendance period approved.')).toHaveAttribute('role', 'status')
+    expect(await screen.findByRole('button', { name: 'Return to editing' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /approve period/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Return to editing' }))
+    await waitFor(() => expect(mocks.reviewPeriod).toHaveBeenCalledWith(period.id, 'RETURN', 'Please correct the monthly attendance entries.'))
+    expect(await screen.findByText(/Payroll review is the approval step/)).toBeInTheDocument()
   })
 
   it('clearly locks submitted attendance entries until a reviewer returns the period', async () => {
@@ -103,7 +105,7 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByText(/previous workflow and is locked while under review/i)).toHaveAttribute('role', 'status')
+    expect(await screen.findByText(/previous workflow. Return it to editing/i)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
   })
 
@@ -114,25 +116,24 @@ describe('LIVE attendance workflow', () => {
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
     renderScreen()
-    expect(await screen.findByText(/request an audited correction to reopen it/i)).toHaveAttribute('role', 'status')
-    expect(await screen.findByRole('button', { name: 'Correction unavailable' })).toBeDisabled()
+    expect(await screen.findByText(/open an audited correction to edit it/i)).toHaveAttribute('role', 'status')
+    expect(await screen.findByRole('button', { name: 'Correct attendance' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled()
     expect(mocks.saveEntry).not.toHaveBeenCalled()
   })
 
-  it('opens an approved-period correction with a reason and requires reapproval', async () => {
+  it('opens an approved-period correction with a reason and leaves review to payroll approval', async () => {
     const period = { id: 'period-1', portfolio_id: company.portfolioId, company_id: company.id, branch_id: 'synthetic-branch',
       period_start: '2026-10-01', period_end: '2026-10-31', status: 'APPROVED', created_by: 'branch-manager', reviewed_by: 'reviewer', reviewed_at: '2026-10-30T08:00:00Z', review_reason: null }
     mocks.periods.mockResolvedValue({ items: [period], total: 1 })
     mocks.entries.mockResolvedValue([{ id: 'entry-1', attendance_period_id: period.id, employee_id: employee.id, scheduled_working_days: 22,
       actual_days_worked: 22, paid_leave_days: 0, unpaid_leave_days: 0, other_payable_absence_days: 0, contract_type: 'MONTHLY', correction_note: null }])
-    mocks.approvedCorrectionCapability.mockResolvedValue(true)
     renderScreen()
-    fireEvent.click(await screen.findByRole('button', { name: 'Request correction' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Correct attendance' }))
     fireEvent.change(screen.getByLabelText('Reason for correction'), { target: { value: 'Correct an approved attendance entry' } })
     fireEvent.click(screen.getByRole('button', { name: 'Open correction' }))
     await waitFor(() => expect(mocks.requestApprovedCorrection).toHaveBeenCalledWith(period.id, 'Correct an approved attendance entry'))
-    expect(await screen.findByText(/^Correction opened\./)).toBeInTheDocument()
+    expect(await screen.findByText(/^Correction opened\. Save the corrected entries; payroll review is the approval step\./)).toBeInTheDocument()
   })
 
   it('does not display success when attendance persistence is denied', async () => {

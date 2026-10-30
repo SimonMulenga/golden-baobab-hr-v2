@@ -33,7 +33,6 @@ export function LiveAttendance() {
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false)
   const [correctionOpen, setCorrectionOpen] = useState(false)
   const [correctionReason, setCorrectionReason] = useState('')
-  const [correctionCapability, setCorrectionCapability] = useState<'checking' | 'available' | 'unavailable'>('checking')
   const [form, setForm] = useState({ scheduled: '22', worked: '', paid: '0', unpaid: '0', other: '0', note: '' })
 
   useEffect(() => {
@@ -60,19 +59,6 @@ export function LiveAttendance() {
   }, [companyId, branchId, month, page])
 
   useEffect(() => { const timer = window.setTimeout(() => { void load() }, 0); return () => window.clearTimeout(timer) }, [load])
-
-  useEffect(() => {
-    if (period?.status !== 'APPROVED' || !companyId || !branchId) {
-      setCorrectionCapability('checking')
-      return
-    }
-    let active = true
-    setCorrectionCapability('checking')
-    void createLiveBusinessServices(getSupabaseClient()).attendance.approvedCorrectionCapability(companyId, branchId)
-      .then((supported) => { if (active) setCorrectionCapability(supported ? 'available' : 'unavailable') })
-      .catch(() => { if (active) setCorrectionCapability('unavailable') })
-    return () => { active = false }
-  }, [period?.id, period?.status, companyId, branchId])
 
   const byEmployee = useMemo(() => new Map(entries.map((item) => [item.employee_id, item])), [entries])
   const summary = useMemo(() => entries.reduce((value, item) => ({
@@ -114,15 +100,14 @@ export function LiveAttendance() {
     finally { setBusy(false) }
   }
 
-  const transition = async (action: 'submit' | 'approve' | 'return' | 'request-correction', reason?: string) => {
+  const transition = async (action: 'return' | 'request-correction', reason?: string) => {
     if (!period) return
     setBusy(true); setError(''); setNotice('')
     try {
       const services = createLiveBusinessServices(getSupabaseClient())
-      if (action === 'submit') { if (entries.length < total) throw new Error('Attendance is incomplete for this period.'); await services.attendance.submitPeriod(period.id) }
-      else if (action === 'request-correction') { await services.attendance.requestApprovedCorrection(period.id, reason ?? '') }
-      else await services.attendance.reviewPeriod(period.id, action === 'approve' ? 'APPROVE' : 'RETURN', action === 'return' ? 'Please correct the monthly attendance entries.' : undefined)
-      setNotice(action === 'submit' ? 'Attendance period submitted for review.' : action === 'approve' ? 'Attendance period approved.' : action === 'return' ? 'Attendance period returned for correction.' : 'Correction opened. Updated entries must be resubmitted for independent review.')
+      if (action === 'request-correction') await services.attendance.requestApprovedCorrection(period.id, reason ?? '')
+      else await services.attendance.reviewPeriod(period.id, 'RETURN', 'Please correct the monthly attendance entries.')
+      setNotice(action === 'return' ? 'Attendance returned to editing. Payroll review is the approval step.' : 'Correction opened. Save the corrected entries; payroll review is the approval step.')
       if (action === 'request-correction') { setCorrectionOpen(false); setCorrectionReason('') }
       await load()
     } catch {
@@ -175,8 +160,8 @@ export function LiveAttendance() {
         <div><strong>{period.status === 'APPROVED' ? 'Period approved' : period.status === 'SUBMITTED' ? 'Awaiting review' : period.status === 'RETURNED_FOR_CORRECTION' ? 'Correction open' : entries.length === total ? 'Ready for payroll review' : 'Attendance in progress'}</strong>
           <span>{entries.length} of {total} employee entries recorded</span></div>
         <div className="attendance-workflow-actions">
-          {period.status === 'SUBMITTED' ? <><button className="button-secondary" type="button" disabled={busy} onClick={() => void transition('return')}>Return for correction</button><button className="button-primary" type="button" disabled={busy} onClick={() => void transition('approve')}><Check size={15}/> Approve period</button></> : null}
-          {period.status === 'APPROVED' && <button className="button-secondary" type="button" disabled={busy || correctionCapability !== 'available'} onClick={() => { setCorrectionReason(''); setCorrectionOpen(true) }}>{correctionCapability === 'checking' ? 'Checking correction access…' : correctionCapability === 'available' ? 'Request correction' : 'Correction unavailable'}</button>}
+          {period.status === 'SUBMITTED' ? <button className="button-secondary" type="button" disabled={busy} onClick={() => void transition('return')}>Return to editing</button> : null}
+          {period.status === 'APPROVED' && <button className="button-secondary" type="button" disabled={busy} onClick={() => { setCorrectionReason(''); setCorrectionOpen(true) }}>Correct attendance</button>}
         </div>
       </div>}
     </section>
@@ -189,8 +174,8 @@ export function LiveAttendance() {
       <div><span>Paid / unpaid leave</span><strong>{summary.paid} / {summary.unpaid}</strong></div>
     </section>
 
-    {period?.status === 'SUBMITTED' && <p role="status" className="live-notice">This period was submitted under the previous workflow and is locked while under review.</p>}
-    {period?.status === 'APPROVED' && <p role="status" className="live-notice">This approved period is locked. Request an audited correction to reopen it; the changes must be resubmitted for independent review. Reopening is blocked if a payroll run exists.</p>}
+    {period?.status === 'SUBMITTED' && <p role="status" className="live-notice">This period was submitted under the previous workflow. Return it to editing to continue; payroll review is the approval step.</p>}
+    {period?.status === 'APPROVED' && <p role="status" className="live-notice">This period was approved under the previous workflow. Open an audited correction to edit it. Reopening is blocked once a payroll run exists.</p>}
     {notice && <p role="status" className="live-notice">{notice}</p>}
     {error && <p role="alert" className="live-error">{error}</p>}
 
@@ -222,7 +207,7 @@ export function LiveAttendance() {
         {!loading && employees.length > 0 && !period && <div className="attendance-inline-note">No attendance period exists for this month yet. Record an entry to open the period.</div>}
       </div>
       <footer className="attendance-table-footer">
-        <p>Saved attendance is included in the payroll trial. HR reviews these inputs with the final payroll submission.</p>
+        <p>Save monthly attendance once. The payroll reviewer checks these inputs with the payroll run.</p>
         <nav aria-label="Attendance employee pages">
           <button type="button" aria-label="Previous employee page" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={17}/></button>
           <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
@@ -233,7 +218,7 @@ export function LiveAttendance() {
     {employeePickerOpen && <div className="ops-backdrop"><section className="ops-dialog attendance-employee-picker" role="dialog" aria-modal="true" aria-labelledby="attendance-update-title"><header><div><h2 id="attendance-update-title">Update attendance</h2><p>{company?.name} · {company?.branches.find((item) => item.id === branchId)?.name} · {month}</p></div><button className="icon-button" type="button" onClick={() => setEmployeePickerOpen(false)} aria-label="Close">×</button></header><p>Select an approved employee in this branch. Existing entries can be updated while the period is open.</p><div className="attendance-employee-picker-list">{employees.map((person) => { const row = byEmployee.get(person.id); return <button type="button" key={person.id} disabled={!entriesEditable} onClick={() => { setEmployeePickerOpen(false); openEditor(person) }}><span><strong>{person.first_name} {person.last_name}</strong><small>{person.employee_number} · {person.department || 'No department'}</small></span><span>{row ? `${row.actual_days_worked} worked · ${row.paid_leave_days + row.unpaid_leave_days} leave` : 'No entry · defaults to 22 scheduled days'}</span></button> })}</div></section></div>}
     {period && <section className="panel peopleops-panel"><div className="leave-list-heading"><div><div className="section-eyebrow">PERIOD AUDIT TRAIL</div><h2>Attendance history</h2></div></div>{history.length ? <ol className="attendance-history">{history.map((item) => <li key={item.id}><strong>{item.previous_status ?? 'Created'} → {item.new_status}</strong><span>{item.action} · {formatWorkspaceDateTime(item.occurred_at, preferences)}</span>{item.reason && <p>{item.reason}</p>}</li>)}</ol> : <div className="ops-empty">No attendance workflow changes recorded yet.</div>}</section>}
     {editing && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-entry-title"><header><div><h2 id="attendance-entry-title">Monthly attendance entry</h2><p>{editing.first_name} {editing.last_name} · {month}</p></div><button className="icon-button" onClick={() => setEditing(null)} aria-label="Close">×</button></header><form onSubmit={save}><div className="ops-date-pair"><label>Scheduled working days<input type="number" min="0" max="31" step="0.5" required value={form.scheduled} onChange={(event) => setForm({ ...form, scheduled: event.target.value })}/></label><label>Actual days worked<input type="number" min="0" max="31" step="0.5" required value={form.worked} onChange={(event) => setForm({ ...form, worked: event.target.value })}/></label><label>Paid leave days taken<input type="number" min="0" max="31" step="0.5" value={form.paid} onChange={(event) => setForm({ ...form, paid: event.target.value })}/></label><label>Unpaid leave days taken<input type="number" min="0" max="31" step="0.5" value={form.unpaid} onChange={(event) => setForm({ ...form, unpaid: event.target.value })}/></label><label>Other payable absence<input type="number" min="0" max="31" step="0.5" value={form.other} onChange={(event) => setForm({ ...form, other: event.target.value })}/></label></div><label>Correction note<textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Add a note if you are correcting a saved entry" rows={2}/></label><p><CalendarDays size={14}/> New entries start at 22 scheduled working days. Adjust the total for this month, enter worked and leave days, then save. Leave balances continue to follow recorded leave requests.</p><footer><button type="button" className="button-secondary" onClick={() => setEditing(null)}>Cancel</button><button className="button-primary" disabled={busy}><Check size={14}/> Save entry</button></footer></form></section></div>}
-    {correctionOpen && period && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title"><header><div><h2 id="attendance-correction-title">Request attendance correction</h2><p>{month} · {company?.name}</p></div><button className="icon-button" type="button" onClick={() => setCorrectionOpen(false)} aria-label="Close">×</button></header><form onSubmit={(event) => { event.preventDefault(); void transition('request-correction', correctionReason) }}><label>Reason for correction<textarea autoFocus required minLength={3} maxLength={1000} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} rows={4}/></label><p>Payroll run history is checked before reopening. After changes, submit the period for review by a different authorized reviewer.</p><footer><button type="button" className="button-secondary" disabled={busy} onClick={() => setCorrectionOpen(false)}>Cancel</button><button className="button-primary" disabled={busy || correctionReason.trim().length < 3}>{busy ? 'Requesting…' : 'Open correction'}</button></footer></form></section></div>}
+    {correctionOpen && period && <div className="ops-backdrop"><section className="ops-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title"><header><div><h2 id="attendance-correction-title">Open attendance correction</h2><p>{month} · {company?.name}</p></div><button className="icon-button" type="button" onClick={() => setCorrectionOpen(false)} aria-label="Close">×</button></header><form onSubmit={(event) => { event.preventDefault(); void transition('request-correction', correctionReason) }}><label>Reason for correction<textarea autoFocus required minLength={3} maxLength={1000} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} rows={4}/></label><p>Payroll run history is checked before reopening. Correct and save the entries; payroll approval remains the final review.</p><footer><button type="button" className="button-secondary" disabled={busy} onClick={() => setCorrectionOpen(false)}>Cancel</button><button className="button-primary" disabled={busy || correctionReason.trim().length < 3}>{busy ? 'Opening…' : 'Open correction'}</button></footer></form></section></div>}
   </div>
 }
 

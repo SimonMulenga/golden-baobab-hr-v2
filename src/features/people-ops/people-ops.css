@@ -244,3 +244,14 @@
 .attendance-employee-picker-list strong{font-size:14px;line-height:1.4}
 .attendance-employee-picker-list small,.attendance-employee-picker-list>button>span:last-child{color:var(--muted);font-size:12px;line-height:1.4}
 @media(max-width:600px){.attendance-employee-picker-list>button{align-items:flex-start;flex-direction:column;gap:5px}}
+
+.attendance-leave-report{padding:18px;margin:16px 0 20px;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+.attendance-leave-report>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:12px}
+.attendance-leave-report h2{margin:4px 0;font:700 19px Manrope,sans-serif;color:var(--text)}
+.attendance-leave-report p{max-width:760px;margin:5px 0;color:var(--muted);font-size:14px;line-height:1.5}
+.attendance-leave-report>header label{display:grid;gap:5px;min-width:180px;color:var(--text);font-size:13px;font-weight:600}
+.attendance-leave-report input{min-height:38px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font:14px 'DM Sans',sans-serif}
+.attendance-leave-report-table{min-width:660px}
+.attendance-leave-report-table th,.attendance-leave-report-table td{height:auto;padding:11px 12px;font-size:13px;line-height:1.4}
+.attendance-leave-report-table th{font-size:12px}
+@media(max-width:600px){.attendance-leave-report{padding:14px}.attendance-leave-report>header{flex-direction:column}.attendance-leave-report>header label{width:100%}.attendance-leave-report h2{font-size:17px}}
