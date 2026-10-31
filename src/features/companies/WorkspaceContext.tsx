@@ -29,6 +29,7 @@ export function formatWorkspaceDateTime(value: string | number | Date, preferenc
 export type WorkspaceData = {
   companies: Company[]
   saveCompany: (company: Company) => void | Company | Promise<void | Company>
+  saveCompanyLogo?: (companyId: string, file: File | null) => Promise<Company>
   deleteCompany: (id: string) => void | Promise<void>
   loading?: boolean
   error?: string

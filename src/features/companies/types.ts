@@ -27,6 +27,9 @@ export type Company = {
   province: string
   town: string
   logo: string
+  /** Private Storage object reference and short-lived signed URL for live logos. */
+  logoStoragePath?: string | null
+  logoUrl?: string | null
   contactPerson: string
   status: CompanyStatus
   employeeCount: number

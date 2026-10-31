@@ -135,6 +135,11 @@ function AppShell() {
         throw new Error('Company changes were not saved.')
       }
     },
+    saveCompanyLogo: async (companyId: string, file: File | null) => {
+      const saved = await createLiveCompanyServices(getSupabaseClient(), authUserId ?? '').saveLogo(companyId, file)
+      setCompanies((items) => items.map((item) => item.id === saved.id ? saved : item))
+      return saved
+    },
     deleteCompany: async (id: string) => {
       await createLiveCompanyServices(getSupabaseClient(), authUserId ?? '').deactivate(id)
       setCompanies((items) => items.map((item) => item.id === id ? { ...item, status: 'Inactive' } : item))

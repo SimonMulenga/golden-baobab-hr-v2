@@ -28,6 +28,7 @@ $migration043 = Join-Path $repoRoot 'supabase\migrations\20261030004300_retire_c
 $migration044 = Join-Path $repoRoot 'supabase\migrations\20261030004400_honor_editable_attendance_schedule.sql'
 $migration045 = Join-Path $repoRoot 'supabase\migrations\20261030004500_simplify_attendance_and_leave_approvals.sql'
 $migration046 = Join-Path $repoRoot 'supabase\migrations\20261031004600_portfolio_company_administrator.sql'
+$migration047 = Join-Path $repoRoot 'supabase\migrations\20261031004700_private_company_logos.sql'
 $bin = 'C:\Program Files\PostgreSQL\18\bin'
 $initdb = Join-Path $bin 'initdb.exe'
 $pgCtl = Join-Path $bin 'pg_ctl.exe'
@@ -144,7 +145,7 @@ function Invoke-BoundedUnredirectedNative(
 foreach ($tool in @($initdb, $pgCtl, $psql, $createdb, $pgRestore)) {
   if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Required installed PostgreSQL 18 tool is unavailable: $tool" }
 }
-foreach ($migration in @($migration041, $migration042, $migration045, $migration046)) {
+foreach ($migration in @($migration041, $migration042, $migration045, $migration046, $migration047)) {
   if (-not (Test-Path -LiteralPath $migration -PathType Leaf)) { throw "Required migration is missing: $migration" }
 }
 if (-not (Test-Path -LiteralPath $archive -PathType Leaf) -or
@@ -253,7 +254,7 @@ select 'rls|'||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamesp
   [IO.File]::WriteAllText($baselinePath, $baselineSql, [Text.UTF8Encoding]::new($false))
   $baselineOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$baselinePath) 'baseline-checks' 20 (Join-Path $workRoot 'baseline-checks')
   $baselineOutput = $baselineOutput -replace "`r", ''
-  if ($baselineOutput -notmatch 'history\|(?<count>40|41|43|44|45)\|20261028000100\|(?<last>20261030004000|20261030004100|20261030004300|20261030004400|20261030004500)') { throw 'Archive migration history does not match a supported baseline through 040, 041, 043, 044 or 045.' }
+  if ($baselineOutput -notmatch 'history\|(?<count>40|41|43|44|45|46)\|20261028000100\|(?<last>20261030004000|20261030004100|20261030004300|20261030004400|20261030004500|20261031004600)') { throw 'Archive migration history does not match a supported baseline through 040, 041, 043, 044, 045 or 046.' }
   $baselineHistoryCount = [int]$Matches.count
   $baselineHistoryLast = $Matches.last
   if ($baselineOutput -notmatch '(?m)^bootstrap_portfolio\|true$') { throw 'The retained Company Administrator portfolio is missing from the backup.' }
@@ -298,7 +299,7 @@ select 'compensation|'||count(*) from public.employee_compensation;
 select 'attendance_periods|'||count(*) from public.attendance_periods;
 select 'payroll_periods|'||count(*) from public.payroll_periods;
 select 'payroll_runs|'||count(*) from public.payroll_runs;
-select 'audit_fingerprint|'||md5(coalesce(string_agg(to_jsonb(a)::text, E'\\n' order by a.id),'')) from public.audit_logs a;
+select 'audit_fingerprint|'||md5(coalesce(string_agg((to_jsonb(a) - 'actor_kind')::text, E'\\n' order by a.id),'')) from public.audit_logs a;
 select 'rls_disabled|'||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity;
 select 'policy_count|'||count(*) from pg_policies where schemaname='public';
 "@
@@ -424,12 +425,12 @@ select has_function_privilege('authenticated','public.branch_work_calendar_reque
     throw 'Migration 043 did not revoke client RPC/helper execution while preserving historical calendar data and the earning trigger.'
   }
 
-  if ($baselineHistoryLast -ne '20261030004400') {
+  if ([long]$baselineHistoryLast -lt 20261030004400) {
     Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration044) 'migration-044' 60 (Join-Path $workRoot 'migration-044') | Out-Null
     Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=044'
   } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=044' }
 
-  if ($baselineHistoryLast -ne '20261030004500') {
+  if ([long]$baselineHistoryLast -lt 20261030004500) {
     Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration045) 'migration-045' 90 (Join-Path $workRoot 'migration-045') | Out-Null
     Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=045'
   } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=045' }
@@ -454,13 +455,61 @@ select (position('ATTENDANCE_SCHEDULE_MISMATCH' in pg_get_functiondef('public.pa
   $result044 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check044Path) 'check-044' 15 (Join-Path $workRoot 'check-044')).Trim()
   if ($result044 -ne 'true|true|false') { throw 'Migration 044 schedule override or payroll-preview grant verification failed.' }
 
-  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration046) 'migration-046' 90 (Join-Path $workRoot 'migration-046') | Out-Null
-  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=046'
+  if ([long]$baselineHistoryLast -lt 20261031004600) {
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration046) 'migration-046' 90 (Join-Path $workRoot 'migration-046') | Out-Null
+    Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=046'
+  } else { Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=046' }
   $role046Path = Join-Path $repoRoot 'supabase\tests\portfolio-company-admin-rollback.sql'
   $role046Output = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-f',$role046Path) 'portfolio-company-admin-rollback' 30 (Join-Path $workRoot 'portfolio-company-admin-rollback')
   if ($role046Output -notmatch 'PASS portfolio Company Administrator authorization and bootstrap rollback assertions passed') {
     throw 'Migration 046 rollback-only authorization assertions did not pass.'
   }
+
+  # The application archive intentionally omits Supabase-managed Storage. The
+  # following API-compatible catalog stubs exist only in this disposable test DB.
+  $storageFixture = @"
+create schema if not exists storage;
+create table if not exists storage.buckets (
+  id text primary key, name text not null, public boolean not null default false,
+  file_size_limit bigint, allowed_mime_types text[]
+);
+create table if not exists storage.objects (
+  id uuid primary key default gen_random_uuid(), bucket_id text not null, name text not null, owner_id text
+);
+alter table storage.objects enable row level security;
+grant usage on schema storage to authenticated, anon;
+grant select,insert,update,delete on storage.objects to authenticated, anon;
+create or replace function storage.foldername(name text) returns text[]
+language sql immutable set search_path=pg_catalog as `$gb`$
+  select case when array_length(string_to_array(name,'/'),1)>1
+    then (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1]
+    else array[]::text[] end;
+`$gb`$;
+create or replace function storage.filename(name text) returns text
+language sql immutable set search_path=pg_catalog as `$gb`$
+  select split_part(name,'/',array_length(string_to_array(name,'/'),1));
+`$gb`$;
+"@
+  $storageFixturePath = Join-Path $workRoot 'storage-fixture.sql'
+  [IO.File]::WriteAllText($storageFixturePath, $storageFixture, [Text.UTF8Encoding]::new($false))
+  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$storageFixturePath) 'storage-catalog-fixture' 20 (Join-Path $workRoot 'storage-catalog-fixture') | Out-Null
+  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration047) 'migration-047' 90 (Join-Path $workRoot 'migration-047') | Out-Null
+  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=047'
+
+  $check047 = @"
+select (exists(select 1 from information_schema.columns where table_schema='public' and table_name='companies' and column_name='logo_storage_path' and is_nullable='YES'))::text
+||'|'||(exists(select 1 from storage.buckets where id='gb-company-logos' and public=false and file_size_limit=2097152 and allowed_mime_types=array['image/webp']::text[]))::text
+||'|'||(to_regprocedure('public.company_logo_set(uuid,text)') is not null)::text
+||'|'||has_function_privilege('authenticated','public.company_logo_set(uuid,text)','EXECUTE')::text
+||'|'||has_function_privilege('anon','public.company_logo_set(uuid,text)','EXECUTE')::text
+||'|'||(select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname like 'gb_company_logos_%')::text
+||'|'||(select relrowsecurity from pg_class where oid='storage.objects'::regclass)::text
+||'|'||(position('company.edit' in pg_get_functiondef('public.company_logo_set(uuid,text)'::regprocedure))>0)::text;
+"@
+  $check047Path = Join-Path $workRoot 'check-047.sql'
+  [IO.File]::WriteAllText($check047Path, $check047, [Text.UTF8Encoding]::new($false))
+  $result047 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check047Path) 'check-047' 15 (Join-Path $workRoot 'check-047')).Trim()
+  if ($result047 -ne 'true|true|true|true|false|11|true|true') { throw 'Migration 047 company logo storage, RLS, RPC grant, or company permission verification failed.' }
 
   $afterSql = @"
 select 'companies|'||count(*) from public.companies;
@@ -476,20 +525,22 @@ select 'rls_disabled|'||count(*) from pg_class c join pg_namespace n on n.oid=c.
 select 'rls_enabled|'||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relrowsecurity;
 select 'policy_count|'||count(*) from pg_policies where schemaname='public';
 select 'history|'||count(*) from supabase_migrations.schema_migrations;
+select 'logo_column|'||(exists(select 1 from information_schema.columns where table_schema='public' and table_name='companies' and column_name='logo_storage_path'))::text;
 "@
   $afterPath = Join-Path $workRoot 'after.sql'
   [IO.File]::WriteAllText($afterPath, $afterSql, [Text.UTF8Encoding]::new($false))
   $afterOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$afterPath) 'after-checks' 15 (Join-Path $workRoot 'after-checks')
   $afterRows = @{}
-  foreach ($line in ($afterOutput -split "`r?`n")) { if ($line -match '^(?<key>companies|branches|employees|audit|compensation|attendance_periods|payroll_periods|payroll_runs|audit_fingerprint|rls_disabled|rls_enabled|policy_count|history)\|(?<value>.+)$') { $afterRows[$Matches.key] = $Matches.value } }
+  foreach ($line in ($afterOutput -split "`r?`n")) { if ($line -match '^(?<key>companies|branches|employees|audit|compensation|attendance_periods|payroll_periods|payroll_runs|audit_fingerprint|rls_disabled|rls_enabled|policy_count|history|logo_column)\|(?<value>.+)$') { $afterRows[$Matches.key] = $Matches.value } }
   foreach ($key in @('companies','branches','employees','audit','compensation','attendance_periods','payroll_periods','payroll_runs','audit_fingerprint','rls_disabled')) {
     if ($afterRows[$key] -ne $baselineRows[$key]) { throw "Migration preservation invariant changed: $key differs." }
   }
   if ([int]$afterRows['rls_enabled'] -ne [int]$baselineRows['rls']) { throw 'Migration 041 changed the number of RLS-enabled public tables.' }
   if ([int]$afterRows['policy_count'] -ne [int]$baselineRows['policy_count']) { throw 'Migration 041 unexpectedly changed the public policy count.' }
   if ([int]$afterRows['history'] -ne $baselineHistoryCount) { throw 'Local raw SQL validation unexpectedly changed the restored migration history.' }
+  if ($afterRows['logo_column'] -ne 'true') { throw 'Migration 047 company logo column did not persist in the isolated target.' }
 
-  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=046 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true prior_audit_history_unchanged=true prior_rls_preserved=true rollback_workflows=$rollbackWorkflowStatus migration046_rollback_tests=passed logs=$workRoot"
+  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=047 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true prior_audit_history_unchanged=true prior_rls_preserved=true rollback_workflows=$rollbackWorkflowStatus migration046_rollback_tests=passed storage_stubbed_for_local_schema_validation=true logs=$workRoot"
   Write-Output 'This validates migration SQL and structural preservation on an isolated local PostgreSQL database; Supabase-managed and signed Auth HTTP behavior remains to be tested.'
 } finally {
   foreach ($name in @('PGHOST','PGPORT','PGUSER','PGDATABASE','PGSSLMODE','PGCONNECT_TIMEOUT','PGAPPNAME')) {

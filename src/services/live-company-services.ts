@@ -9,6 +9,7 @@ type CompanyRow = {
   id: string; portfolio_id: string; name: string; registration_number: string; tpin: string
   industry: string; business_email: string; phone: string; province: string; town: string
   physical_address: string; contact_person: string; status: string; created_at: string
+  logo_storage_path?: string | null
   branches: BranchRow[]
 }
 
@@ -29,7 +30,8 @@ function mapCompany(row: CompanyRow): Company {
     id: row.id, portfolioId: row.portfolio_id, name: row.name,
     registrationNumber: row.registration_number, tpin: row.tpin, industry: row.industry,
     email: row.business_email, phone: row.phone, address: row.physical_address,
-    province: row.province, town: row.town, logo: initials(row.name), contactPerson: row.contact_person,
+    province: row.province, town: row.town, logo: initials(row.name),
+    logoStoragePath: row.logo_storage_path ?? null, contactPerson: row.contact_person,
     status: toUiStatus(row.status), employeeCount: 0, createdAt: row.created_at.slice(0, 10),
     branches: (row.branches ?? []).map(mapBranch),
   }
@@ -48,15 +50,19 @@ async function withEmployeeCounts(client: SupabaseClient, row: CompanyRow): Prom
   const [companyCount, ...branchCounts] = await Promise.all([
     count(), ...mapped.branches.map((branch) => count(branch.id)),
   ])
+  const signedLogo = row.logo_storage_path
+    ? await client.storage.from('gb-company-logos').createSignedUrl(row.logo_storage_path, 3600)
+    : null
   return {
     ...mapped,
+    logoUrl: signedLogo && !signedLogo.error ? signedLogo.data.signedUrl : null,
     employeeCount: companyCount,
     branches: mapped.branches.map((branch, index) => ({ ...branch, employeeCount: branchCounts[index] ?? 0 })),
   }
 }
 
 export function createLiveCompanyServices(client: SupabaseClient, userId: string) {
-  const fields = 'id,portfolio_id,name,registration_number,tpin,industry,business_email,phone,province,town,physical_address,contact_person,status,created_at,branches(id,name,code,province,town,physical_address,manager_name,contact_phone,status)'
+  const fields = 'id,portfolio_id,name,registration_number,tpin,industry,business_email,phone,province,town,physical_address,contact_person,status,created_at,logo_storage_path,branches(id,name,code,province,town,physical_address,manager_name,contact_phone,status)'
 
   return {
     async list(): Promise<Company[]> {
@@ -109,6 +115,38 @@ export function createLiveCompanyServices(client: SupabaseClient, userId: string
     async deactivate(companyId: string): Promise<void> {
       const { error } = await client.rpc('company_set_status', { p_company_id: companyId, p_status: 'INACTIVE' })
       if (error) throw error
+    },
+
+    async saveLogo(companyId: string, file: File | null): Promise<Company> {
+      const { data: company, error: lookupError } = await client.from('companies')
+        .select('id,portfolio_id,logo_storage_path').eq('id', companyId).single()
+      if (lookupError) throw lookupError
+      const record = company as { id: string; portfolio_id: string; logo_storage_path: string | null }
+      const oldPath = record.logo_storage_path
+      let newPath: string | null = null
+      if (file) {
+        newPath = `${record.portfolio_id}/${record.id}/${crypto.randomUUID()}.webp`
+        const uploaded = await client.storage.from('gb-company-logos').upload(newPath, file, {
+          contentType: 'image/webp', cacheControl: '3600', upsert: false,
+        })
+        if (uploaded.error) throw uploaded.error
+      }
+      const changed = await client.rpc('company_logo_set', {
+        p_company_id: companyId, p_storage_path: newPath,
+      })
+      if (changed.error) {
+        if (newPath) await client.storage.from('gb-company-logos').remove([newPath])
+        throw changed.error
+      }
+      if (oldPath && oldPath !== newPath) {
+        // Pointer replacement has succeeded; a failed cleanup leaves only an
+        // unreferenced private object and must not misreport the saved logo.
+        await client.storage.from('gb-company-logos').remove([oldPath])
+      }
+      const { data: refreshed, error: refreshError } = await client.from('companies')
+        .select(fields).eq('id', companyId).single()
+      if (refreshError) throw refreshError
+      return withEmployeeCounts(client, refreshed as unknown as CompanyRow)
     },
   }
 }
