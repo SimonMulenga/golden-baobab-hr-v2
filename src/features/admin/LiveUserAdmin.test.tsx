@@ -94,4 +94,15 @@ describe('LIVE company administrator management', () => {
     ])
     expect(screen.queryByRole('button', { name: /Assign Company Payroll (Approver|Reviewer)|Assign Company HR\/Payroll Preparer/ })).not.toBeInTheDocument()
   })
+
+  it('shows the portfolio Company Administrator only HR and branch role controls', async () => {
+    render(<LiveUserAdmin portfolioCompanyAdmin />)
+    expect(await screen.findByText('Create Overall HR Manager and Branch Manager access.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Company administrator account UUID')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Choose a company' })).toBeInTheDocument()
+    const invitationRole = screen.getByLabelText('Role') as HTMLSelectElement
+    expect(Array.from(invitationRole.options).map((option) => option.value)).toEqual(['OVERALL_HR_MANAGER', 'BRANCH_MANAGER'])
+    const assignmentRole = screen.getByLabelText('Account role') as HTMLSelectElement
+    expect(Array.from(assignmentRole.options).map((option) => option.value)).toEqual(['OVERALL_HR_MANAGER', 'BRANCH_MANAGER'])
+  })
 })

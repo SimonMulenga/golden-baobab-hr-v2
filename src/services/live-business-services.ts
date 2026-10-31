@@ -58,7 +58,7 @@ export type PayslipDeliveryRecord = {
 };
 export type AuditLogRecord = {
   id: number; portfolio_id: string; company_id: string | null; branch_id: string | null;
-  actor_id: string; action: string; module: string; record_id: string;
+  actor_id: string | null; action: string; module: string; record_id: string;
   details: Record<string, unknown>; occurred_at: string;
 };
 
@@ -308,7 +308,7 @@ export type CompanyAdminRecord = { user_id: string; email: string; display_name:
 export type CompanyPayrollApproverRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_APPROVER' };
 export type CompanyPayrollReviewerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_REVIEWER' };
 export type CompanyPayrollPreparerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_PREPARER' };
-export type PortfolioMemberRecord = { user_id: string; email: string; display_name: string | null; role: 'PORTFOLIO_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; created_at: string; revoked_at: string | null; branch_ids: string[] };
+export type PortfolioMemberRecord = { user_id: string; email: string; display_name: string | null; role: 'PORTFOLIO_ADMIN' | 'COMPANY_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; created_at: string; revoked_at: string | null; branch_ids: string[] };
 export type DeductionRequestInput = {
   portfolioId: string;
   companyId: string;

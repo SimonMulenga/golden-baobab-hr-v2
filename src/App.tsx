@@ -5,7 +5,7 @@ import { WorkspaceContext, defaultWorkspacePreferences, useWorkspace, type Works
 import { AuthProvider } from './features/auth/AuthContext'
 import { useAuth } from './features/auth/auth-context'
 import { getAuthGateDecision } from './features/auth/auth-routing'
-import { roleCanOpenPath, visibleWorkspaceRoutes, type WorkspaceRole } from './features/auth/workspace-access'
+import { mergeWorkspaceRoles, roleCanOpenPath, visibleWorkspaceRoutes, type WorkspaceRole } from './features/auth/workspace-access'
 import { isLiveMode } from './lib/data-mode'
 import { getSupabaseClient } from './lib/supabase/client'
 import { createLiveCompanyServices } from './services/live-company-services'
@@ -63,7 +63,7 @@ function AppShell() {
   const workspaceName = activeCompanyId === 'all' ? 'All companies' : currentCompany?.name ?? 'Company workspace'
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
   const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes])
-  const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
+  const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
   const maySelectCompany = !branchOnly && companies.length > 1
   const profileName = typeof auth.user?.user_metadata?.full_name === 'string' ? auth.user.user_metadata.full_name : auth.user?.email ?? 'Signed-in account'
   const initials = (value: string) => value.split(/[@\s.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GB'
@@ -110,7 +110,9 @@ function AppShell() {
       client.from('company_memberships').select('role').eq('user_id', authUserId).is('revoked_at', null),
     ]).then(([portfolio, company]) => {
       if (cancelled) return
-      const roles = [...new Set([...(portfolio.data ?? []), ...(company.data ?? [])].map((row) => row.role as WorkspaceRole))]
+      const portfolioRoles = (portfolio.data ?? []).map((row) => row.role)
+      const companyRoles = (company.data ?? []).map((row) => row.role)
+      const roles = mergeWorkspaceRoles(portfolioRoles, companyRoles)
       setRoleContext({ roles, loading: false })
     }).catch(() => { if (!cancelled) setRoleContext({ roles: [], loading: false }) })
     return () => { cancelled = true }
@@ -152,7 +154,7 @@ function AppShell() {
   return <WorkspaceContext.Provider value={data}><div className={`app-shell ${collapsed ? 'is-collapsed' : ''}`}>    {mobileOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span>GB</span></div><span className="brand-word">Golden Baobab <span>HR</span></span><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
-      <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.includes('PORTFOLIO_ADMIN') ? 'Company Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
+      <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role)) ? 'Company Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
       <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom">{!isLiveMode && <div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div>}<div className="profile-row"><div className="profile-avatar">{isLiveMode ? initials(profileName) : 'CM'}</div><div className="profile-copy"><strong>{profileName}</strong><span>{isLiveMode ? 'Signed-in account' : 'Workspace admin'}</span></div>{!isLiveMode && <MoreHorizontal size={18} />}</div></div>
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label="Collapse sidebar"><ChevronLeft size={15} /></button>
@@ -160,7 +162,7 @@ function AppShell() {
     <div className="main-column"><header className="topbar"><div className="top-left"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions">{maySelectCompany ? <label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label> : companies.length === 1 && <div className="company-switch company-context" aria-label="Assigned company"><Building2 size={15}/><span>{companies[0].name}</span></div>}<button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search"><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link>{isLiveMode && <button className="auth-signout" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } }}>Sign out</button>}<div className="top-avatar" title={isLiveMode ? auth.user?.email ?? '' : 'Chola Mwansa'}>{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</div></div></header>
       {authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}
       <main className="page-content"><Suspense fallback={<div className="route-loading"><span className="route-loading-mark">GB</span><span>Opening workspaceâ€¦</span></div>}><Routes>
-          <Route path="/" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.includes('PORTFOLIO_ADMIN')} />} />
+          <Route path="/" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
           <Route path="/companies" element={<CompanyDirectory />} />
           <Route path="/companies/new" element={<CompanyForm mode="create" />} />
           <Route path="/companies/:companyId/edit" element={<CompanyForm mode="edit" />} />
@@ -182,11 +184,11 @@ function AppShell() {
           <Route path="/deductions" element={<LiveDeductions />} />
           <Route path="/statutory" element={<LiveStatutoryFilings />} />
           <Route path="/reports" element={<LivePayrollReports />} />
-          <Route path="/users" element={<LiveUserAdmin />} />
+          <Route path="/users" element={<LiveUserAdmin portfolioCompanyAdmin={roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN')} />} />
           <Route path="/audit" element={<LiveAuditLogs />} />
           <Route path="/notifications" element={<LiveNotifications />} />
           <Route path="/settings" element={<LiveSettings />} />
-          <Route path="*" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.includes('PORTFOLIO_ADMIN')} />} />
+          <Route path="*" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
         </Routes></Suspense></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span>People and payroll workspace</span></footer>
     </div>
@@ -213,7 +215,7 @@ function LiveDashboard({ companies, loading, canCreateCompany }: { companies: Co
   const money = metrics?.finalizedPayrollTotal == null ? 'Restricted' : `K${metrics.finalizedPayrollTotal.toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   return <>
     <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> Workforce</div><h1>Company Overview</h1><p>Manage your workforce, payroll and HR operations in one place.</p></div>{canCreateCompany && <div className="welcome-actions"><Link className="button-primary" to="/companies/new"><Building2 size={15}/> Add company</Link></div>}</section>
-    {loading ? <div className="panel empty-state" role="status">Loading your companies…</div> : companies.length === 0 ? <div className="panel empty-state"><h2>No company access yet</h2><p>Ask your portfolio administrator to grant access to a company.</p></div> : metricsError ? <div className="auth-shell-error" role="alert">{metricsError}</div> : metricsLoading || !metrics ? <div className="panel empty-state" role="status">Loading company overview…</div> : <section className="metrics-grid">
+    {loading ? <div className="panel empty-state" role="status">Loading your companies…</div> : companies.length === 0 ? <div className="panel empty-state"><h2>{canCreateCompany ? 'Set up your first company' : 'No company access yet'}</h2><p>{canCreateCompany ? 'Add a company to begin setting up branches and HR access.' : 'Ask your company administrator to grant access to a company.'}</p></div> : metricsError ? <div className="auth-shell-error" role="alert">{metricsError}</div> : metricsLoading || !metrics ? <div className="panel empty-state" role="status">Loading company overview…</div> : <section className="metrics-grid">
       <Metric icon={<Building2 />} tone="teal" label="Total companies" value={String(scopeCompanies.length)} note={selectedCompany?.name ?? 'All selected companies'} />
       <Metric icon={<Users />} tone="blue" label="Employees" value={String(metrics.employees)} note={`${metrics.activeEmployees} active employees`} />
       <Metric icon={<Wallet />} tone="amber" label="Finalized payroll" value={money} note={metrics.finalizedPayrollTotal == null ? 'Available with payroll access' : 'Net pay in finalized runs'} />

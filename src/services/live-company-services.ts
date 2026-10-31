@@ -69,10 +69,10 @@ export function createLiveCompanyServices(client: SupabaseClient, userId: string
       let portfolioId = company.portfolioId ?? previous?.portfolioId
       if (!portfolioId) {
         const { data: memberships, error } = await client.from('portfolio_memberships')
-          .select('portfolio_id').eq('user_id', userId).is('revoked_at', null).eq('role', 'PORTFOLIO_ADMIN')
+          .select('portfolio_id').eq('user_id', userId).is('revoked_at', null).in('role', ['PORTFOLIO_ADMIN', 'COMPANY_ADMIN'])
         if (error) throw error
         const ids = [...new Set((memberships ?? []).map((row) => (row as { portfolio_id: string }).portfolio_id))]
-        if (ids.length !== 1) throw new Error(ids.length ? 'Select a portfolio before creating a company.' : 'Your account has no active portfolio administrator access.')
+        if (ids.length !== 1) throw new Error(ids.length ? 'Select a portfolio before creating a company.' : 'Your account has no active company setup access.')
         portfolioId = ids[0]
       }
 

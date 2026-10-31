@@ -7,6 +7,8 @@ function queryClient(result: { data: unknown; error: unknown }) {
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn(() => query),
+    is: vi.fn(() => query),
+    in: vi.fn(() => query),
     order: vi.fn(() => query),
     then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve),
   }
@@ -63,6 +65,38 @@ describe('live company data services', () => {
       p_branches: [expect.objectContaining({ id: 'branch-uuid', name: 'Updated QA Branch' })],
       p_deactivate_branch_ids: [],
     }))
+  })
+
+  it('derives the first company portfolio from the scoped Company Administrator role', async () => {
+    const companyRow = {
+      id: 'new-company-uuid', portfolio_id: 'portfolio-uuid', name: 'First Client Company',
+      registration_number: 'REG-1', tpin: 'TPIN-1', industry: 'Services', business_email: 'client@example.invalid',
+      phone: '+260000000001', province: 'Lusaka', town: 'Lusaka', physical_address: 'Synthetic address',
+      contact_person: 'Client contact', status: 'ACTIVE', created_at: '2026-10-31T00:00:00Z', branches: [],
+    }
+    const makeQuery = (result: unknown) => {
+      const query: Record<string, unknown> = {}
+      for (const method of ['select', 'eq', 'is', 'in', 'order']) query[method] = vi.fn(() => query)
+      query.single = vi.fn(() => Promise.resolve(result))
+      query.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve)
+      return query
+    }
+    const membershipQuery = makeQuery({ data: [{ portfolio_id: 'portfolio-uuid' }], error: null })
+    const companyQuery = makeQuery({ data: companyRow, error: null })
+    const employeeQuery = makeQuery({ data: null, error: null, count: 0 })
+    const rpc = vi.fn().mockResolvedValue({ data: 'new-company-uuid', error: null })
+    const client = {
+      from: vi.fn((table: string) => table === 'portfolio_memberships' ? membershipQuery : table === 'companies' ? companyQuery : employeeQuery),
+      rpc,
+    } as unknown as SupabaseClient
+
+    const result = await createLiveCompanyServices(client, 'company-admin-user').save({
+      ...mockCompanies[0], id: '', portfolioId: '', name: 'First Client Company', branches: [],
+    })
+
+    expect((membershipQuery.in as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('role', ['PORTFOLIO_ADMIN', 'COMPANY_ADMIN'])
+    expect(rpc).toHaveBeenCalledWith('company_workspace_save', expect.objectContaining({ p_portfolio_id: 'portfolio-uuid', p_company_id: null }))
+    expect(result.id).toBe('new-company-uuid')
   })
 })
 
