@@ -43,6 +43,20 @@ describe('approved Zambia ordinary monthly payroll configuration', () => {
   })
 
   it.each([
+    [500_000, 5_000, 470_000, 530_000],
+    [650_000, 6_500, 583_000, 689_000],
+    [1_250_000, 12_500, 949_900, 1_325_000],
+  ])('applies separate 1%% NHIMA shares on basic salary K%s', (basicCents, expectedNhimaCents, expectedNetCents, expectedEmployerCostCents) => {
+    const result = calculateZambiaIllustrativePayroll({ basicCents })
+
+    expect(result.nhimaEmployeeCents).toBe(expectedNhimaCents)
+    expect(result.nhimaEmployerCents).toBe(expectedNhimaCents)
+    // Only the employee share reduces net pay; the employer share is cost.
+    expect(result.netPayCents).toBe(expectedNetCents)
+    expect(result.employerCostCents).toBe(expectedEmployerCostCents)
+  })
+
+  it.each([
     [3_000_000, 150_000],
     [3_723_599, 186_180],
     [3_723_600, 186_180],

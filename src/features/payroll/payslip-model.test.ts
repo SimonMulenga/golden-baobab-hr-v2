@@ -25,6 +25,23 @@ describe('finalized payslip view model', () => {
     expect(result.reference).toContain('SYN-001')
   })
 
+  it('deducts NHIMA employee share only and never lists the employer share as a payslip deduction', () => {
+    const result = buildPayslipView({ company, employee, run, item: {
+      ...item,
+      statutory_deductions: { PAYE: 0, NAPSA_EMPLOYEE: 0, NHIMA_EMPLOYEE: 50 },
+      nhima_employee: 50,
+      nhima_employer: 50,
+      gross_pay: 5000,
+      net_pay: 4950,
+      voluntary_deductions: 0,
+    } as unknown as FinalizedPayslipItemRecord })
+
+    expect(result.deductions).toContainEqual({ label: 'NHIMA', amount: 50 })
+    expect(result.deductions).not.toContainEqual(expect.objectContaining({ label: expect.stringMatching(/employer/i) }))
+    expect(result.totalDeductions).toBe(50)
+    expect(result.net).toBe(4950)
+  })
+
   it('marks unpaid-leave adjustment as informational so it is not deducted twice', () => {
     const adjusted = { ...item, attendance_deduction: 686 }
     const result = buildPayslipView({ company, employee, run, item: adjusted })

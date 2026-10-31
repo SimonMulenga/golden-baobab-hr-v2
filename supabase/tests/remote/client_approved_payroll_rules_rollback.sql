@@ -6,12 +6,55 @@ do $$
 declare
   v_configuration jsonb;
   v_result jsonb;
+  v_nhima_rule public.statutory_rule_versions%rowtype;
+  v_salary numeric;
+  v_expected_nhima numeric;
+  v_expected_net numeric;
+  v_expected_employer_cost numeric;
 begin
   select configuration into strict v_configuration
   from public.payroll_calculation_rule_versions
   where jurisdiction = 'ZM' and version = 'ZM-2026-CLIENT-APPROVED-V1'
     and client_approval_status = 'APPROVED_FOR_DEVELOPMENT'
-    and regulatory_verification_status = 'UNVERIFIED';
+    and regulatory_verification_status = 'VERIFIED';
+
+  select * into strict v_nhima_rule
+  from public.statutory_rule_versions
+  where jurisdiction = 'ZM' and rule_code = 'NHIMA' and active
+    and effective_from <= date '2026-11-01'
+    and (effective_to is null or effective_to >= date '2026-11-01')
+  order by effective_from desc limit 1;
+  if (v_nhima_rule.rule_data->>'employee_rate')::numeric <> 0.01
+    or (v_nhima_rule.rule_data->>'employer_rate')::numeric <> 0.01
+    or v_nhima_rule.rule_data->>'employee_base' <> 'BASIC_SALARY_ONLY'
+    or v_nhima_rule.rule_data->>'employer_base' <> 'BASIC_SALARY_ONLY'
+    or v_configuration #>> '{nhima,base}' <> 'BASIC_SALARY_ONLY'
+    or (v_configuration #>> '{nhima,employee_rate}')::numeric <> 0.01
+    or (v_configuration #>> '{nhima,employer_rate}')::numeric <> 0.01 then
+    raise exception 'The effective NHIMA rule must version 1%% employee and employer rates on formal-sector basic salary.';
+  end if;
+
+  -- Basic salary examples: employer NHIMA is an employer cost, not an
+  -- employee deduction. These checks exercise the same trusted PG helper.
+  for v_salary, v_expected_nhima, v_expected_net, v_expected_employer_cost in
+    select * from (values
+      (5000::numeric, 50::numeric, 4700::numeric, 5300::numeric),
+      (6500::numeric, 65::numeric, 5830::numeric, 6890::numeric),
+      (12500::numeric, 125::numeric, 9499::numeric, 13250::numeric)
+    ) as cases(basic_salary, nhima_each, net_pay, employer_cost)
+  loop
+    v_result := app_private.payroll_calculate_client_policy_amounts(
+      v_salary, 0, 0, 0, 0, 0, 0, 0, v_configuration
+    );
+    if (v_result->>'nhima_employee')::numeric <> v_expected_nhima
+      or (v_result->>'nhima_employer')::numeric <> v_expected_nhima
+      or (v_result #>> '{statutory_deductions,nhima_employee}')::numeric <> v_expected_nhima
+      or (v_result #>> '{employer_contributions,nhima}')::numeric <> v_expected_nhima
+      or (v_result->>'net_pay')::numeric <> v_expected_net
+      or (v_result->>'total_employer_cost')::numeric <> v_expected_employer_cost then
+      raise exception 'NHIMA basic salary test failed for K%: %', v_salary, v_result;
+    end if;
+  end loop;
 
   v_result := app_private.payroll_calculate_client_policy_amounts(15092, 4527.60, 0, 0, 0, 0, 0, 0, v_configuration);
   if (v_result->>'gross_earnings')::numeric <> 19619.60

@@ -31,8 +31,12 @@ describe('LIVE finalized payroll reports', () => {
   it('shows statutory employer and employee contribution columns', async () => {
     render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: company.id }}><LivePayrollReports mode="statutory" /></WorkspaceContext.Provider>)
     expect(await screen.findByRole('heading', { name: 'Statutory summaries' })).toBeInTheDocument()
+    expect(await screen.findByText(/Synthetic Person/)).toBeInTheDocument()
     expect(screen.getByText('NAPSA EE')).toBeInTheDocument()
     expect(screen.getByText('NAPSA ER')).toBeInTheDocument()
-    expect(screen.getByText('NHIMA EE')).toBeInTheDocument()
+    expect(screen.getByText('NHIMA employee')).toBeInTheDocument()
+    expect(screen.getByText('NHIMA employer')).toBeInTheDocument()
+    expect(screen.getByText(/employee share reduces net pay; the employer share is a separate employer cost/i)).toBeInTheDocument()
+    expect(screen.getAllByText('K100.00')).toHaveLength(2)
   })
 })
