@@ -43,9 +43,10 @@ describe('LIVE company administrator management', () => {
   it('lists company-scoped users and assigns only through the authorized live service', async () => {
     render(<LiveUserAdmin />)
     expect(await screen.findByText('demo@example.invalid')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Company administrator account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
+    fireEvent.change(screen.getByLabelText('Company Administrator account UUID'), { target: { value: '88888888-8888-4888-8888-888888888888' } })
     fireEvent.click(screen.getByRole('button', { name: 'Assign Company Administrator' }))
     await waitFor(() => expect(mocks.assign).toHaveBeenCalledWith('portfolio-demo', 'company-demo', '88888888-8888-4888-8888-888888888888'))
+    expect(await screen.findByRole('status')).toHaveTextContent('Company Administrator access was assigned.')
   })
 
   it('explains that invitation submits send email and requires a reason to revoke', async () => {
@@ -88,21 +89,37 @@ describe('LIVE company administrator management', () => {
 
   it('offers only the three client account roles for new invitations', async () => {
     render(<LiveUserAdmin />)
-    const role = await screen.findByLabelText('Role')
+    const role = await screen.findByLabelText('Invitation access level')
     expect(Array.from((role as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
-      'Overall HR Manager', 'Branch Manager', 'Company Administrator',
+      'Overall HR Manager (portfolio-wide)', 'Branch Manager (selected branches)', 'Company Administrator',
     ])
     expect(screen.queryByRole('button', { name: /Assign Company Payroll (Approver|Reviewer)|Assign Company HR\/Payroll Preparer/ })).not.toBeInTheDocument()
   })
 
-  it('shows the portfolio Company Administrator only HR and branch role controls', async () => {
+  it('shows the Portfolio Administrator only HR and branch role controls', async () => {
     render(<LiveUserAdmin portfolioCompanyAdmin />)
     expect(await screen.findByText('Create Overall HR Manager and Branch Manager access.')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Company administrator account UUID')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Company Administrator account UUID')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Choose a company' })).toBeInTheDocument()
-    const invitationRole = screen.getByLabelText('Role') as HTMLSelectElement
+    const invitationRole = screen.getByLabelText('Invitation access level') as HTMLSelectElement
     expect(Array.from(invitationRole.options).map((option) => option.value)).toEqual(['OVERALL_HR_MANAGER', 'BRANCH_MANAGER'])
-    const assignmentRole = screen.getByLabelText('Account role') as HTMLSelectElement
+    const assignmentRole = screen.getByLabelText('Role access level') as HTMLSelectElement
     expect(Array.from(assignmentRole.options).map((option) => option.value)).toEqual(['OVERALL_HR_MANAGER', 'BRANCH_MANAGER'])
+  })
+
+  it('labels company and portfolio administrator memberships by their actual scope', async () => {
+    portfolioMocks.list.mockResolvedValue([{
+      user_id: '66666666-6666-4666-8666-666666666666',
+      email: 'portfolio@example.invalid',
+      display_name: 'Portfolio Admin',
+      role: 'COMPANY_ADMIN',
+      created_at: '2026-10-01T00:00:00Z',
+      revoked_at: null,
+      branch_ids: [],
+    }])
+    render(<LiveUserAdmin />)
+    expect(await screen.findByText('portfolio@example.invalid')).toBeInTheDocument()
+    expect(screen.getAllByText('Company Administrator').length).toBeGreaterThan(0)
+    expect(screen.getByText('Portfolio Administrator')).toBeInTheDocument()
   })
 })
