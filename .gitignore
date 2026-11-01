@@ -27,5 +27,6 @@ dist-ssr
 *.sw?
 
 .playwright-cli/
+output/playwright/
 supabase/.temp/
 

@@ -1,5 +1,7 @@
 # Release Readiness Checklist
 
+> Historical baseline: this checklist predates the current migration-053 deployment and final QA pass. Use [`docs/handover/HANDOVER_CHECKLIST.md`](docs/handover/HANDOVER_CHECKLIST.md) for the current release gates.
+
 **Decision: NO-GO for client handover and production deployment as of 1 November 2026.** Migration 049 is active on development; the remaining gates are listed below.
 
 ## Repository and build

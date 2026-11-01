@@ -1,5 +1,7 @@
 # Security Test Report
 
+> Historical baseline: this report's checks stop at migration 049. The current read-only migration check is through 053; see [`docs/handover/QA_TEST_REPORT.md`](docs/handover/QA_TEST_REPORT.md) and [`docs/handover/KNOWN_ISSUES.md`](docs/handover/KNOWN_ISSUES.md) for current limitations.
+
 **Scope:** local source/tests, migration 049 contract tests, isolated PostgreSQL 18 restore, and read-only post-migration checks on development project `jssuaebiizjcoqmngxzk`. No production testing, invitations, payments, statutory filings, or payroll finalization occurred.
 
 ## Completed checks

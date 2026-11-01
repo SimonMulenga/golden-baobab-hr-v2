@@ -1,5 +1,7 @@
 # Golden Baobab HR V2 — Final Development Report
 
+> Historical baseline: this report predates the current migration-053 deployment and final QA pass. Use [`docs/handover/QA_TEST_REPORT.md`](docs/handover/QA_TEST_REPORT.md) and [`docs/handover/HANDOVER_CHECKLIST.md`](docs/handover/HANDOVER_CHECKLIST.md) for current release evidence and decision.
+
 **Assessment date:** 1 November 2026
 **Repository:** `C:\Project\golden-baobab`
 **Branch:** `feature/supabase-auth-synced`

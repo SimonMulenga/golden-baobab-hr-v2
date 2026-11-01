@@ -1,5 +1,7 @@
 # Known Limitations and Release Risks
 
+> Historical baseline: some project and deployment statements below predate migration 053 and the current production release. See [`docs/handover/KNOWN_ISSUES.md`](docs/handover/KNOWN_ISSUES.md) for current release blockers and verified scope.
+
 ## Release blockers
 
 - NHIMA's current FAQ wording (“declared income” for the formal employee share) conflicts with SI 63 of 2019, Third Schedule, which sets payroll-based employee and employer shares at 1% of basic salary. The application follows the Gazette schedule; monitor for a later amendment or formal filing instruction.
