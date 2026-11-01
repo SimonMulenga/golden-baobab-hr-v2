@@ -53,6 +53,7 @@ export type FinalizedPayslipItemRecord = {
   paye_taxable_income: number; napsa_employee: number; napsa_employer: number;
   nhima_employee: number; nhima_employer: number; total_employer_cost: number;
 };
+export type LeaveLedgerReportRecord = { employee_id: string; branch_id: string; event_type: 'ACCRUAL' | 'PAID_LEAVE' | 'ADJUSTMENT' | 'REVERSAL'; amount_delta: number; period_start: string };
 export type PayslipDeliveryRecord = {
   id: string; document_id: string; status: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
   attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null;
@@ -447,6 +448,7 @@ export interface LiveBusinessServices {
   };
   reports: {
     authorizeAndAuditExport(payrollRunId: string, reportType: string, rowCount: number, action?: 'PREVIEW' | 'EXPORT'): Promise<void>;
+    leaveLedger(companyId: string, branchId: string, employeeIds: string[], throughDate: string): Promise<LeaveLedgerReportRecord[]>;
   };
 }
 
@@ -1048,6 +1050,25 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         });
         if (result.error) throw result.error;
         if (result.data !== true) throw new Error('Report export authorization was not confirmed.');
+      },
+      async leaveLedger(companyId, branchId, employeeIds, throughDate) {
+        const rows: LeaveLedgerReportRecord[] = [];
+        const ids = [...new Set(employeeIds)];
+        for (let batchStart = 0; batchStart < ids.length; batchStart += 100) {
+          const batch = ids.slice(batchStart, batchStart + 100);
+          for (let offset = 0; ; offset += 1000) {
+            const result = await client.from('leave_balance_ledger')
+              .select('employee_id,branch_id,event_type,amount_delta,period_start')
+              .eq('company_id', companyId).eq('branch_id', branchId)
+              .in('employee_id', batch).lte('period_start', throughDate)
+              .order('period_start').order('id').range(offset, offset + 999);
+            if (result.error) throw result.error;
+            const page = (result.data ?? []) as unknown as LeaveLedgerReportRecord[];
+            rows.push(...page);
+            if (page.length < 1000) break;
+          }
+        }
+        return rows;
       },
     },
   };

@@ -32,7 +32,7 @@ describe('LIVE statutory filing tracking', () => {
     fireEvent.change(screen.getByLabelText('Due date from approved calendar'), { target: { value: '2026-11-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Prepare filing record' }))
     await waitFor(() => expect(mocks.prepare).toHaveBeenCalledWith(run.id, 'PAYE', '2026-11-10'))
-    expect(await screen.findByRole('status')).toHaveTextContent('No return was submitted')
+    expect(await screen.findByText('PAYE filing record created from the selected finalized payroll version. No return was submitted.')).toBeInTheDocument()
   })
 
   it('shows only live permitted rows and handles permission denial without mock fallback', async () => {

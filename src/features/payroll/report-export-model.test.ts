@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { ADVANCE_HEADINGS, BANK_HEADINGS, buildAdvanceReport, buildBankPayrollReport, buildCashPayrollReport, buildMobileMoneyPayrollReport, buildPayeReport, buildReportWorkbook, CASH_HEADINGS, MOBILE_MONEY_HEADINGS, PAYE_HEADINGS, REPORT_BLOCKERS, type DeductionReportRecord, type PrivateReportDetails } from './report-export-model'
+import { ADVANCE_HEADINGS, BANK_HEADINGS, buildAdvanceReport, buildBankPayrollReport, buildCashPayrollReport, buildLeaveDaysReport, buildMasterPayrollReport, buildMobileMoneyPayrollReport, buildNapsaReport, buildNhimaReport, buildPayeReport, buildReportCsv, buildReportWorkbook, CASH_HEADINGS, LEAVE_HEADINGS, MASTER_HEADINGS, MOBILE_MONEY_HEADINGS, PAYE_HEADINGS, type DeductionReportRecord, type PrivateReportDetails } from './report-export-model'
 import type { EmployeeDirectoryRecord } from '../../services/live-business-services'
 
 const employee = (id: string, employee_number: string): EmployeeDirectoryRecord => ({
@@ -24,22 +24,36 @@ const privateInfo = (employee_id: string, payment_method: PrivateReportDetails['
 
 describe('sample-based payroll report mappings', () => {
   it('keeps the exact supplied column order for supported sample layouts', () => {
-    expect([...BANK_HEADINGS]).toEqual(['NAME', 'NRC NO.', 'BRANCH NAME', 'ACCOUNT NO.', 'AMOUNT'])
+    expect([...BANK_HEADINGS]).toEqual(['EMP NO', 'NAME', 'NRC NO.', 'BRANCH NAME', 'ACCOUNT NO.', 'AMOUNT'])
     expect([...CASH_HEADINGS]).toEqual(['#', 'EMP NO', 'NAME', 'TOTAL EARNINGS', 'STAT DEDUCTIONS', 'GEN DEDUCTIONS', 'TOTAL DEDUCTIONS', 'NET PAY'])
-    expect([...ADVANCE_HEADINGS]).toEqual(['EMP NO.', 'NAME', 'DEDUCTION NAME', 'MONTHLY AMT', 'INITIAL AMT', 'OUTSTANDING AMT'])
+    expect([...ADVANCE_HEADINGS]).toEqual(['EMP NO.', 'NAME', 'DEDUCTION NAME', 'MONTHLY AMT', 'INITIAL AMT', 'AMOUNT RECOVERED', 'OUTSTANDING AMT'])
     expect([...MOBILE_MONEY_HEADINGS]).toEqual(['EMP NO', 'EMPLOYEE NAME', 'PAYMENT PROVIDER', 'REGISTERED MOBILE NUMBER', 'NET PAY'])
-    expect([...PAYE_HEADINGS]).toEqual(['tpin', 'fullName', 'employmentNature', 'grossEmoluments', 'chargeableEmoluments', 'totalTaxCredit', 'taxDeducted', 'taxAdjusted'])
+    expect([...PAYE_HEADINGS]).toEqual(['Employee Number', 'Employee Name', 'TPIN', 'Employment Nature', 'Gross Emoluments', 'Chargeable Emoluments', 'Tax Deducted'])
   })
 
   it('creates a readable workbook with ordered headings, numeric cells and the bank total row', () => {
-    const workbook = buildReportWorkbook([{ NAME: 'Synthetic Person', 'NRC NO.': '000000/00/0', 'BRANCH NAME': 'QA Lusaka', 'ACCOUNT NO.': '0000123400', AMOUNT: 4200 }], BANK_HEADINGS, 'Bank Payroll', 'AMOUNT')
+    const workbook = buildReportWorkbook([{ 'EMP NO': 'QA-001', NAME: 'Synthetic Person', 'NRC NO.': '000000/00/0', 'BRANCH NAME': 'QA Lusaka', 'ACCOUNT NO.': '0000123400', AMOUNT: 4200 }], BANK_HEADINGS, 'Bank Payroll', 'AMOUNT')
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' })
     const sheet = reopened.Sheets['Bank Payroll']
     expect(XLSX.utils.sheet_to_json(sheet, { header: 1 })).toEqual([
-      [...BANK_HEADINGS], ['Synthetic Person', '000000/00/0', 'QA Lusaka', '0000123400', 4200], ['TOTAL', '', '', '', 4200],
+      [...BANK_HEADINGS], ['QA-001', 'Synthetic Person', '000000/00/0', 'QA Lusaka', '0000123400', 4200], ['TOTAL', '', '', '', '', 4200],
     ])
-    expect(sheet?.E2?.t).toBe('n')
-    expect(sheet?.D2?.t).toBe('s')
+    expect(sheet?.F2?.t).toBe('n')
+    expect(sheet?.E2?.t).toBe('s')
+  })
+
+  it('creates a valid zero-employee workbook with its headers and zero total', () => {
+    const workbook = buildReportWorkbook([], BANK_HEADINGS, 'Bank Payroll', 'AMOUNT', 'TOTAL (0 employees)')
+    const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' })
+    expect(XLSX.utils.sheet_to_json(reopened.Sheets['Bank Payroll'], { header: 1 })).toEqual([
+      [...BANK_HEADINGS], ['TOTAL (0 employees)', '', '', '', '', 0],
+    ])
+  })
+
+  it('writes dynamic CSV rows with numeric contribution values and safe text identifiers', () => {
+    const csv = buildReportCsv([{ 'Employee Number': '00007', Amount: 125.5, Name: '=HYPERLINK("x")' }], ['Employee Number', 'Amount', 'Name'])
+    expect(csv).toContain('"00007",125.5,"\'=HYPERLINK(""x"")"')
+    expect(csv.split('\r\n')).toHaveLength(2)
   })
 
   it('reopens Cash and Loans & Advances workbooks with the reference headings and numeric values', () => {
@@ -131,11 +145,49 @@ describe('sample-based payroll report mappings', () => {
     expect(result.errors[0].reason).toContain('duplicate repayment entries')
   })
 
-  it('blocks PAYE while required non-zero sample tax-credit values are unavailable', () => {
+  it('creates an internal PAYE schedule from persisted finalized snapshot fields without inventing tax credits', () => {
     const person = employee('emp-1', 'QA-001')
     const result = buildPayeReport([line('emp-1')], new Map([[person.id, person]]), new Map([[person.id, privateInfo('emp-1', 'CASH')]]))
+    expect(result.errors).toEqual([])
+    expect(result.rows).toEqual([{
+      'Employee Number': 'QA-001', 'Employee Name': 'Synthetic emp-1', TPIN: 'SYN0000000', 'Employment Nature': 'PERMANENT',
+      'Gross Emoluments': 5000, 'Chargeable Emoluments': 5000, 'Tax Deducted': 0,
+    }])
+  })
+
+  it('includes every employee in the selected branch payroll and exposes the actual contribution fields', () => {
+    const first = employee('emp-1', 'QA-001')
+    const second = employee('emp-2', 'QA-002')
+    const items = [line(first.id), line(second.id, { napsa_employee: 300, napsa_employer: 300, nhima_employee: 60, nhima_employer: 60 })]
+    const people = new Map([[first.id, first], [second.id, second]])
+    const details = new Map([[first.id, privateInfo(first.id, 'CASH')], [second.id, privateInfo(second.id, 'CASH')]])
+    const context = { companyName: 'QA Company', branchName: 'QA Branch', payrollPeriod: 'October 2026' }
+    expect(buildNapsaReport(items, people, details, context).rows).toHaveLength(2)
+    expect(buildNhimaReport(items, people, details, context).rows[1]).toMatchObject({ 'Employee Contribution': 60, 'Employer Contribution': 60, 'Total Contribution': 120 })
+  })
+
+  it('builds leave and master reports from the selected payroll employee set without a brought-forward column', () => {
+    const person = employee('emp-1', 'QA-001')
+    const ledger = [
+      { employee_id: person.id, branch_id: 'branch-a', event_type: 'ACCRUAL' as const, amount_delta: 2, period_start: '2026-10-01' },
+      { employee_id: person.id, branch_id: 'branch-a', event_type: 'PAID_LEAVE' as const, amount_delta: -1, period_start: '2026-10-10' },
+      { employee_id: person.id, branch_id: 'branch-a', event_type: 'ACCRUAL' as const, amount_delta: 1.5, period_start: '2026-11-01' },
+    ]
+    const leave = buildLeaveDaysReport([line(person.id)], new Map([[person.id, person]]), ledger, {
+      companyName: 'QA Company', branchName: 'QA Branch', payrollPeriod: 'October 2026', periodStart: '2026-10-01', periodEnd: '2026-10-31',
+    })
+    expect(leave.rows[0]).toMatchObject({ 'Accrued (Period)': 2, 'Leave Taken (Period)': 1, 'Balance at Period End': 1 })
+    expect(Object.keys(leave.rows[0])).toEqual([...LEAVE_HEADINGS])
+    expect(Object.keys(leave.rows[0]).some((heading) => /B.F|brought forward/i.test(heading))).toBe(false)
+    const master = buildMasterPayrollReport([line(person.id)], new Map([[person.id, person]]))
+    expect(master.rows).toHaveLength(1)
+    expect(Object.keys(master.rows[0])).toEqual([...MASTER_HEADINGS])
+  })
+
+  it('rejects missing mandatory statutory identifiers without substituting zero', () => {
+    const person = employee('emp-1', 'QA-001')
+    const result = buildNapsaReport([line(person.id)], new Map([[person.id, person]]), new Map([[person.id, privateInfo(person.id, 'CASH', { napsa_number: null })]]), { companyName: 'QA', branchName: 'QA', payrollPeriod: '2026-10' })
     expect(result.rows).toEqual([])
-    expect(result.errors[0].field).toBe('totalTaxCredit')
-    expect(REPORT_BLOCKERS.PAYE).toContain('do not retain a tax-credit amount')
+    expect(result.errors[0]).toMatchObject({ field: 'NAPSA Number' })
   })
 })
