@@ -34,6 +34,13 @@
 .employee-profile-card dd{font-size:15px;line-height:1.45}
 .employee-history-card li strong{font-size:14px;line-height:1.4}
 .employee-history-card li small,.employee-history-card li p{font-size:13px;line-height:1.5}
+.employee-review-toast{position:fixed;z-index:100;top:20px;right:20px;width:min(560px,calc(100vw - 40px));display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--border);border-left:4px solid #258779;border-radius:10px;background:var(--panel);box-shadow:0 12px 36px #10251c26;color:var(--text);font-size:14px;line-height:1.45}
+.employee-review-toast>span{flex:1;min-width:0}
+.employee-review-toast>svg{flex:none;color:#258779}
+.employee-review-toast.is-error{border-left-color:#b3433d}
+.employee-review-toast.is-error>svg{color:#b3433d}
+.employee-review-toast .icon-button{flex:none;min-width:36px;min-height:36px}
+@media(max-width:600px){.employee-review-toast{top:12px;right:12px;width:calc(100vw - 24px);align-items:flex-start;flex-wrap:wrap}.employee-review-toast>span{flex-basis:calc(100% - 72px)}.employee-review-toast>.button-secondary{margin-left:29px}}
 @media(max-width:760px){
   .employee-welcome{align-items:flex-start;flex-direction:column}
   .employee-welcome h1{font-size:26px}

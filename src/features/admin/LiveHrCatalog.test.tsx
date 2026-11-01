@@ -32,11 +32,22 @@ describe('LIVE company department setup', () => {
     mocks.saveDepartment.mockResolvedValue('department-new')
   })
 
-  it('reactivates an inactive department through the scoped service and refreshes the list', async () => {
-    render(<MemoryRouter><LiveHrCatalog type="departments" /></MemoryRouter>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Activate' }))
+  it('reactivates an inactive department through the accessible row action menu', async () => {
+    render(<MemoryRouter><LiveHrCatalog type="departments" /></MemoryRouter>);
+    (await screen.findAllByLabelText('Synthetic Operations actions'))[0].closest('details')?.setAttribute('open', '')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reactivate' }))
     await waitFor(() => expect(mocks.activateDepartment).toHaveBeenCalledWith('department-qa'))
     expect(await screen.findByRole('status')).toHaveTextContent('Department activated. It is available for new employee assignments.')
+  })
+
+  it('shows separate edit and deactivate actions for active departments', async () => {
+    mocks.departments.mockResolvedValue([{ ...inactiveDepartment, status: 'ACTIVE' }])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<MemoryRouter><LiveHrCatalog type="departments" /></MemoryRouter>);
+    (await screen.findAllByLabelText('Synthetic Operations actions'))[0].closest('details')?.setAttribute('open', '')
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Deactivate' }))
+    await waitFor(() => expect(mocks.deactivateDepartment).toHaveBeenCalledWith('department-qa'))
   })
 
   it('creates a department for the selected company only through the authorized catalog service', async () => {

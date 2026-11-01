@@ -7,14 +7,18 @@ export function mergeWorkspaceRoles(portfolioRoles: string[], companyRoles: stri
 
 export function visibleWorkspaceRoutes(roles: WorkspaceRole[]): Set<string> {
   const routes = new Set<string>(['/'])
-  if (roles.includes('PORTFOLIO_COMPANY_ADMIN')) {
-    ['/companies', '/branches', '/users'].forEach((path) => routes.add(path))
-    routes.add('/companies/new')
+  const portfolioAdministrator = roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))
+  const companyAdministrator = roles.includes('COMPANY_ADMIN')
+  const administrator = portfolioAdministrator || companyAdministrator
+
+  if (administrator) {
+    [
+      '/companies', '/branches', '/employees', '/employee-approvals', '/departments', '/job-roles',
+      '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory',
+      '/reports', '/users', '/audit', '/settings', '/notifications',
+    ].forEach((path) => routes.add(path))
   }
-  if (roles.includes('PORTFOLIO_ADMIN') || roles.includes('COMPANY_ADMIN')) {
-    ['/companies', '/branches', '/users', '/audit', '/settings', '/notifications'].forEach((path) => routes.add(path))
-    if (roles.includes('PORTFOLIO_ADMIN')) routes.add('/companies/new')
-  }
+  if (portfolioAdministrator) routes.add('/companies/new')
   if (roles.includes('OVERALL_HR_MANAGER')) {
     ['/employees', '/employee-approvals', '/departments', '/job-roles', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/audit', '/notifications'].forEach((path) => routes.add(path))
   }

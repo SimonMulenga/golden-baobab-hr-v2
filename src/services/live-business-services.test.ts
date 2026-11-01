@@ -159,15 +159,17 @@ describe('live Supabase business service adapter', () => {
     ]);
   });
 
-  it('routes branch-role assignment and replacement through trusted portfolio RPCs', async () => {
+  it('routes administrator user listing, scoped branch assignment and revocation through trusted RPCs', async () => {
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
     const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
     await services.portfolioUsers.list('portfolio-1');
+    await services.portfolioUsers.listForCompany('portfolio-1', 'company-1');
     await services.portfolioUsers.assign('portfolio-1', 'user-2', 'BRANCH_MANAGER', ['branch-1']);
     await services.portfolioUsers.replaceBranchAssignments('portfolio-1', 'company-1', 'user-2', 'BRANCH_MANAGER', ['branch-2']);
+    await services.portfolioUsers.revokeBranchAssignments('portfolio-1', 'company-1', 'user-2', 'BRANCH_MANAGER', 'Synthetic scope update');
     await services.portfolioUsers.revoke('portfolio-1', 'user-2', 'BRANCH_MANAGER', 'Synthetic scope update');
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
-      'portfolio_membership_directory', 'assign_portfolio_membership', 'replace_branch_role_assignments', 'revoke_portfolio_membership',
+      'portfolio_membership_directory', 'managed_user_assignment_directory', 'assign_portfolio_membership', 'replace_branch_role_assignments', 'revoke_company_branch_role_assignments', 'revoke_portfolio_membership',
     ]);
   });
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Check, ChevronLeft, ChevronRight, Download, History, RotateCcw, Search, ShieldCheck, Upload, UserRoundX } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Download, History, RotateCcw, Search, ShieldCheck, Upload, UserRoundX, X } from 'lucide-react'
 import { formatWorkspaceDate, formatWorkspaceDateTime, useWorkspace } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeChangeCapabilities, type EmployeeChangeRequestRecord, type EmployeeDirectoryRecord, type EmployeeReviewDecision, type EmploymentHistoryRecord } from '../../services/live-business-services'
@@ -309,6 +309,14 @@ function EmployeeDocuments({ employee }: { employee: EmployeeDirectoryRecord }) 
 
 type ReviewTarget = { employee: EmployeeDirectoryRecord; decision: EmployeeReviewDecision }
 
+function employeeReviewErrorMessage(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code ?? '') : ''
+  if (code === '42501') return 'Your account does not have employee review permission for this company and branch.'
+  if (code === '40001') return 'Another reviewer changed this submission. The queue has been refreshed; choose an available submission.'
+  if (code === '22023') return 'The selected review action is invalid. Add a reason when returning or rejecting a submission.'
+  return 'The review could not be saved. Refresh the queue and try again, or contact an administrator if this continues.'
+}
+
 export function LiveEmployeeApprovals() {
   const { companies, preferences } = useWorkspace()
   const [records, setRecords] = useState<EmployeeDirectoryRecord[]>([])
@@ -348,10 +356,12 @@ export function LiveEmployeeApprovals() {
       setNotice(`${employee.first_name} ${employee.last_name}: ${decision.toLowerCase()} action saved.`)
       setTarget(null)
       setReason('')
+      setRecords((current) => current.filter((record) => record.id !== employee.id))
+      setTotal((current) => Math.max(0, current - 1))
       setLoading(true)
       await load()
-    } catch {
-      setError('The review was not saved. Your role, branch access, or submission status may not permit this action.')
+    } catch (reviewError) {
+      setError(employeeReviewErrorMessage(reviewError))
     } finally {
       setBusyId('')
     }
@@ -367,7 +377,12 @@ export function LiveEmployeeApprovals() {
   return <div className="employee-screen">
     <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> HR REVIEW QUEUE</div><h1>Employee approvals</h1><p>Review employee records submitted for approval. Available actions depend on your role and company access.</p></div><Link className="button-secondary" to="/employees">Employee directory</Link></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Approval decisions are recorded with your account and assigned company and branch.</div>
-    {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="import-success" role="status">{notice}</div>}
+    {(error || notice) && <div className={`employee-review-toast ${error ? 'is-error' : 'is-success'}`} role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'}>
+      {error ? <ShieldCheck size={17} aria-hidden="true"/> : <Check size={17} aria-hidden="true"/>}
+      <span>{error || notice}</span>
+      {error && <button type="button" className="button-secondary" onClick={() => { setError(''); setLoading(true); void load() }}>Refresh queue</button>}
+      <button type="button" className="icon-button" aria-label="Dismiss notification" onClick={() => { setError(''); setNotice('') }}><X size={16}/></button>
+    </div>}
     <section className="panel employee-directory-panel">
       <div className="employee-toolbar"><div><strong>{total} awaiting HR review</strong><small>Only employees in your accessible companies and branches are listed</small></div><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search pending employees"/></label></div>
       {loading ? <div className="employee-empty" role="status">Loading submissions…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>POSITION</th><th>SUBMITTED</th><th>REVIEW</th></tr></thead><tbody>{records.map((employee) => {

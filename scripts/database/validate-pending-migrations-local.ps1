@@ -30,6 +30,7 @@ $migration045 = Join-Path $repoRoot 'supabase\migrations\20261030004500_simplify
 $migration046 = Join-Path $repoRoot 'supabase\migrations\20261031004600_portfolio_company_administrator.sql'
 $migration047 = Join-Path $repoRoot 'supabase\migrations\20261031004700_private_company_logos.sql'
 $migration048 = Join-Path $repoRoot 'supabase\migrations\20261031004800_restore_authenticated_membership_rls_helper.sql'
+$migration049 = Join-Path $repoRoot 'supabase\migrations\20261031004900_unified_administrator_capabilities.sql'
 $bin = 'C:\Program Files\PostgreSQL\18\bin'
 $initdb = Join-Path $bin 'initdb.exe'
 $pgCtl = Join-Path $bin 'pg_ctl.exe'
@@ -146,7 +147,7 @@ function Invoke-BoundedUnredirectedNative(
 foreach ($tool in @($initdb, $pgCtl, $psql, $createdb, $pgRestore)) {
   if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Required installed PostgreSQL 18 tool is unavailable: $tool" }
 }
-foreach ($migration in @($migration041, $migration042, $migration045, $migration046, $migration047, $migration048)) {
+foreach ($migration in @($migration041, $migration042, $migration045, $migration046, $migration047, $migration048, $migration049)) {
   if (-not (Test-Path -LiteralPath $migration -PathType Leaf)) { throw "Required migration is missing: $migration" }
 }
 if (-not (Test-Path -LiteralPath $archive -PathType Leaf) -or
@@ -255,7 +256,7 @@ select 'rls|'||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamesp
   [IO.File]::WriteAllText($baselinePath, $baselineSql, [Text.UTF8Encoding]::new($false))
   $baselineOutput = Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$baselinePath) 'baseline-checks' 20 (Join-Path $workRoot 'baseline-checks')
   $baselineOutput = $baselineOutput -replace "`r", ''
-  if ($baselineOutput -notmatch 'history\|(?<count>40|41|43|44|45|46|47)\|20261028000100\|(?<last>20261030004000|20261030004100|20261030004300|20261030004400|20261030004500|20261031004600|20261031004700)') { throw 'Archive migration history does not match a supported baseline through 040, 041, 043, 044, 045, 046 or 047.' }
+  if ($baselineOutput -notmatch 'history\|(?<count>40|41|43|44|45|46|47|48)\|20261028000100\|(?<last>20261030004000|20261030004100|20261030004300|20261030004400|20261030004500|20261031004600|20261031004700|20261031004800)') { throw 'Archive migration history does not match a supported baseline through 040, 041, 043, 044, 045, 046, 047 or 048.' }
   $baselineHistoryCount = [int]$Matches.count
   $baselineHistoryLast = $Matches.last
   if ($baselineOutput -notmatch '(?m)^bootstrap_portfolio\|true$') { throw 'The retained Company Administrator portfolio is missing from the backup.' }
@@ -494,6 +495,14 @@ language sql immutable set search_path=pg_catalog as `$gb`$
   $storageFixturePath = Join-Path $workRoot 'storage-fixture.sql'
   [IO.File]::WriteAllText($storageFixturePath, $storageFixture, [Text.UTF8Encoding]::new($false))
   Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$storageFixturePath) 'storage-catalog-fixture' 20 (Join-Path $workRoot 'storage-catalog-fixture') | Out-Null
+  if ([long]$baselineHistoryLast -ge 20261031004700) {
+    # Supabase Storage metadata is platform-managed and excluded from the
+    # selected application-schema restore. Recreate only the migration-recorded
+    # bucket metadata as a local fixture; object policies remain statically
+    # covered and are not represented by this PostgreSQL stub.
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-c',
+      "insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('gb-company-logos','gb-company-logos',false,2097152,array['image/webp'])") 'storage-bucket-fixture' 10 (Join-Path $workRoot 'storage-bucket-fixture') | Out-Null
+  }
   if ([long]$baselineHistoryLast -lt 20261031004700) {
     Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration047) 'migration-047' 90 (Join-Path $workRoot 'migration-047') | Out-Null
     Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=047'
@@ -512,10 +521,20 @@ select (exists(select 1 from information_schema.columns where table_schema='publ
   $check047Path = Join-Path $workRoot 'check-047.sql'
   [IO.File]::WriteAllText($check047Path, $check047, [Text.UTF8Encoding]::new($false))
   $result047 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check047Path) 'check-047' 15 (Join-Path $workRoot 'check-047')).Trim()
-  if ($result047 -ne 'true|true|true|true|false|11|true|true') { throw 'Migration 047 company logo storage, RLS, RPC grant, or company permission verification failed.' }
+  $expectedStoragePolicyCount = if ([long]$baselineHistoryLast -ge 20261031004700) { 0 } else { 11 }
+  if ($result047 -ne "true|true|true|true|false|$expectedStoragePolicyCount|true|true") { throw 'Migration 047 company logo storage metadata, RPC grant, or RLS verification failed.' }
 
-  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration048) 'migration-048' 30 (Join-Path $workRoot 'migration-048') | Out-Null
-  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=048'
+  if ([long]$baselineHistoryLast -lt 20261031004800) {
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration048) 'migration-048' 30 (Join-Path $workRoot 'migration-048') | Out-Null
+    Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=048'
+  } else {
+    # The application restore deliberately creates NOLOGIN placeholders and
+    # does not replay Supabase's cluster-level role memberships. Recreate only
+    # migration 048's exact authenticated helper grants for this local check.
+    Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-c',
+      'GRANT USAGE ON SCHEMA app_private TO authenticated; GRANT EXECUTE ON FUNCTION app_private.is_platform_super_admin() TO authenticated;') 'platform-role-fixture-048' 10 (Join-Path $workRoot 'platform-role-fixture-048') | Out-Null
+    Write-Output 'MIGRATION_SQL_ALREADY_PRESENT_IN_ARCHIVE version=048; local-platform-role-fixture=exact-migration-grants'
+  }
   $check048 = @"
 select has_function_privilege('authenticated','app_private.is_platform_super_admin()','EXECUTE')::text
 ||'|'||has_function_privilege('anon','app_private.is_platform_super_admin()','EXECUTE')::text
@@ -527,6 +546,43 @@ select has_function_privilege('authenticated','app_private.is_platform_super_adm
   [IO.File]::WriteAllText($check048Path, $check048, [Text.UTF8Encoding]::new($false))
   $result048 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check048Path) 'check-048' 15 (Join-Path $workRoot 'check-048')).Trim()
   if ($result048 -ne 'true|false|true|false|true') { throw 'Migration 048 did not grant authenticated schema/function access only or changed its security-definer property.' }
+
+  Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration049) 'migration-049' 90 (Join-Path $workRoot 'migration-049') | Out-Null
+  Write-Output 'MIGRATION_SQL_APPLIED_LOCALLY version=049'
+  $check049 = @"
+select (position('select ''COMPANY_ADMIN'', permission from role_permissions where role = ''PORTFOLIO_ADMIN''' in pg_get_functiondef('app_private.has_permission(text,uuid,uuid,uuid)'::regprocedure))>0)::text
+||'|'||(position('cm.company_id = p_company_id' in pg_get_functiondef('app_private.has_permission(text,uuid,uuid,uuid)'::regprocedure))>0)::text
+||'|'||exists(select 1 from pg_trigger where tgname='preserve_last_portfolio_administrator' and not tgisinternal)::text
+||'|'||exists(select 1 from pg_trigger where tgname='preserve_last_company_administrator' and not tgisinternal)::text
+||'|'||has_function_privilege('authenticated','public.company_branch_role_directory(uuid,uuid)','EXECUTE')::text
+||'|'||has_function_privilege('anon','public.company_branch_role_directory(uuid,uuid)','EXECUTE')::text
+||'|'||(position('leave_apply_carry_forward' in pg_get_functiondef('public.leave_accrue_month(uuid,date)'::regprocedure))>0)::text
+||'|'||(position('v.created_by = auth.uid()' in pg_get_functiondef('public.payroll_review_submission(uuid,text,integer,text)'::regprocedure))>0)::text;
+"@
+  $check049Path = Join-Path $workRoot 'check-049.sql'
+  [IO.File]::WriteAllText($check049Path, $check049, [Text.UTF8Encoding]::new($false))
+  $result049 = (Invoke-BoundedNative $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$check049Path) 'check-049' 15 (Join-Path $workRoot 'check-049')).Trim()
+  if ($result049 -ne 'true|true|true|true|true|false|true|true') { throw 'Migration 049 permission parity, scoped directory grants, administrator retention, leave carry-forward, or payroll self-review verification failed.' }
+
+  $ownerParitySql = @"
+grant usage on schema auth to authenticated;
+grant execute on function auth.uid() to authenticated;
+begin;
+insert into public.portfolio_memberships(portfolio_id,user_id,role)
+values ('c9df7ad5-7634-43a6-a833-e46d276bdd23'::uuid,'22b72cdc-0fb0-4cda-bc5e-d5483667f684'::uuid,'COMPANY_ADMIN')
+on conflict (portfolio_id,user_id,role) do update set revoked_at=null;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','22b72cdc-0fb0-4cda-bc5e-d5483667f684',true);
+select 'admin_parity|'||(select app_private.has_permission('payroll.finalize',p.id,null,null)
+  from public.client_portfolios p
+  join public.portfolio_memberships pm on pm.portfolio_id=p.id and pm.user_id=auth.uid()
+  where pm.revoked_at is null and pm.role='COMPANY_ADMIN' limit 1)::text;
+rollback;
+"@
+  $ownerParityPath = Join-Path $workRoot 'owner-admin-parity.sql'
+  [IO.File]::WriteAllText($ownerParityPath, $ownerParitySql, [Text.UTF8Encoding]::new($false))
+  $ownerParityResult = (Invoke-BoundedNative $psql @('-X','-w','-q','-v','ON_ERROR_STOP=1','-A','-t','-f',$ownerParityPath) 'owner-admin-parity' 15 (Join-Path $workRoot 'owner-admin-parity')).Trim()
+  if ($ownerParityResult -notmatch '(?m)^admin_parity\|true$') { throw 'The synthetic portfolio Company Administrator claim did not receive the shared payroll capability in the isolated RLS simulation.' }
   $rlsQuery048 = @"
 -- Supabase-managed default grants are recreated as a test fixture because the
 -- application-schema archive deliberately excludes platform-owned privileges.
@@ -572,7 +628,7 @@ select 'logo_column|'||(exists(select 1 from information_schema.columns where ta
   if ([int]$afterRows['history'] -ne $baselineHistoryCount) { throw 'Local raw SQL validation unexpectedly changed the restored migration history.' }
   if ($afterRows['logo_column'] -ne 'true') { throw 'Migration 047 company logo column did not persist in the isolated target.' }
 
-  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=048 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true prior_audit_history_unchanged=true prior_rls_preserved=true rollback_workflows=$rollbackWorkflowStatus migration046_rollback_tests=passed storage_stubbed_for_local_schema_validation=true authenticated_membership_rls_helper=true logs=$workRoot"
+  Write-Output "LOCAL_MIGRATION_VALIDATION_PASSED source=development archive=$archive server=PostgreSQL18 migrations=049 history_before_after_count=$baselineHistoryCount history_last=$baselineHistoryLast company_employee_compensation_attendance_payroll_rows_unchanged=true prior_audit_history_unchanged=true prior_rls_preserved=true rollback_workflows=$rollbackWorkflowStatus migration046_rollback_tests=passed storage_stubbed_for_local_schema_validation=true authenticated_membership_rls_helper=true administrator_parity=true logs=$workRoot"
   Write-Output 'This validates migration SQL and structural preservation on an isolated local PostgreSQL database; Supabase-managed and signed Auth HTTP behavior remains to be tested.'
 } finally {
   foreach ($name in @('PGHOST','PGPORT','PGUSER','PGDATABASE','PGSSLMODE','PGCONNECT_TIMEOUT','PGAPPNAME')) {

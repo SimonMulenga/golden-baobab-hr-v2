@@ -7,30 +7,29 @@ describe('role scoped navigation', () => {
     expect(mergeWorkspaceRoles([], ['COMPANY_ADMIN'])).toEqual(['COMPANY_ADMIN'])
   })
 
-  it('keeps company setup with the company administrator', () => {
-    const routes = visibleWorkspaceRoutes(['PORTFOLIO_ADMIN'])
-    expect(roleCanOpenPath(routes, '/companies/new')).toBe(true)
-    expect(roleCanOpenPath(routes, '/users')).toBe(true)
-    expect(roleCanOpenPath(routes, '/employees')).toBe(false)
-    expect(roleCanOpenPath(routes, '/payroll')).toBe(false)
+  it('gives portfolio and portfolio Company Administrators the same routes', () => {
+    const portfolioAdminRoutes = visibleWorkspaceRoutes(['PORTFOLIO_ADMIN'])
+    const companyAdminRoutes = visibleWorkspaceRoutes(['PORTFOLIO_COMPANY_ADMIN'])
+    expect([...companyAdminRoutes].sort()).toEqual([...portfolioAdminRoutes].sort())
+    expect(roleCanOpenPath(companyAdminRoutes, '/companies/new')).toBe(true)
+    expect(roleCanOpenPath(companyAdminRoutes, '/employees')).toBe(true)
+    expect(roleCanOpenPath(companyAdminRoutes, '/payroll')).toBe(true)
+    expect(roleCanOpenPath(companyAdminRoutes, '/audit')).toBe(true)
   })
 
-  it('limits the portfolio Company Administrator to company, branch, and HR/branch-user setup', () => {
-    const routes = visibleWorkspaceRoutes(['PORTFOLIO_COMPANY_ADMIN'])
-    expect(roleCanOpenPath(routes, '/companies/new')).toBe(true)
-    expect(roleCanOpenPath(routes, '/companies')).toBe(true)
-    expect(roleCanOpenPath(routes, '/branches')).toBe(true)
-    expect(roleCanOpenPath(routes, '/users')).toBe(true)
-    expect(roleCanOpenPath(routes, '/employees')).toBe(false)
-    expect(roleCanOpenPath(routes, '/payroll')).toBe(false)
-    expect(roleCanOpenPath(routes, '/audit')).toBe(false)
-    expect(roleCanOpenPath(routes, '/settings')).toBe(false)
-  })
-
-  it('does not let a company-scoped Company Administrator create portfolio companies', () => {
+  it('shows all administrator workflows to a company-scoped administrator but leaves company registration portfolio-scoped', () => {
     const routes = visibleWorkspaceRoutes(['COMPANY_ADMIN'])
     expect(roleCanOpenPath(routes, '/companies/new')).toBe(false)
     expect(roleCanOpenPath(routes, '/companies')).toBe(true)
+    expect(roleCanOpenPath(routes, '/branches')).toBe(true)
+    expect(roleCanOpenPath(routes, '/employees')).toBe(true)
+    expect(roleCanOpenPath(routes, '/attendance')).toBe(true)
+    expect(roleCanOpenPath(routes, '/leave')).toBe(true)
+    expect(roleCanOpenPath(routes, '/payroll')).toBe(true)
+    expect(roleCanOpenPath(routes, '/payslips')).toBe(true)
+    expect(roleCanOpenPath(routes, '/reports')).toBe(true)
+    expect(roleCanOpenPath(routes, '/users')).toBe(true)
+    expect(roleCanOpenPath(routes, '/audit')).toBe(true)
   })
 
   it('keeps HR workflows but hides super administrator setup', () => {

@@ -1,15 +1,28 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$ArchivePath,
+  [string]$ExpectedLatestMigration = '20261031004800',
+  [int]$ExpectedMigrationCount = 48,
+  [switch]$ValidateMigration050,
+  [int]$Port = 55432
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # One-off, disposable local cluster. Never points at the linked Supabase project.
-$backupRoot = Join-Path $env:LOCALAPPDATA 'GoldenBaobab\database-backups'
-$archive = Join-Path $backupRoot 'gbhr-dev-20261029-133528.dump'
-$rolesDump = Join-Path $backupRoot 'gbhr-dev-20261029-133528-roles.sql'
-$manifestPath = Join-Path $backupRoot 'gbhr-dev-20261029-133528-manifest.json'
+$archive = [IO.Path]::GetFullPath($ArchivePath)
+$backupRoot = Split-Path -Parent $archive
+$archiveStem = [IO.Path]::GetFileNameWithoutExtension($archive)
+$rolesDump = Join-Path $backupRoot "$archiveStem-roles.sql"
+$manifestPath = Join-Path $backupRoot "$archiveStem-manifest.json"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$migration050 = Join-Path $repoRoot 'supabase\migrations\20261101005000_employee_review_and_user_assignment_lifecycle.sql'
+$workflowTest050 = Join-Path $repoRoot 'supabase\tests\rls\hr_payroll_workflows.test.sql'
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $workRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'GoldenBaobab\restore-validation') "local-pg18-$runId"
 $dataDirectory = Join-Path $workRoot 'data'
-$port = 55432
+$port = $Port
 $targetDatabase = 'gbhr_restore_validation'
 $bin = 'C:\Program Files\PostgreSQL\18\bin'
 $initdb = Join-Path $bin 'initdb.exe'
@@ -97,6 +110,12 @@ $acl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
 $acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($who, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
 $acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
 Set-Acl -LiteralPath $workRoot -AclObject $acl
+$cipher = Join-Path $env:SystemRoot 'System32\cipher.exe'
+if (-not (Test-Path -LiteralPath $cipher -PathType Leaf)) { throw 'Windows EFS utility is unavailable; refusing an unencrypted restore workspace.' }
+& $cipher /e $workRoot | Out-Null
+if ($LASTEXITCODE -ne 0 -or -not ((Get-Item -LiteralPath $workRoot).Attributes -band [IO.FileAttributes]::Encrypted)) {
+  throw 'Could not enable EFS on the isolated restore workspace.'
+}
 
 foreach ($entry in Get-ChildItem Env: | Where-Object { $_.Name -like 'PG*' }) { $oldPgEnv[$entry.Name] = $entry.Value }
 try {
@@ -116,7 +135,7 @@ try {
 
   $identityQuery = "select current_database()||'|'||current_user||'|'||coalesce(inet_server_addr()::text,'local')||'|'||current_setting('port')||'|'||current_setting('server_version_num');"
   $identity = (Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',$identityQuery) 'local target identity check' 10 (Join-Path $workRoot 'identity')).Trim()
-  if ($identity -notmatch '^postgres\|postgres\|127\.0\.0\.1(?:/32)?\|55432\|180[0-9]{3}$') { throw 'Fresh target identity did not match local loopback PostgreSQL 18; restore stopped.' }
+  if ($identity -notmatch "^postgres\|postgres\|127\.0\.0\.1(?:/32)?\|$port\|180[0-9]{3}$") { throw 'Fresh target identity did not match local loopback PostgreSQL 18; restore stopped.' }
   $databaseList = (Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',"select datname from pg_database where datallowconn and not datistemplate order by datname;") 'fresh cluster database check' 10 (Join-Path $workRoot 'databases')).Trim()
   if ($databaseList -ne 'postgres') { throw 'Fresh isolated cluster contains an unexpected connectable database; restore stopped.' }
 
@@ -128,7 +147,7 @@ try {
   # Supabase's managed schemas are provisioned by its platform and are not
   # recreated from this archive's schema TOC entries by pg_restore filtering.
   Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-c',
-    'CREATE SCHEMA app_private; CREATE SCHEMA auth; CREATE SCHEMA extensions; CREATE SCHEMA supabase_migrations;') 'create isolated schema containers' 10 (Join-Path $workRoot 'schemas') | Out-Null
+    'CREATE SCHEMA app_private; CREATE SCHEMA auth; CREATE SCHEMA extensions; CREATE SCHEMA storage; CREATE SCHEMA supabase_migrations;') 'create isolated schema containers' 10 (Join-Path $workRoot 'schemas') | Out-Null
 
   $roleSql = Get-Content -LiteralPath $rolesDump -Raw
   $roleMatches = [regex]::Matches($roleSql, '(?im)^\s*CREATE ROLE\s+"?(?<name>[A-Za-z0-9_-]+)"?\s*;')
@@ -152,9 +171,91 @@ try {
   $tocPath = Join-Path $workRoot 'restore.toc'
   [IO.File]::WriteAllText($tocPath, $toc, [Text.UTF8Encoding]::new($false))
   $restoreArgs = @('--exit-on-error','--single-transaction','--no-owner','--dbname',$targetDatabase,'--use-list',$tocPath,
-    '--schema=public','--schema=app_private','--schema=auth','--schema=extensions','--schema=supabase_migrations',$archive)
+    '--schema=public','--schema=app_private','--schema=auth','--schema=extensions','--schema=storage','--schema=supabase_migrations',$archive)
   Invoke-LocalProcess $pgRestore $restoreArgs 'application-schema partial restore' 180 (Join-Path $workRoot 'restore') | Out-Null
   $restoreSucceeded = $true
+
+  if ($ValidateMigration050) {
+    foreach ($path in @($migration050, $workflowTest050)) {
+      if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Migration 050 isolated-validation input is missing: $path" }
+    }
+    $collisionQuery = @"
+select 'fixture_id_collisions|' ||
+  (select count(*) from auth.users where id in ('a0000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000003','a0000000-0000-4000-8000-000000000004','a0000000-0000-4000-8000-000000000005','a0000000-0000-4000-8000-000000000006','a0000000-0000-4000-8000-000000000007')) +
+  (select count(*) from public.profiles where id in ('a0000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000003','a0000000-0000-4000-8000-000000000004','a0000000-0000-4000-8000-000000000005','a0000000-0000-4000-8000-000000000006','a0000000-0000-4000-8000-000000000007')) +
+  (select count(*) from public.client_portfolios where id in ('10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002')) +
+  (select count(*) from public.companies where id in ('20000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000003')) +
+  (select count(*) from public.branches where id in ('30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000004')) +
+  (select count(*) from public.employees where id in ('40000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000003')) +
+  (select count(*) from public.employee_deductions where id = '50000000-0000-0000-0000-000000000001') +
+  (select count(*) from public.payroll_periods where id = '60000000-0000-0000-0000-000000000001') +
+  (select count(*) from public.payroll_runs where id = '70000000-0000-0000-0000-000000000001');
+"@
+    $collision = (Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',$collisionQuery) 'migration 050 fixture collision check' 10 (Join-Path $workRoot 'm050-fixture-collisions')).Trim()
+    if ($collision -ne 'fixture_id_collisions|0') { throw 'Synthetic migration 050 test identifiers collide with restored records; rollback test stopped.' }
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration050) 'migration 050 isolated application' 60 (Join-Path $workRoot 'm050-apply') | Out-Null
+    $localPgtapShimSql = @'
+create extension if not exists pgcrypto with schema extensions;
+create or replace function extensions.plan(integer) returns text language plpgsql as $function$
+begin
+  perform set_config('gbhr_test.expected', $1::text, true);
+  perform set_config('gbhr_test.assertions', '0', true);
+  return '1..' || $1::text;
+end
+$function$;
+create or replace function extensions.is(anycompatible, anycompatible, text) returns text language plpgsql as $function$
+declare n integer;
+begin
+  n := coalesce(nullif(current_setting('gbhr_test.assertions', true), '')::integer, 0) + 1;
+  if $1 is distinct from $2 then raise exception using errcode='P0001', message=format('assertion %s failed: %s', n, $3); end if;
+  perform set_config('gbhr_test.assertions', n::text, true);
+  return format('ok %s - %s', n, $3);
+end
+$function$;
+create or replace function extensions.ok(boolean, text) returns text language plpgsql as $function$
+declare n integer;
+begin
+  n := coalesce(nullif(current_setting('gbhr_test.assertions', true), '')::integer, 0) + 1;
+  if $1 is not true then raise exception using errcode='P0001', message=format('assertion %s failed: %s', n, $2); end if;
+  perform set_config('gbhr_test.assertions', n::text, true);
+  return format('ok %s - %s', n, $2);
+end
+$function$;
+create or replace function extensions.throws_ok(text, text, text) returns text language plpgsql as $function$
+declare actual_state text; n integer;
+begin
+  begin
+    execute $1;
+  exception when others then
+    get stacked diagnostics actual_state = returned_sqlstate;
+  end;
+  n := coalesce(nullif(current_setting('gbhr_test.assertions', true), '')::integer, 0) + 1;
+  if actual_state is distinct from $2 then raise exception using errcode='P0001', message=format('assertion %s expected SQLSTATE %s, got %s: %s', n, $2, coalesce(actual_state,'none'), $3); end if;
+  perform set_config('gbhr_test.assertions', n::text, true);
+  return format('ok %s - %s', n, $3);
+end
+$function$;
+create or replace function extensions.finish() returns table(result text) language plpgsql as $function$
+declare expected integer; actual integer;
+begin
+  expected := current_setting('gbhr_test.expected')::integer;
+  actual := current_setting('gbhr_test.assertions')::integer;
+  if actual <> expected then raise exception 'test plan expected % assertions, observed %', expected, actual; end if;
+  result := '1..' || expected::text;
+  return next;
+end
+$function$;
+grant usage on schema extensions to public;
+grant execute on all functions in schema extensions to public;
+'@
+    $localPgtapShimPath = Join-Path $workRoot 'local-pgtap-shim.sql'
+    [IO.File]::WriteAllText($localPgtapShimPath, $localPgtapShimSql, [Text.UTF8Encoding]::new($false))
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-f',$localPgtapShimPath) 'install local pgTAP-compatible assertion shim' 10 (Join-Path $workRoot 'm050-pgtap-shim') | Out-Null
+    $workflowOutput = Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-f',$workflowTest050) 'migration 050 rollback authorization tests' 120 (Join-Path $workRoot 'm050-workflows')
+    if ($workflowOutput -match '(?m)^not ok\s' -or $workflowOutput -match 'Looks like you failed') { throw "Migration 050 authorization regression tests failed; see $workRoot\m050-workflows.out" }
+    if ($workflowOutput -notmatch '(?m)^\s*1\.\.90\s*$') { throw "Migration 050 authorization regression test plan was not completed; see $workRoot\m050-workflows.out" }
+    Write-Output 'ISOLATED_M050_VALIDATED migration 050 applied to the restored local copy; rollback authorization tests passed.'
+  }
 
   $validationSql = @"
 select 'target|'||current_database()||'|'||current_user||'|'||inet_server_addr()||'|'||current_setting('server_version_num');
@@ -168,6 +269,15 @@ select 'employees|'||count(*) from public.employees;
 select 'payroll_runs|'||count(*) from public.payroll_runs;
 select 'payroll_items|'||count(*) from public.payroll_run_items;
 select 'leave_requests|'||count(*) from public.leave_requests;
+select 'attendance_periods|'||count(*) from public.attendance_periods;
+select 'attendance_entries|'||count(*) from public.attendance_entries;
+select 'compensation|'||count(*) from public.employee_compensation;
+select 'audit_logs|'||count(*) from public.audit_logs;
+select 'companies|'||count(*) from public.companies;
+select 'branches|'||count(*) from public.branches;
+select 'auth_users|'||count(*) from auth.users;
+select 'storage_buckets|'||count(*) from storage.buckets;
+select 'storage_objects|'||count(*) from storage.objects;
 select 'migration_history|'||count(*)||'|'||coalesce(min(version),'')||'|'||coalesce(max(version),'') from supabase_migrations.schema_migrations;
 select 'extensions|'||coalesce(string_agg(extname,',' order by extname),'') from pg_extension where extname in ('pgcrypto','pg_stat_statements','uuid-ossp','supabase_vault');
 "@
@@ -175,17 +285,18 @@ select 'extensions|'||coalesce(string_agg(extname,',' order by extname),'') from
   [IO.File]::WriteAllText($validationFile, $validationSql, [Text.UTF8Encoding]::new($false))
   Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-f',$validationFile) 'post-restore structural checks' 30 (Join-Path $workRoot 'validation') | Out-Null
   $validation = Get-Content -LiteralPath (Join-Path $workRoot 'validation.out')
-  if (-not ($validation -match '^tables_public\|[1-9][0-9]*$') -or -not ($validation -match '^constraints_public\|[1-9][0-9]*$') -or -not ($validation -match '^functions_app\|[1-9][0-9]*$') -or -not ($validation -match '^migration_history\|[1-9][0-9]*\|20261028000100\|20261028002700$')) {
+  $migrationExpected = "^migration_history\|$ExpectedMigrationCount\|20261028000100\|$ExpectedLatestMigration$"
+  if (-not ($validation -match '^tables_public\|[1-9][0-9]*$') -or -not ($validation -match '^constraints_public\|[1-9][0-9]*$') -or -not ($validation -match '^functions_app\|[1-9][0-9]*$') -or -not ($validation -match $migrationExpected)) {
     throw "Restored application objects or migration history did not meet expectations. See $workRoot\validation.out"
   }
-  Write-Output "PARTIAL_RESTORE_VERIFIED target=local-loopback-postgresql-18 database=$targetDatabase; details=$workRoot\validation.out"
-  Write-Output 'Supabase-managed schemas, Vault, platform role passwords, Storage object bytes, and project settings were not validated by this partial local restore.'
+  Write-Output "PARTIAL_RESTORE_VERIFIED target=local-loopback-postgresql-18 database=$targetDatabase migrations=$ExpectedMigrationCount latest=$ExpectedLatestMigration; details=$workRoot\validation.out"
+  Write-Output 'Supabase Auth and Storage schemas/metadata were restored, but platform-managed Auth/Storage behavior, Vault secrets, role passwords, Storage object bytes, and project settings were not validated by this partial local restore.'
 } finally {
   foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -like 'PG*' }).Name)) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
   foreach ($name in $oldPgEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $oldPgEnv[$name], 'Process') }
   if ($clusterStarted) {
     try {
-      Invoke-LocalProcess $pgCtl @('-D',$dataDirectory,'-m','fast','-w','stop') 'pg_ctl stop' 30 (Join-Path $workRoot 'stop') | Out-Null
+      Invoke-LocalProcess $pgCtl @('-D',$dataDirectory,'-m','fast','-w','-t','90','stop') 'pg_ctl stop' 100 (Join-Path $workRoot 'stop') | Out-Null
       $clusterStarted = $false
     } catch { Write-Warning 'Isolated restore cluster did not stop cleanly; its data directory was preserved.' }
   }

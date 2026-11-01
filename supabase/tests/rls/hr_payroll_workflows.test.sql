@@ -1,36 +1,37 @@
--- Run only after migrations 00100 through 02700 on a disposable database.
+-- Run only after migrations 00100 through 05000 on a disposable database.
 -- Synthetic account portfolios/users and rollback-only end-to-end authorization tests.
 begin;
-select extensions.plan(53);
+select extensions.plan(90);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select u, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
   'synthetic-' || u || '@test.invalid', '', now(), '{}', '{}', now(), now()
 from unnest(array[
-  '00000000-0000-0000-0000-000000000001'::uuid,
-  '00000000-0000-0000-0000-000000000002'::uuid,
-  '00000000-0000-0000-0000-000000000003'::uuid,
-  '00000000-0000-0000-0000-000000000004'::uuid,
-  '00000000-0000-0000-0000-000000000005'::uuid,
-  '00000000-0000-0000-0000-000000000006'::uuid,
-  '00000000-0000-0000-0000-000000000007'::uuid
+  'a0000000-0000-4000-8000-000000000001'::uuid,
+  'a0000000-0000-4000-8000-000000000002'::uuid,
+  'a0000000-0000-4000-8000-000000000003'::uuid,
+  'a0000000-0000-4000-8000-000000000004'::uuid,
+  'a0000000-0000-4000-8000-000000000005'::uuid,
+  'a0000000-0000-4000-8000-000000000006'::uuid,
+  'a0000000-0000-4000-8000-000000000007'::uuid
 ]) as users(u);
 
 insert into public.profiles(id, display_name)
 select id, 'Synthetic test user ' || id::text from auth.users
-where id between '00000000-0000-0000-0000-000000000001'::uuid and '00000000-0000-0000-0000-000000000007'::uuid;
+where id between 'a0000000-0000-4000-8000-000000000001'::uuid and 'a0000000-0000-4000-8000-000000000007'::uuid
+on conflict (id) do update set display_name = excluded.display_name;
 
 insert into public.client_portfolios(id, name) values
   ('10000000-0000-0000-0000-000000000001', 'Synthetic Mr Mark portfolio'),
   ('10000000-0000-0000-0000-000000000002', 'Synthetic isolated customer portfolio');
 
 insert into public.portfolio_memberships(portfolio_id, user_id, role) values
-  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'PORTFOLIO_ADMIN'),
-  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000007', 'OVERALL_HR_MANAGER'),
-  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'BRANCH_MANAGER'),
-  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'PAYROLL_PROCESSOR'),
-  ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000004', 'OVERALL_HR_MANAGER');
+  ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'PORTFOLIO_ADMIN'),
+  ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000007', 'OVERALL_HR_MANAGER'),
+  ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000002', 'BRANCH_MANAGER'),
+  ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'PAYROLL_PROCESSOR'),
+  ('10000000-0000-0000-0000-000000000002', 'a0000000-0000-4000-8000-000000000004', 'OVERALL_HR_MANAGER');
 
 insert into public.companies(id, portfolio_id, name, registration_number, tpin, industry, business_email, phone, province, town, physical_address, contact_person) values
   ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Synthetic company A', 'REG-SA', '1000000001', 'Retail', 'a@test.invalid', '+260000000001', 'Copperbelt', 'Kitwe', 'Synthetic address A', 'Synthetic contact'),
@@ -44,18 +45,18 @@ insert into public.branches(id, portfolio_id, company_id, name, code, province, 
   ('30000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000003', 'Synthetic branch 4', 'S-B-1', 'Lusaka', 'Lusaka', 'Synthetic branch address');
 
 insert into public.branch_assignments(portfolio_id, company_id, branch_id, user_id, role) values
-  ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'BRANCH_MANAGER'),
-  ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'PAYROLL_PROCESSOR');
+  ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000002', 'BRANCH_MANAGER'),
+  ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000003', 'PAYROLL_PROCESSOR');
 
 insert into public.employees(
   id, portfolio_id, company_id, workplace_branch_id, employee_number, first_name, last_name,
   date_of_birth, nationality, job_title, department, employment_type, contract_type,
   contract_start_date, created_by
 ) values
-  ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'SYN-001', 'Test', 'Employee', '1990-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', '00000000-0000-0000-0000-000000000002'),
-  ('40000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002', 'SYN-002', 'Other', 'Branch', '1991-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', '00000000-0000-0000-0000-000000000007'),
-  ('40000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000004', 'SYN-003', 'Other', 'Portfolio', '1992-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', '00000000-0000-0000-0000-000000000004');
-update public.employees set approval_status = 'APPROVED', submitted_at = now(), reviewed_by = '00000000-0000-0000-0000-000000000007', reviewed_at = now()
+  ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'SYN-001', 'Test', 'Employee', '1990-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', 'a0000000-0000-4000-8000-000000000002'),
+  ('40000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002', 'SYN-002', 'Other', 'Branch', '1991-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', 'a0000000-0000-4000-8000-000000000007'),
+  ('40000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000004', 'SYN-003', 'Other', 'Portfolio', '1992-01-01', 'Zambian', 'Clerk', 'Finance', 'PERMANENT', 'MONTHLY', '2025-01-01', 'a0000000-0000-4000-8000-000000000004');
+update public.employees set approval_status = 'APPROVED', submitted_at = now(), reviewed_by = 'a0000000-0000-4000-8000-000000000007', reviewed_at = now()
 where id = '40000000-0000-0000-0000-000000000002';
 
 insert into public.employee_private_details(
@@ -74,7 +75,7 @@ insert into public.employee_compensation(
 ) values (
   '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001',
   '30000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001',
-  '2026-01-01', 'MONTHLY', 6000, '00000000-0000-0000-0000-000000000007', 'CASH'
+  '2026-01-01', 'MONTHLY', 6000, 'a0000000-0000-4000-8000-000000000007', 'CASH'
 );
 
 insert into public.employee_deductions(
@@ -84,7 +85,7 @@ insert into public.employee_deductions(
   '50000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
   '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
   '40000000-0000-0000-0000-000000000001', 'MEDICAL_ADVANCE', 6000, 'EQUAL_INSTALLMENTS',
-  6, '2026-10-01', 0, 'SUBMITTED', '00000000-0000-0000-0000-000000000002', 'synthetic-medical-advance-fixture-1', 'Synthetic K6000 advance');
+  6, '2026-10-01', 0, 'SUBMITTED', 'a0000000-0000-4000-8000-000000000002', 'synthetic-medical-advance-fixture-1', 'Synthetic K6000 advance');
 insert into public.deduction_installments(portfolio_id, company_id, branch_id, employee_id, deduction_id, sequence_number, due_period, scheduled_amount)
 select '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001',
   '30000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001',
@@ -102,14 +103,15 @@ insert into public.payroll_runs(
   '70000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
   '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
   '60000000-0000-0000-0000-000000000001', 'CALCULATED', 1,
-  '00000000-0000-0000-0000-000000000003', 'synthetic-run-key-1');
+  'a0000000-0000-4000-8000-000000000003', 'synthetic-run-key-1');
 insert into public.payroll_run_items(
   portfolio_id, company_id, branch_id, payroll_run_id, employee_id, version,
-  basic_pay, gross_pay, voluntary_deductions, net_pay
+  basic_pay, gross_pay, voluntary_deductions, net_pay, calculation_rule_version_id
 ) values (
   '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001',
   '30000000-0000-0000-0000-000000000001', '70000000-0000-0000-0000-000000000001',
-  '40000000-0000-0000-0000-000000000001', 1, 6000, 6000, 1000, 5000);
+  '40000000-0000-0000-0000-000000000001', 1, 6000, 6000, 1000, 5000,
+  (select id from public.payroll_calculation_rule_versions where version = 'ZM-2026-CLIENT-APPROVED-V1'));
 insert into public.payroll_item_deductions(
   portfolio_id, company_id, branch_id, payroll_run_id, employee_id, version, deduction_id, installment_id, amount
 )
@@ -120,14 +122,15 @@ from public.deduction_installments
 where deduction_id = '50000000-0000-0000-0000-000000000001' and due_period = '2026-10-01';
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
 select extensions.is((select count(*) from public.employees), 1::bigint, 'branch manager sees only assigned branch employees');
 select extensions.is((select count(*) from public.employees where workplace_branch_id = '30000000-0000-0000-0000-000000000002'), 0::bigint, 'branch manager cannot read another branch');
 select extensions.is((select count(*) from public.employee_private_details), 0::bigint, 'branch manager cannot read private banking/contact detail');
-select extensions.is((select count(*) from public.employee_compensation), 0::bigint, 'branch manager cannot read restricted compensation table');
+select extensions.is((select count(*) from public.employee_compensation), 1::bigint, 'branch manager can read compensation for the assigned branch');
+select extensions.is((select count(*) from public.employee_compensation where workplace_branch_id = '30000000-0000-0000-0000-000000000002'), 0::bigint, 'branch manager cannot read compensation outside the assigned branch');
 select extensions.is((select count(*) from public.employees where portfolio_id = '10000000-0000-0000-0000-000000000002'), 0::bigint, 'branch manager cannot cross portfolios');
-select extensions.throws_ok($$insert into public.portfolio_memberships(portfolio_id,user_id,role) values ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','PORTFOLIO_ADMIN')$$, '42501', 'branch manager cannot self-escalate');
-select extensions.throws_ok($$insert into public.employees(portfolio_id,company_id,workplace_branch_id,employee_number,first_name,last_name,date_of_birth,nationality,job_title,department,employment_type,contract_type,contract_start_date,created_by) values ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','FORGED-001','Forged','Record','1990-01-01','Zambian','Clerk','Finance','PERMANENT','MONTHLY','2026-01-01','00000000-0000-0000-0000-000000000002')$$, '42501', 'employee rows cannot be inserted directly through table grants');
+select extensions.throws_ok($$insert into public.portfolio_memberships(portfolio_id,user_id,role) values ('10000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000002','PORTFOLIO_ADMIN')$$, '42501', 'branch manager cannot self-escalate');
+select extensions.throws_ok($$insert into public.employees(portfolio_id,company_id,workplace_branch_id,employee_number,first_name,last_name,date_of_birth,nationality,job_title,department,employment_type,contract_type,contract_start_date,created_by) values ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','FORGED-001','Forged','Record','1990-01-01','Zambian','Clerk','Finance','PERMANENT','MONTHLY','2026-01-01','a0000000-0000-4000-8000-000000000002')$$, '42501', 'employee rows cannot be inserted directly through table grants');
 select extensions.throws_ok($$update public.employees set department='Forged' where id='40000000-0000-0000-0000-000000000001'$$, '42501', 'employee rows cannot be edited directly through table grants');
 select extensions.throws_ok($$select public.employee_create_draft(
   '10000000-0000-0000-0000-000000000001',
@@ -150,17 +153,29 @@ select extensions.is((select approval_status from public.employees where id = cu
 select public.employee_submit_for_hr_approval(current_setting('test.new_employee')::uuid);
 select extensions.is((select approval_status from public.employees where id = current_setting('test.new_employee')::uuid), 'SUBMITTED_FOR_HR_APPROVAL', 'branch-created employee is submitted for HR review');
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000004', true);
 select extensions.is((select count(*) from public.employees), 1::bigint, 'other portfolio HR sees only its own employee');
 select extensions.throws_ok($$select public.employee_review_submission('40000000-0000-0000-0000-000000000001','APPROVE',null)$$, '42501', 'other portfolio HR cannot approve another portfolio employee');
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select public.employee_review_submission('40000000-0000-0000-0000-000000000001', 'APPROVE', null);
 select public.employee_review_submission(current_setting('test.new_employee')::uuid, 'APPROVE', null);
 select extensions.is((select approval_status from public.employees where id = current_setting('test.new_employee')::uuid), 'APPROVED', 'Overall HR can approve branch-created employee');
+select set_config('test.hr_created_employee', public.employee_create_draft(
+  '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000003',
+  '{"employee_number":"SYN-HR-SELF-050","first_name":"Synthetic","last_name":"HrCreated","date_of_birth":"1993-02-01","nationality":"Zambian","job_title":"Analyst","department":"Operations","employment_type":"PERMANENT","contract_type":"MONTHLY","contract_start_date":"2026-10-01"}'::jsonb,
+  '{"residential_address":"Synthetic address","phone":"+260000000204","email_unavailable_reason":"Synthetic unavailable","emergency_contact_name":"Synthetic Contact","emergency_contact_relationship":"Friend","emergency_contact_phone":"+260000000205","payment_method":"CASH"}'::jsonb,
+  '{"effective_from":"2026-10-01","salary_frequency":"MONTHLY","basic_pay":6100,"payment_method":"CASH"}'::jsonb
+)::text, true);
+select public.employee_submit_for_hr_approval(current_setting('test.hr_created_employee')::uuid);
+select public.employee_review_submission(current_setting('test.hr_created_employee')::uuid, 'APPROVE', null);
+select extensions.is((select approval_status from public.employees where id = current_setting('test.hr_created_employee')::uuid), 'APPROVED', 'Overall HR can review its own submission at a second authorized company and branch in the portfolio');
+select extensions.is((select reviewed_by from public.employees where id = current_setting('test.hr_created_employee')::uuid), 'a0000000-0000-4000-8000-000000000007'::uuid, 'employee review records the authenticated Overall HR reviewer');
+select extensions.is((select count(*) from public.employee_approval_history where employee_id = current_setting('test.hr_created_employee')::uuid and actor_id = 'a0000000-0000-4000-8000-000000000007' and action = 'APPROVED'), 1::bigint, 'employee approval writes exactly one immutable review event');
+select extensions.throws_ok($$select public.employee_review_submission(current_setting('test.hr_created_employee')::uuid, 'APPROVE', null)$$, '40001', 'repeated employee approval is rejected as a concurrent/stale decision');
 select public.deduction_review_request('50000000-0000-0000-0000-000000000001', 'APPROVE', null);
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
 select set_config('test.new_deduction', public.deduction_create_request(
   '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
   '40000000-0000-0000-0000-000000000001', 'synthetic-medical-advance-test-1',
@@ -169,20 +184,20 @@ select set_config('test.new_deduction', public.deduction_create_request(
 )::text, true);
 select extensions.is((select sum(scheduled_amount) from public.deduction_installments where deduction_id = current_setting('test.new_deduction')::uuid), 6000::numeric, 'K6000 advance creates six K1000 installments');
 select extensions.throws_ok($$select public.deduction_review_request(current_setting('test.new_deduction')::uuid,'APPROVE',null)$$, '42501', 'branch manager cannot approve their own advance');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select public.deduction_review_request(current_setting('test.new_deduction')::uuid, 'APPROVE', null);
 select extensions.is((select status from public.employee_deductions where id = current_setting('test.new_deduction')::uuid), 'ACTIVE', 'Overall HR approval activates the advance schedule');
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
-select extensions.is((select count(*) from public.employee_compensation), 2::bigint, 'payroll processor reads compensation records only in assigned branch');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
+select extensions.is((select count(*) from public.employee_compensation), 0::bigint, 'payroll processor without compensation.view cannot directly read salary records');
 select extensions.is((select count(*) from public.employee_private_details), 0::bigint, 'payroll processor cannot read employee bank details');
 select public.payroll_submit_for_approval('70000000-0000-0000-0000-000000000001');
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
 select extensions.throws_ok($$select public.payroll_review_submission('70000000-0000-0000-0000-000000000001','START_REVIEW',1,null)$$, '42501', 'branch manager cannot review payroll');
 select extensions.throws_ok($$select public.payroll_submit_for_approval('70000000-0000-0000-0000-000000000001')$$, '42501', 'branch manager without payroll assignment cannot submit payroll');
 
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select public.payroll_review_submission('70000000-0000-0000-0000-000000000001', 'START_REVIEW', 1, null);
 select public.payroll_review_submission('70000000-0000-0000-0000-000000000001', 'APPROVE', 1, null);
 select extensions.throws_ok($$select public.payroll_finalize('70000000-0000-0000-0000-000000000001')$$, '22023', 'unverified or missing statutory rules block finalization');
@@ -190,7 +205,7 @@ select extensions.is((select count(*) from public.deduction_transactions), 0::bi
 
 reset role;
 insert into public.statutory_rule_versions(jurisdiction,rule_code,version,effective_from,rule_data,verified_by,verified_at,active)
-select 'ZM', code, 'SYNTHETIC-TEST-VERIFIED', '2026-01-01', '{}', '00000000-0000-0000-0000-000000000007', now(), true
+select 'ZM', code, 'SYNTHETIC-TEST-VERIFIED', '2026-01-01', '{}', 'a0000000-0000-4000-8000-000000000007', now(), true
 from (values ('PAYE'),('NAPSA'),('NHIMA')) as required(code);
 insert into public.payroll_run_statutory_rules(portfolio_id,company_id,branch_id,payroll_run_id,statutory_rule_version_id)
 select r.portfolio_id,r.company_id,r.branch_id,r.id,s.id
@@ -198,58 +213,58 @@ from public.payroll_runs r cross join public.statutory_rule_versions s
 where r.id = '70000000-0000-0000-0000-000000000001' and s.version = 'SYNTHETIC-TEST-VERIFIED';
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select public.payroll_finalize('70000000-0000-0000-0000-000000000001');
 select public.payroll_finalize('70000000-0000-0000-0000-000000000001');
 select set_config('test.payout_export', public.payroll_prepare_payout_instructions('70000000-0000-0000-0000-000000000001')->>'export_id', true);
-select extensions.throws_ok($$insert into public.deduction_transactions(portfolio_id,company_id,branch_id,employee_id,deduction_id,installment_id,payroll_run_id,amount,transaction_type,idempotency_key,posted_by) values ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001',(select id from public.deduction_installments where deduction_id='50000000-0000-0000-0000-000000000001' and due_period='2026-10-01'),'70000000-0000-0000-0000-000000000001',1000,'PAYROLL_REPAYMENT','forged-duplicate','00000000-0000-0000-0000-000000000007')$$, '42501', 'browser cannot post loan repayments directly');
+select extensions.throws_ok($$insert into public.deduction_transactions(portfolio_id,company_id,branch_id,employee_id,deduction_id,installment_id,payroll_run_id,amount,transaction_type,idempotency_key,posted_by) values ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001',(select id from public.deduction_installments where deduction_id='50000000-0000-0000-0000-000000000001' and due_period='2026-10-01'),'70000000-0000-0000-0000-000000000001',1000,'PAYROLL_REPAYMENT','forged-duplicate','a0000000-0000-4000-8000-000000000007')$$, '42501', 'browser cannot post loan repayments directly');
 reset role;
 set local role anon;
 select extensions.throws_ok($$select count(*) from public.employees$$, '42501', 'anonymous users cannot read employee records');
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000007')$$, '42501', 'anonymous users cannot issue privileged payslip snapshots');
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000007')$$, '42501', 'anonymous users cannot issue privileged payslip snapshots');
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
 select extensions.throws_ok($$select public.statutory_filing_list('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,25)$$, '42501', 'branch manager cannot inspect statutory filing data');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000003')$$, '42501', 'payroll.view-only user cannot call the service-only issuance RPC');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002')$$, '42501', 'ordinary authenticated branch user cannot issue payslip snapshots');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000003')$$, '42501', 'payroll.view-only user cannot call the service-only issuance RPC');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','a0000000-0000-4000-8000-000000000002')$$, '42501', 'ordinary authenticated branch user cannot issue payslip snapshots');
 reset role;
 set local role service_role;
 select set_config('request.jwt.claim.role', 'service_role', true);
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000003')$$, '42501', 'trusted server cannot issue for actor without payslip.issue');
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000003')$$, '42501', 'trusted server cannot issue for actor without payslip.issue');
 select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',null)$$, '42501', 'trusted server rejects a missing human actor');
-select extensions.is(public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000007')->>'branch_id', '30000000-0000-0000-0000-000000000001', 'authorized issuer receives only the finalized run scope');
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000004')$$, '42501', 'issuer from another portfolio cannot access finalized payslip snapshot');
+select extensions.is(public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000007')->>'branch_id', '30000000-0000-0000-0000-000000000001', 'authorized issuer receives only the finalized run scope');
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000004')$$, '42501', 'issuer from another portfolio cannot access finalized payslip snapshot');
 select set_config('test.payslip_document', public.payslip_register_document(
   '70000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001',
   '10000000-0000-0000-0000-000000000001/20000000-0000-0000-0000-000000000001/70000000-0000-0000-0000-000000000001/1/40000000-0000-0000-0000-000000000001.pdf',
-  repeat('a',64), '00000000-0000-0000-0000-000000000007'
+  repeat('a',64), 'a0000000-0000-4000-8000-000000000007'
 )::text, true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select set_config('test.payslip_delivery', public.payslip_email_enqueue(current_setting('test.payslip_document')::uuid)::text, true);
 select extensions.is((select count(*) from jsonb_object_keys((select to_jsonb(h) from public.payslip_email_history(current_setting('test.payslip_document')::uuid) h)) as j(key) where j.key='recipient_email'), 0::bigint, 'redacted delivery history does not expose recipient email');
 select extensions.is((case when public.payslip_authorized_document(current_setting('test.payslip_document')::uuid) ? 'snapshot' then 1 else 0 end), 0, 'authorized download metadata does not expose the payroll snapshot');
 select extensions.throws_ok($$select recipient_email from public.payslip_email_deliveries$$, '42501', 'authenticated users cannot read delivery recipient addresses directly');
 select extensions.throws_ok($$select snapshot from public.payslip_documents$$, '42501', 'payroll.view users cannot read privileged payslip snapshots directly');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
 select extensions.throws_ok($$select * from public.payslip_email_history(current_setting('test.payslip_document')::uuid)$$, '42501', 'payroll.view-only user cannot read controlled delivery history');
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
-select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','synthetic-import-outside-branch','[]'::jsonb)$$, '42501', 'employee import cannot cross the actor branch assignment');
-select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000003','synthetic-import-other-company','[]'::jsonb)$$, '42501', 'employee import cannot cross company scope inside the same portfolio');
-select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000004','synthetic-import-other-tenant','[]'::jsonb)$$, '42501', 'employee import cannot cross tenant scope');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
-select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-unprivileged','[]'::jsonb)$$, '42501', 'payroll.view-only actor cannot import employees');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
+select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','synthetic-import-outside-branch','[{}]'::jsonb)$$, '42501', 'employee import cannot cross the actor branch assignment');
+select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000003','synthetic-import-other-company','[{}]'::jsonb)$$, '42501', 'employee import cannot cross company scope inside the same portfolio');
+select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000004','synthetic-import-other-tenant','[{}]'::jsonb)$$, '42501', 'employee import cannot cross tenant scope');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
+select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-unprivileged','[{}]'::jsonb)$$, '42501', 'payroll.view-only actor cannot import employees');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
 select extensions.is((public.employee_import_atomic(
   '10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-duplicate-01',
   '[{"line":"2","employee":{"employee_number":"SYN-001","first_name":"Synthetic","last_name":"Duplicate","date_of_birth":"1990-01-01","nationality":"Zambian","job_title":"Clerk","department":"Operations","employment_type":"PERMANENT","contract_type":"MONTHLY","contract_start_date":"2026-01-01"},"private_details":{},"compensation":{}}]'::jsonb
@@ -263,7 +278,7 @@ select extensions.is((public.employee_import_atomic(
   '10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-valid-01',
   '[{"line":"2","employee":{"employee_number":"SYN-IMPORT-001","first_name":"Synthetic","last_name":"Import","date_of_birth":"1990-01-01","nationality":"Zambian","job_title":"Clerk","department":"Operations","employment_type":"PERMANENT","contract_type":"MONTHLY","contract_start_date":"2026-01-01"},"private_details":{"residential_address":"Synthetic","phone":"+260000000300","email_unavailable_reason":"Synthetic","emergency_contact_name":"Synthetic","emergency_contact_relationship":"Friend","emergency_contact_phone":"+260000000301","payment_method":"CASH"},"compensation":{"effective_from":"2026-01-01","salary_frequency":"MONTHLY","basic_pay":6000,"payment_method":"CASH"}}]'::jsonb
 )->>'replayed'), 'true', 'identical import retry is idempotent');
-select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-valid-01','[]'::jsonb)$$, '22023', 'import idempotency key cannot be reused with another payload');
+select extensions.throws_ok($$select public.employee_import_atomic('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-valid-01','[{}]'::jsonb)$$, '22023', 'import idempotency key cannot be reused with another payload');
 select extensions.is((select count(*) from public.employee_import_jobs where idempotency_key='synthetic-import-valid-01'), 1::bigint, 'idempotent import creates one job history record');
 select set_config('test.import_rollback', public.employee_import_atomic(
   '10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','synthetic-import-rollback-01',
@@ -288,14 +303,14 @@ select extensions.throws_ok($$select public.payroll_payout_reconciliation_batche
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',true);
+select set_config('request.jwt.claim.sub','a0000000-0000-4000-8000-000000000003',true);
 select extensions.throws_ok($$select public.payroll_payout_reconciliation_batches('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001')$$, '42501', 'payroll preparer without payroll.finalize cannot list payout reconciliation batches');
 select extensions.throws_ok($$select payout_export_id from public.payroll_payout_reconciliations$$, '42501', 'authenticated user cannot directly read reconciliation references or notes');
-select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+select set_config('request.jwt.claim.sub','a0000000-0000-4000-8000-000000000002',true);
 select extensions.throws_ok($$select public.payroll_payout_reconciliation_batches('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001')$$, '42501', 'branch manager without payroll.finalize cannot reconcile payouts');
-select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000004',true);
+select set_config('request.jwt.claim.sub','a0000000-0000-4000-8000-000000000004',true);
 select extensions.throws_ok($$select public.payroll_payout_reconciliation_batches('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001')$$, '42501', 'cross-portfolio payroll user cannot reconcile another tenant');
-select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000007',true);
+select set_config('request.jwt.claim.sub','a0000000-0000-4000-8000-000000000007',true);
 select extensions.is(jsonb_typeof(public.payroll_payout_reconciliation_batches('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001')), 'array', 'authorized payroll finalizer can list batches in its exact branch');
 select extensions.is((public.payroll_payout_reconciliation_detail(current_setting('test.payout_export')::uuid,1,50)->>'total')::integer, 1, 'authorized finalizer reads one recipient from the selected batch');
 select extensions.throws_ok($$select public.payroll_payout_reconciliation_detail('ffffffff-ffff-4fff-8fff-ffffffffffff',1,50)$$, '42501', 'batch detail cannot be retrieved outside a known authorized batch');
@@ -305,9 +320,9 @@ select extensions.throws_ok($$select public.payroll_payout_reconciliation_save(c
 select public.payroll_payout_reconciliation_save(current_setting('test.payout_export')::uuid,'40000000-0000-0000-0000-000000000001','PAID',5000,'2026-10-31','SYNTHETIC-STATEMENT-REF-001','Synthetic reconciliation test');
 select extensions.is((public.payroll_payout_reconciliation_detail(current_setting('test.payout_export')::uuid,1,50)->'items'->0->>'status'), 'PAID', 'authorized payout reconciliation persists the checked statement outcome');
 select extensions.is((public.payroll_payout_reconciliation_detail(current_setting('test.payout_export')::uuid,1,50)->'items'->0 ? 'bank_account_number'), false, 'reconciliation detail excludes bank account numbers');
+reset role;
 select extensions.is((select count(*) from public.payroll_payout_reconciliations where payout_export_id=current_setting('test.payout_export')::uuid), 1::bigint, 'one employee reconciliation is stored per payout recipient');
 select extensions.is((select count(*) from public.audit_logs where action='PAYOUT_RECONCILIATION_UPDATED' and details ? 'provider_reference'), 0::bigint, 'audit trail records reconciliation without copying provider references');
-reset role;
 
 set local role anon;
 select extensions.throws_ok($$select public.statutory_filing_list('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,25)$$, '42501', 'anonymous callers cannot list statutory filing evidence');
@@ -315,12 +330,12 @@ select extensions.throws_ok($$select public.statutory_filing_prepare('70000000-0
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
 select extensions.throws_ok($$select public.statutory_filing_list('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,25)$$, '42501', 'payroll viewer without finalization permission cannot inspect filing evidence');
 select extensions.throws_ok($$select public.statutory_filing_prepare('70000000-0000-0000-0000-000000000001','PAYE','2026-11-10')$$, '42501', 'payroll viewer cannot create filing records');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000004', true);
 select extensions.throws_ok($$select public.statutory_filing_list('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,25)$$, '42501', 'other portfolio HR cannot read filing evidence');
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000007', true);
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000007', true);
 select set_config('test.statutory_filing', public.statutory_filing_prepare('70000000-0000-0000-0000-000000000001','PAYE','2026-11-10')::text, true);
 select extensions.is(public.statutory_filing_prepare('70000000-0000-0000-0000-000000000001','PAYE','2026-12-10')::text, current_setting('test.statutory_filing'), 'repeated filing preparation returns the same idempotent record');
 select extensions.is((public.statutory_filing_list('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,25)->>'total')::integer, 1, 'authorized finalizer sees only its exact branch filing register');

@@ -136,11 +136,13 @@ describe('LIVE employee screens', () => {
   })
 
   it('requests the submitted review queue and invokes the trusted approval action', async () => {
+    serviceMocks.list.mockResolvedValueOnce({ items: [employee], total: 1 }).mockResolvedValue({ items: [], total: 0 })
     renderRoute(<LiveEmployeeApprovals />)
     fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
     await waitFor(() => expect(serviceMocks.reviewSubmission).toHaveBeenCalledWith('employee-synthetic-1', 'APPROVE', undefined))
     await waitFor(() => expect(serviceMocks.list).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, search: '', approvalStatus: 'SUBMITTED_FOR_HR_APPROVAL' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Demo Employee: approve action saved.')
+    expect(screen.queryByText('Demo Employee')).not.toBeInTheDocument()
   })
 
   it('requires a reason for return and shows backend rejection without a success state', async () => {
@@ -151,8 +153,38 @@ describe('LIVE employee screens', () => {
     expect(await screen.findByText('Enter a short review reason before returning or rejecting this record.')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Please verify contract dates' } })
     fireEvent.submit(screen.getByRole('dialog'))
-    expect(await screen.findByRole('alert')).toHaveTextContent('The review was not saved.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('The review could not be saved.')
     expect(screen.queryByText(/updated successfully/)).not.toBeInTheDocument()
+  })
+
+  it('shows a specific authorization error returned by the trusted review RPC', async () => {
+    serviceMocks.reviewSubmission.mockRejectedValue({ code: '42501', message: 'internal detail is not displayed' })
+    renderRoute(<LiveEmployeeApprovals />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    const notification = await screen.findByRole('alert')
+    expect(notification).toHaveClass('employee-review-toast', 'is-error')
+    expect(notification).toHaveTextContent('Your account does not have employee review permission for this company and branch.')
+    expect(screen.queryByText(/internal detail/)).not.toBeInTheDocument()
+    fireEvent.click(within(notification).getByRole('button', { name: 'Dismiss notification' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('lets the reviewer refresh the approval queue from the error notification', async () => {
+    serviceMocks.reviewSubmission.mockRejectedValueOnce({ code: '40001' })
+    renderRoute(<LiveEmployeeApprovals />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    const notification = await screen.findByRole('alert')
+    expect(notification).toHaveTextContent('Another reviewer changed this submission.')
+    fireEvent.click(within(notification).getByRole('button', { name: 'Refresh queue' }))
+    await waitFor(() => expect(serviceMocks.list).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('explains a concurrent employee review and allows refreshing the queue', async () => {
+    serviceMocks.reviewSubmission.mockRejectedValue({ code: '40001' })
+    renderRoute(<LiveEmployeeApprovals />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Another reviewer changed this submission.')
   })
 
   it('offers only Male and Female and keeps job title editable text', () => {

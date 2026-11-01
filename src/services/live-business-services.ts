@@ -308,7 +308,14 @@ export type CompanyAdminRecord = { user_id: string; email: string; display_name:
 export type CompanyPayrollApproverRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_APPROVER' };
 export type CompanyPayrollReviewerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_REVIEWER' };
 export type CompanyPayrollPreparerRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_PREPARER' };
-export type PortfolioMemberRecord = { user_id: string; email: string; display_name: string | null; role: 'PORTFOLIO_ADMIN' | 'COMPANY_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; created_at: string; revoked_at: string | null; branch_ids: string[] };
+export type PortfolioMemberRecord = {
+  user_id: string; email: string; display_name: string | null
+  role: 'PORTFOLIO_ADMIN' | 'COMPANY_ADMIN' | 'OVERALL_HR_MANAGER' | 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'
+    | 'COMPANY_PAYROLL_PREPARER' | 'COMPANY_PAYROLL_APPROVER' | 'COMPANY_PAYROLL_REVIEWER'
+  created_at: string; revoked_at: string | null; branch_ids: string[]
+  scope_type?: 'PORTFOLIO' | 'COMPANY' | 'BRANCH'; company_id?: string | null; scope_label?: string
+  assignment_status?: 'ACTIVE' | 'INACTIVE'
+};
 export type DeductionRequestInput = {
   portfolioId: string;
   companyId: string;
@@ -344,6 +351,7 @@ export interface LiveBusinessServices {
     list(portfolioId: string, companyId: string): Promise<CompanyAdminRecord[]>;
     assign(portfolioId: string, companyId: string, userId: string): Promise<void>;
     revoke(portfolioId: string, companyId: string, userId: string, reason: string): Promise<void>;
+    manageAssignment(input: { portfolioId: string; companyId: string; userId: string; newCompanyId?: string; action: 'EDIT' | 'REVOKE' | 'REACTIVATE' | 'REMOVE'; reason: string; displayName?: string }): Promise<void>;
   };
   companyPayrollApprovers: {
     list(portfolioId: string, companyId: string): Promise<CompanyPayrollApproverRecord[]>;
@@ -362,8 +370,13 @@ export interface LiveBusinessServices {
   };
   portfolioUsers: {
     list(portfolioId: string): Promise<PortfolioMemberRecord[]>;
+    listForCompany(portfolioId: string, companyId: string): Promise<PortfolioMemberRecord[]>;
+    manageBranchAssignment(input: { portfolioId: string; companyId: string; newCompanyId?: string; userId: string; currentRole: 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; action: 'EDIT' | 'REVOKE' | 'REACTIVATE' | 'REMOVE'; newRole?: 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR'; branchIds?: string[]; reason: string; displayName?: string }): Promise<void>;
+    managePortfolioAssignment(input: { portfolioId: string; userId: string; currentRole: 'PORTFOLIO_ADMIN' | 'COMPANY_ADMIN' | 'OVERALL_HR_MANAGER'; action: 'EDIT' | 'REVOKE' | 'REACTIVATE' | 'REMOVE'; newRole?: 'PORTFOLIO_ADMIN' | 'COMPANY_ADMIN' | 'OVERALL_HR_MANAGER'; reason: string; displayName?: string }): Promise<void>;
+    manageCompanyAssignment(input: { portfolioId: string; companyId: string; userId: string; currentRole: 'COMPANY_ADMIN' | 'COMPANY_PAYROLL_PREPARER' | 'COMPANY_PAYROLL_APPROVER' | 'COMPANY_PAYROLL_REVIEWER'; action: 'EDIT' | 'REVOKE' | 'REACTIVATE' | 'REMOVE'; newRole?: 'COMPANY_ADMIN' | 'COMPANY_PAYROLL_PREPARER' | 'COMPANY_PAYROLL_APPROVER' | 'COMPANY_PAYROLL_REVIEWER'; reason: string; displayName?: string }): Promise<void>;
     assign(portfolioId: string, userId: string, role: PortfolioMemberRecord['role'], branchIds?: string[]): Promise<void>;
     replaceBranchAssignments(portfolioId: string, companyId: string, userId: string, role: 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR', branchIds: string[]): Promise<void>;
+    revokeBranchAssignments(portfolioId: string, companyId: string, userId: string, role: 'BRANCH_MANAGER' | 'PAYROLL_PROCESSOR', reason: string): Promise<void>;
     revoke(portfolioId: string, userId: string, role: PortfolioMemberRecord['role'], reason: string): Promise<void>;
   };
   deductions: {
@@ -577,6 +590,14 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const result = await client.rpc('revoke_company_admin', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_reason: reason });
         if (result.error) throw result.error;
       },
+      async manageAssignment(input) {
+        const result = await client.rpc('manage_company_admin_assignment', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_user_id: input.userId,
+          p_action: input.action, p_reason: input.reason, p_display_name: input.displayName ?? null,
+          p_new_company_id: input.newCompanyId ?? input.companyId,
+        });
+        if (result.error) throw result.error;
+      },
     },
     companyPayrollApprovers: {
       async list(portfolioId, companyId) {
@@ -629,12 +650,46 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         if (result.error) throw result.error;
         return (result.data ?? []) as PortfolioMemberRecord[];
       },
+      async listForCompany(portfolioId, companyId) {
+        const result = await client.rpc('managed_user_assignment_directory', { p_portfolio_id: portfolioId, p_company_id: companyId });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as PortfolioMemberRecord[];
+      },
+      async manageBranchAssignment(input) {
+        const result = await client.rpc('manage_company_branch_role_assignment', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_user_id: input.userId,
+          p_current_role: input.currentRole, p_action: input.action, p_new_role: input.newRole ?? input.currentRole,
+          p_branch_ids: input.branchIds ?? [], p_reason: input.reason, p_display_name: input.displayName ?? null,
+          p_new_company_id: input.newCompanyId ?? input.companyId,
+        });
+        if (result.error) throw result.error;
+      },
+      async managePortfolioAssignment(input) {
+        const result = await client.rpc('manage_portfolio_role_assignment', {
+          p_portfolio_id: input.portfolioId, p_user_id: input.userId, p_current_role: input.currentRole,
+          p_action: input.action, p_new_role: input.newRole ?? input.currentRole,
+          p_reason: input.reason, p_display_name: input.displayName ?? null,
+        });
+        if (result.error) throw result.error;
+      },
+      async manageCompanyAssignment(input) {
+        const result = await client.rpc('manage_company_role_assignment', {
+          p_portfolio_id: input.portfolioId, p_company_id: input.companyId, p_user_id: input.userId,
+          p_current_role: input.currentRole, p_action: input.action, p_new_role: input.newRole ?? input.currentRole,
+          p_reason: input.reason, p_display_name: input.displayName ?? null,
+        });
+        if (result.error) throw result.error;
+      },
       async assign(portfolioId, userId, role, branchIds = []) {
         const result = await client.rpc('assign_portfolio_membership', { p_portfolio_id: portfolioId, p_user_id: userId, p_role: role, p_branch_ids: branchIds });
         if (result.error) throw result.error;
       },
       async replaceBranchAssignments(portfolioId, companyId, userId, role, branchIds) {
         const result = await client.rpc('replace_branch_role_assignments', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_role: role, p_branch_ids: branchIds });
+        if (result.error) throw result.error;
+      },
+      async revokeBranchAssignments(portfolioId, companyId, userId, role, reason) {
+        const result = await client.rpc('revoke_company_branch_role_assignments', { p_portfolio_id: portfolioId, p_company_id: companyId, p_user_id: userId, p_role: role, p_reason: reason });
         if (result.error) throw result.error;
       },
       async revoke(portfolioId, userId, role, reason) {

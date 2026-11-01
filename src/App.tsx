@@ -189,7 +189,7 @@ function AppShell() {
           <Route path="/deductions" element={<LiveDeductions />} />
           <Route path="/statutory" element={<LiveStatutoryFilings />} />
           <Route path="/reports" element={<LivePayrollReports />} />
-          <Route path="/users" element={<LiveUserAdmin portfolioCompanyAdmin={roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN')} />} />
+          <Route path="/users" element={<LiveUserAdmin portfolioCompanyAdmin={roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN')} portfolioWideAdministrator={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} companyScopedAdministrator={roleContext.roles.includes('COMPANY_ADMIN') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
           <Route path="/audit" element={<LiveAuditLogs />} />
           <Route path="/notifications" element={<LiveNotifications />} />
           <Route path="/settings" element={<LiveSettings />} />
