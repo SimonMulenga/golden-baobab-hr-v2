@@ -57,6 +57,20 @@ export type PayslipDeliveryRecord = {
   id: string; document_id: string; status: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
   attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null;
 };
+export type PayslipStatementDetails = {
+  leave: {
+    monthly_entitlement_days: number;
+    balance_days: number;
+    policies: Array<{ leave_type: string; monthly_entitlement_days: number; balance_days: number }>;
+  };
+  deductions: Array<{
+    description: string;
+    deduction_type: string;
+    total_amount: number;
+    amount_recovered: number;
+    balance: number;
+  }>;
+};
 export type AuditLogRecord = {
   id: number; portfolio_id: string; company_id: string | null; branch_id: string | null;
   actor_id: string | null; action: string; module: string; record_id: string;
@@ -421,6 +435,7 @@ export interface LiveBusinessServices {
   payslips: {
     finalizedRuns(companyId: string, branchId?: string): Promise<FinalizedPayslipRunRecord[]>;
     finalizedItems(payrollRunId: string, payrollVersion: number, page?: number): Promise<PageResult<FinalizedPayslipItemRecord>>;
+    statementDetails(payrollRunId: string, employeeId: string): Promise<PayslipStatementDetails>;
     issueDocument(payrollRunId: string, employeeId: string): Promise<{ documentId: string; signedUrl: string }>;
     downloadDocument(documentId: string): Promise<{ signedUrl: string }>;
     sendEmail(documentId: string): Promise<{ deliveryId: string; status: string; deliveryConfigured: boolean }>;
@@ -436,6 +451,24 @@ function unwrap<T>(result: { data: T | null; error: unknown }): T {
   if (result.error) throw result.error;
   if (result.data === null) throw new Error('The live business service returned no result.');
   return result.data;
+}
+
+async function payslipFunctionError(error: unknown): Promise<Error> {
+  const context = error && typeof error === 'object' ? (error as { context?: unknown }).context : null;
+  let code = '';
+  if (context instanceof Response) {
+    try { code = String(((await context.clone().json()) as { code?: unknown }).code ?? '') } catch { /* Keep the response generic. */ }
+  }
+  const messages: Record<string, string> = {
+    APP_ORIGIN_NOT_APPROVED: 'This application address is not enabled for secure payslip operations. Contact the system administrator.',
+    SERVICE_CONFIGURATION_MISSING: 'The secure payslip service is not fully configured. Contact the system administrator.',
+    AUTHENTICATION_REQUIRED: 'Sign in again before issuing a payslip.',
+    SESSION_EXPIRED: 'Your session expired. Sign in again before issuing a payslip.',
+    ISSUANCE_NOT_AUTHORIZED: 'Your account does not have payslip issuance access for this company and branch.',
+    FINALIZED_PAYROLL_NOT_FOUND: 'This payroll run has no finalized payslip for the selected employee.',
+    IMMUTABLE_DOCUMENT_CONFLICT: 'A payslip already exists for this finalized payroll version and cannot be replaced.',
+  };
+  return new Error(messages[code] ?? 'The secure payslip service could not complete the request. Check access and service configuration.');
 }
 
 /**
@@ -949,28 +982,33 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         if (result.error) throw result.error;
         return { items: (result.data ?? []) as unknown as FinalizedPayslipItemRecord[], total: result.count ?? 0 };
       },
+      async statementDetails(payrollRunId, employeeId) {
+        return unwrap(await client.rpc('payslip_statement_details', {
+          p_payroll_run_id: payrollRunId, p_employee_id: employeeId,
+        })) as PayslipStatementDetails;
+      },
       async issueDocument(payrollRunId, employeeId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'issue', payrollRunId, employeeId } });
-        if (result.error) throw result.error;
+        if (result.error) throw await payslipFunctionError(result.error);
         const data = result.data as { documentId?: unknown; signedUrl?: unknown } | null;
         if (typeof data?.documentId !== 'string' || typeof data.signedUrl !== 'string') throw new Error('Payslip document response is invalid.');
         return { documentId: data.documentId, signedUrl: data.signedUrl };
       },
       async downloadDocument(documentId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'download', documentId } });
-        if (result.error) throw result.error;
+        if (result.error) throw await payslipFunctionError(result.error);
         const data = result.data as { signedUrl?: unknown } | null;
         if (typeof data?.signedUrl !== 'string') throw new Error('Payslip download response is invalid.');
         return { signedUrl: data.signedUrl };
       },
       async sendEmail(documentId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'email', documentId } });
-        if (result.error) throw result.error;
+        if (result.error) throw await payslipFunctionError(result.error);
         return result.data as { deliveryId: string; status: string; deliveryConfigured: boolean };
       },
       async retryEmail(deliveryId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'retry-email', deliveryId } });
-        if (result.error) throw result.error;
+        if (result.error) throw await payslipFunctionError(result.error);
         return result.data as { deliveryId: string; status: string; deliveryConfigured: boolean };
       },
       async deliveryHistory(documentId) {

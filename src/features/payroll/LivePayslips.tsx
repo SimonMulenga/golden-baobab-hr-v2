@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
-import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord } from '../../services/live-business-services'
+import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type PayslipStatementDetails } from '../../services/live-business-services'
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { buildPayslipView } from './payslip-model'
 import './live-payslips.css'
@@ -29,6 +29,9 @@ export function LivePayslips() {
   const [artifactOwner, setArtifactOwner] = useState('')
   const [signedUrl, setSignedUrl] = useState('')
   const [deliveryRows, setDeliveryRows] = useState<Array<{ id: string; status: string; attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null }>>([])
+  const [statementDetails, setStatementDetails] = useState<PayslipStatementDetails | null>(null)
+  const [statementDetailsOwner, setStatementDetailsOwner] = useState('')
+  const [statementDetailsState, setStatementDetailsState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [artifactBusy, setArtifactBusy] = useState(false)
   const [deliveryClock, setDeliveryClock] = useState(0)
   const selectedRun = runs.find((run) => run.id === runId)
@@ -37,9 +40,12 @@ export function LivePayslips() {
   const selectedEmployee = employees.find((employee) => employee.id === employeeId)
   const selectedItem = items.find((item) => item.employee_id === employeeId)
   const currentArtifactId = artifactOwner === `${selectedRunId ?? ''}:${selectedItem?.employee_id ?? ''}` ? artifactId : ''
+  const currentDetailsOwner = `${selectedRunId ?? ''}:${selectedItem?.employee_id ?? ''}`
+  const currentStatementDetails = statementDetailsOwner === currentDetailsOwner ? statementDetails : null
+  const currentStatementDetailsState = statementDetailsOwner === currentDetailsOwner ? statementDetailsState : 'loading'
   const model = useMemo(() => selectedRun && selectedItem && selectedEmployee && company
-    ? buildPayslipView({ company, branch: company.branches.find((branch) => branch.id === selectedRun.branch_id), employee: selectedEmployee, run: selectedRun, item: selectedItem })
-    : null, [selectedRun, selectedItem, selectedEmployee, company])
+    ? buildPayslipView({ company, branch: company.branches.find((branch) => branch.id === selectedRun.branch_id), employee: selectedEmployee, run: selectedRun, item: selectedItem, statementDetails: currentStatementDetails })
+    : null, [selectedRun, selectedItem, selectedEmployee, company, currentStatementDetails])
   const api = () => createLiveBusinessServices(getSupabaseClient())
 
   useEffect(() => {
@@ -71,6 +77,19 @@ export function LivePayslips() {
     return () => { cancelled = true }
   }, [selectedRunId, selectedRunVersion, page])
 
+  useEffect(() => {
+    if (!selectedRunId || !selectedItem?.employee_id) return
+    let cancelled = false
+    const owner = `${selectedRunId}:${selectedItem.employee_id}`
+    setStatementDetails(null)
+    setStatementDetailsOwner('')
+    setStatementDetailsState('loading')
+    api().payslips.statementDetails(selectedRunId, selectedItem.employee_id)
+      .then((result) => { if (!cancelled) { setStatementDetails(result); setStatementDetailsOwner(owner); setStatementDetailsState('ready') } })
+      .catch(() => { if (!cancelled) { setStatementDetails(null); setStatementDetailsOwner(owner); setStatementDetailsState('error') } })
+    return () => { cancelled = true }
+  }, [selectedRunId, selectedItem?.employee_id])
+
   const pageCount = Math.max(1, Math.ceil(total / 100))
   const print = () => { if (model) { setNotice('Use your browser print dialog to save a local copy. Secure issuance and delivery are separately audited actions.'); window.print() } }
   const issueSecurePdf = async () => {
@@ -81,7 +100,7 @@ export function LivePayslips() {
       setArtifactId(result.documentId); setArtifactOwner(`${selectedRun.id}:${selectedItem.employee_id}`); setSignedUrl(result.signedUrl)
       setNotice('Generated from the finalized payroll snapshot. The private download link expires after 60 seconds.')
       try { setDeliveryRows(await api().payslips.deliveryHistory(result.documentId)) } catch { setDeliveryRows([]) }
-    } catch { setError('The secure payslip could not be issued. Confirm payroll issuance permission and that this run remains finalized.') }
+    } catch (error) { setError(error instanceof Error ? error.message : 'The secure payslip could not be issued.') }
     finally { setArtifactBusy(false) }
   }
   const refreshSecureLink = async () => {
@@ -96,7 +115,7 @@ export function LivePayslips() {
     setArtifactBusy(true); setError(''); setNotice('')
     try {
       const result = await api().payslips.sendEmail(currentArtifactId)
-      setNotice(result.status === 'SENT' ? 'The configured email provider accepted the delivery request.' : 'Delivery is recorded as queued. Provider settings and the recipient allowlist determine whether it can be sent.')
+      setNotice(result.status === 'SENT' ? 'The configured email provider accepted the private payslip link for delivery.' : result.deliveryConfigured ? 'The private payslip link is queued for delivery.' : 'The payslip was not emailed. It is queued until the email provider and verified sender address are configured.')
       setDeliveryRows(await api().payslips.deliveryHistory(currentArtifactId))
     } catch {
       setError('Delivery could not be queued. Check payroll issuance permissions and the employee delivery address.')
@@ -133,7 +152,7 @@ export function LivePayslips() {
           : <>
             <div className="live-payslip-actions"><span>{total.toLocaleString()} employees in finalized {period(selectedRun!, preferences)} payroll · page {page}/{pageCount}</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button><button className="button-secondary" onClick={print}><Printer size={15}/> Print / save as PDF</button><button className="button-primary" disabled={artifactBusy} onClick={() => void issueSecurePdf()}>{artifactBusy ? <LoaderCircle size={15}/> : <FileText size={15}/>} Generate secure PDF</button></div></div>
             {currentArtifactId && <section className="panel live-payslip-delivery" aria-label="Payslip document and delivery">
-              <div><strong>Private finalized payslip PDF</strong><p>Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Signed links expire after 60 seconds.</p></div>
+              <div><strong>Private finalized payslip PDF</strong><p>Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Download links expire after 60 seconds; emailed links expire after 24 hours.</p></div>
               <div className="live-payslip-pagination"><button className="button-secondary" onClick={() => void refreshSecureLink()} disabled={artifactBusy}><RefreshCw size={15}/> Refresh link</button>{signedUrl && <a className="button-primary" href={signedUrl} target="_blank" rel="noreferrer"><Download size={15}/> Download PDF</a>}<button className="button-secondary" onClick={() => void sendSecureEmail()} disabled={artifactBusy}><Mail size={15}/> Queue email</button></div>
               <div className="live-payslip-delivery-history"><strong>Delivery history</strong>{deliveryRows.length ? deliveryRows.map((delivery) => { const stale = delivery.status === 'SENDING' && deliveryClock > 0 && deliveryClock - Date.parse(delivery.updated_at) > 10 * 60_000; const retryable = delivery.attempts < 3 && (delivery.status === 'FAILED' || stale); return <div key={delivery.id}><span>{delivery.status}{stale ? ' · stale claim' : ''} · {delivery.attempts}/3 attempts</span><span>{delivery.last_error_code || (delivery.sent_at ? 'Provider accepted' : 'Recorded')}</span>{retryable && <button className="button-secondary" disabled={artifactBusy} onClick={() => void retrySecureEmail(delivery.id)}>Retry</button>}</div> }) : <p>No delivery recorded. History requires payroll issuance access.</p>}</div>
             </section>}
@@ -142,10 +161,16 @@ export function LivePayslips() {
               <div className="live-payslip-title"><div><div className="section-eyebrow">SALARY STATEMENT</div><h1>{model.periodLabel} payslip</h1></div><span>FINALIZED</span></div>
               <dl className="live-payslip-employee"><div><dt>Employee</dt><dd>{model.employeeName}</dd></div><div><dt>Employee number</dt><dd>{model.employeeNumber}</dd></div><div><dt>Job title</dt><dd>{model.jobTitle}</dd></div><div><dt>Department</dt><dd>{model.department}</dd></div><div><dt>Branch</dt><dd>{model.branchName}</dd></div></dl>
               <div className="live-payslip-columns"><section><h3>Earnings</h3><table><tbody>{model.earnings.map((line, index) => <tr className={line.memoOnly ? 'memo-line' : ''} key={`${line.label}-${index}`}><td>{line.label}<small>{line.detail}</small></td><td>{line.memoOnly ? `(${money(Math.abs(line.amount))})` : money(line.amount)}</td></tr>)}</tbody><tfoot><tr><th>Total earnings</th><th>{money(model.gross)}</th></tr></tfoot></table></section><section><h3>Deductions</h3><table><tbody>{model.deductions.map((line, index) => <tr key={`${line.label}-${index}`}><td>{line.label}<small>{line.detail}</small></td><td>{money(line.amount)}</td></tr>)}</tbody><tfoot><tr><th>Total deductions</th><th>{money(model.totalDeductions)}</th></tr></tfoot></table></section></div>
+              <section className="payslip-balances" aria-label="Leave and advance balances">
+                <h3>Leave entitlement and balance</h3>
+                {currentStatementDetailsState === 'loading' ? <p role="status">Loading leave balance…</p> : currentStatementDetailsState === 'error' ? <p role="alert">Leave and repayment balances are unavailable for this payslip.</p> : model.leavePolicies.length ? <table><thead><tr><th>Leave type</th><th>Monthly entitlement</th><th>Balance at period end</th></tr></thead><tbody>{model.leavePolicies.map((line) => <tr key={line.leaveType}><td>{line.leaveType}</td><td>{line.monthlyEntitlementDays.toFixed(2)} days</td><td>{line.balanceDays.toFixed(2)} days</td></tr>)}</tbody></table> : <p>No paid leave accrual policy applies to this period.</p>}
+                <h3>General deduction balances</h3>
+                {currentStatementDetailsState === 'loading' ? <p role="status">Loading advance and loan balances…</p> : currentStatementDetailsState === 'error' ? <p role="alert">Advance and loan balances are unavailable for this payslip.</p> : model.advanceBalances.length ? <div className="table-scroll"><table><thead><tr><th>Description</th><th>Total amount</th><th>Amount recovered</th><th>Balance</th></tr></thead><tbody>{model.advanceBalances.map((line, index) => <tr key={`${line.deductionType}-${index}`}><td>{line.description || line.deductionType}</td><td>{money(line.totalAmount)}</td><td>{money(line.amountRecovered)}</td><td>{money(line.balance)}</td></tr>)}</tbody></table></div> : <p>No outstanding approved advance or loan balance at period end.</p>}
+              </section>
               <footer className="live-payslip-net"><span>Net salary</span><strong>{money(model.net)}</strong></footer>
               <p className="live-payslip-footnote">This payslip reflects payroll version {selectedRun?.version} after finalization. It is not a bank transfer confirmation.</p>
             </article>
-            <div className="live-payslip-note">The GB mark uses a company wordmark because a logo file is not currently stored. Email remains queued unless the server provider and explicit recipient allowlist are configured.</div>
+            <div className="live-payslip-note">Email delivery uses the employee email registered in their private HR details. The provider sends a time-limited private link; email remains queued until the provider and verified sender address are configured.</div>
           </>}
   </div>
 }

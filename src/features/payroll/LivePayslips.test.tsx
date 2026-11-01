@@ -5,7 +5,7 @@ import { mockCompanies } from '../companies/mockData'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { LivePayslips } from './LivePayslips'
 
-const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), byIds: vi.fn(), issueDocument: vi.fn(), deliveryHistory: vi.fn(), sendEmail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), statementDetails: vi.fn(), byIds: vi.fn(), issueDocument: vi.fn(), deliveryHistory: vi.fn(), sendEmail: vi.fn() }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payslips: mocks, employees: { byIds: mocks.byIds } }) }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 
@@ -23,6 +23,7 @@ describe('LIVE finalized payslips', () => {
     vi.clearAllMocks()
     mocks.finalizedRuns.mockResolvedValue([run])
     mocks.finalizedItems.mockResolvedValue({ items: [item], total: 1 })
+    mocks.statementDetails.mockResolvedValue({ leave: { monthly_entitlement_days: 2, balance_days: 3, policies: [{ leave_type: 'ANNUAL_LEAVE', monthly_entitlement_days: 2, balance_days: 3 }] }, deductions: [{ description: '100025 Advance recovery', deduction_type: 'SALARY_ADVANCE', total_amount: 3000, amount_recovered: 2000, balance: 1000 }] })
     mocks.byIds.mockResolvedValue([employee])
     mocks.issueDocument.mockResolvedValue({ documentId: 'doc-1', signedUrl: 'https://private.example/signed?token=opaque' })
     mocks.deliveryHistory.mockResolvedValue([])
@@ -60,7 +61,18 @@ describe('LIVE finalized payslips', () => {
     await screen.findByRole('heading', { name: 'October 2026 payslip' })
     fireEvent.click(screen.getByRole('button', { name: 'Generate secure PDF' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Queue email' }))
-    expect(await screen.findByText(/Delivery is recorded as queued/)).toBeInTheDocument()
+    expect(await screen.findByText(/not emailed\. It is queued until the email provider and verified sender address are configured/)).toBeInTheDocument()
     expect(mocks.sendEmail).toHaveBeenCalledWith('doc-1')
+  })
+
+  it('renders the period-end leave balance and advance repayment balance on the payslip', async () => {
+    renderScreen()
+    expect(await screen.findByText('Annual Leave')).toBeInTheDocument()
+    expect(screen.getByText('2.00 days')).toBeInTheDocument()
+    expect(screen.getByText('3.00 days')).toBeInTheDocument()
+    expect(screen.getByText('100025 Advance recovery')).toBeInTheDocument()
+    expect(screen.getByText('K3,000.00')).toBeInTheDocument()
+    expect(screen.getByText('K2,000.00')).toBeInTheDocument()
+    expect(screen.getAllByText('K1,000.00')).toHaveLength(2)
   })
 })

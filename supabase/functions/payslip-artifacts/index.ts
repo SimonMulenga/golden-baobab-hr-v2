@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
+import { approvedAppOrigins } from './origins.ts'
 
 const baseHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
 const reply = (status: number, body: Record<string, unknown>, origin?: string) => new Response(JSON.stringify(body), {
@@ -11,6 +12,18 @@ const num = (value: unknown) => { const n = Number(value ?? 0); return Number.is
 const text = (value: unknown) => typeof value === 'string' ? value : ''
 const money = (value: unknown) => `K${num(value).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const safeText = (value: unknown) => text(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '?')
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+const statementDays = (value: unknown) => `${num(value).toFixed(2)} days`
+function safeFailureCode(error: unknown) {
+  const value = object(error)
+  const code = text(value.code)
+  const message = error instanceof Error ? error.message : text(value.message)
+  if (code === '42501' || /not authorized|not permit/i.test(message)) return 'ISSUANCE_NOT_AUTHORIZED'
+  if (code === 'P0002' || /finalized payslip source was not found/i.test(message)) return 'FINALIZED_PAYROLL_NOT_FOUND'
+  if (/immutable.*conflict/i.test(message)) return 'IMMUTABLE_DOCUMENT_CONFLICT'
+  if (/storage/i.test(message)) return 'PRIVATE_DOCUMENT_STORAGE_FAILED'
+  return 'PAYSLIP_ISSUANCE_FAILED'
+}
 
 function buildPdf(snapshot: Json): Promise<Uint8Array> {
   return (async () => {
@@ -36,6 +49,9 @@ function buildPdf(snapshot: Json): Promise<Uint8Array> {
     const breakdown = object(item.calculation_breakdown)
     const additional = Array.isArray(breakdown.approved_earning_items) ? breakdown.approved_earning_items.map(object) : []
     const installments = Array.isArray(breakdown.due_deduction_items) ? breakdown.due_deduction_items.map(object) : []
+    const leave = object(snapshot.leave)
+    const leavePolicies = Array.isArray(leave.policies) ? leave.policies.map(object) : []
+    const outstandingDeductions = Array.isArray(snapshot.deductions) ? snapshot.deductions.map(object) : []
     const periodStart = new Date(`${text(snapshot.period_start)}T00:00:00Z`)
     const periodName = Number.isFinite(periodStart.getTime()) ? periodStart.toLocaleDateString('en-ZM', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'Payroll period'
 
@@ -50,6 +66,21 @@ function buildPdf(snapshot: Json): Promise<Uint8Array> {
     write(`Employee: ${[employee.first_name, employee.middle_name, employee.last_name].filter(Boolean).join(' ')}`, 44, 11, bold); y -= 18
     write(`Number: ${employee.employee_number}     Role: ${employee.job_title}     Department: ${employee.department}`, 44, 9); y -= 16
     write(`Branch: ${object(snapshot.branch).name}`, 44, 9); y -= 24
+    write('LEAVE ENTITLEMENT AND BALANCE', 44, 10, bold, rgb(0.04, 0.35, 0.28)); y -= 22
+    if (leavePolicies.length) {
+      for (const policy of leavePolicies) {
+        const leaveLabel = text(policy.leave_type).replaceAll('_', ' ')
+        write(`${leaveLabel} · monthly entitlement`, 48, 9)
+        write(statementDays(policy.monthly_entitlement_days), width - 150, 9, bold)
+        y -= 16
+        write(`${leaveLabel} · balance at period end`, 48, 9)
+        write(statementDays(policy.balance_days), width - 150, 9, bold)
+        y -= 18
+      }
+    } else {
+      write('No paid leave accrual policy applies to this period.', 48, 9); y -= 18
+    }
+    y -= 8
     write('EARNINGS', 44, 10, bold, rgb(0.04, 0.35, 0.28)); y -= 22
     row('Basic salary', item.basic_pay)
     row('Housing allowance', item.housing_allowance)
@@ -75,6 +106,18 @@ function buildPdf(snapshot: Json): Promise<Uint8Array> {
     if (other > 0) row('Other approved deductions', other)
     const statutoryTotal = num(statutory.PAYE) + num(statutory.NAPSA_EMPLOYEE) + num(statutory.NHIMA_EMPLOYEE)
     row('Total deductions', statutoryTotal + num(item.voluntary_deductions)); line()
+    write('GENERAL DEDUCTION BALANCES', 44, 10, bold, rgb(0.04, 0.35, 0.28)); y -= 22
+    if (outstandingDeductions.length) {
+      for (const deduction of outstandingDeductions) {
+        const description = text(deduction.description) || text(deduction.deduction_type).replaceAll('_', ' ')
+        write(description, 48, 8, bold); y -= 14
+        write(`Total ${money(deduction.total_amount)}   Recovered ${money(deduction.amount_recovered)}   Balance ${money(deduction.balance)}`, 58, 8)
+        y -= 17
+      }
+    } else {
+      write('No outstanding approved advance or loan balance at period end.', 48, 9); y -= 18
+    }
+    y -= 4
     page.drawRectangle({ x: 44, y: y - 38, width: width - 88, height: 46, color: rgb(0.91, 0.96, 0.94) })
     page.drawText('NET SALARY', { x: 54, y: y - 19, size: 11, font: bold, color: rgb(0.04, 0.24, 0.2) })
     page.drawText(money(item.net_pay), { x: width - 150, y: y - 20, size: 14, font: bold, color: rgb(0.04, 0.24, 0.2) })
@@ -83,7 +126,6 @@ function buildPdf(snapshot: Json): Promise<Uint8Array> {
   })()
 }
 
-const b64 = (bytes: Uint8Array) => { let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary) }
 async function sha256(bytes: Uint8Array) {
   const digestInput = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(digestInput).set(bytes)
@@ -93,23 +135,26 @@ async function sha256(bytes: Uint8Array) {
 
 Deno.serve(async (request) => {
   const origin = request.headers.get('origin') ?? ''
-  const origins = (Deno.env.get('APPROVED_APP_ORIGINS') ?? '').split(',').map((value) => value.trim()).filter(Boolean)
-  if (!origin || !origins.includes(origin)) return reply(403, { error: 'This application origin is not approved.' })
+  const origins = approvedAppOrigins(Deno.env.get('APPROVED_APP_ORIGINS') ?? '')
+  if (!origin || !origins.includes(origin)) return reply(403, { code: 'APP_ORIGIN_NOT_APPROVED', error: 'This application address is not enabled for secure payslip operations.' })
   if (request.method === 'OPTIONS') return new Response('ok', { headers: { ...baseHeaders, 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS' } })
   if (request.method !== 'POST') return reply(405, { error: 'Method not allowed.' }, origin)
   const url = Deno.env.get('SUPABASE_URL'), anon = Deno.env.get('SUPABASE_ANON_KEY'), serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const bearer = request.headers.get('authorization')
-  if (!url || !anon || !serviceKey || !bearer?.startsWith('Bearer ')) return reply(401, { error: 'Authenticated payslip service is unavailable.' }, origin)
+  if (!url || !anon || !serviceKey) return reply(503, { code: 'SERVICE_CONFIGURATION_MISSING', error: 'The secure payslip service is not fully configured.' }, origin)
+  if (!bearer?.startsWith('Bearer ')) return reply(401, { code: 'AUTHENTICATION_REQUIRED', error: 'Sign in again to use secure payslip services.' }, origin)
   const caller = createClient(url, anon, { global: { headers: { Authorization: bearer } }, auth: { persistSession: false, autoRefreshToken: false } })
   const { data: identity, error: authError } = await caller.auth.getUser()
-  if (authError || !identity.user) return reply(401, { error: 'Your session is no longer valid.' }, origin)
+  if (authError || !identity.user) return reply(401, { code: 'SESSION_EXPIRED', error: 'Your session is no longer valid. Sign in again.' }, origin)
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
   let body: Json
   try { body = object(await request.json()) } catch { return reply(400, { error: 'Invalid request.' }, origin) }
   const action = text(body.action)
 
+  let operation = 'request'
   try {
     if (action === 'issue') {
+      operation = 'issue'
       const runId = text(body.payrollRunId), employeeId = text(body.employeeId)
       const { data: snapshot, error: snapshotError } = await admin.rpc('payslip_issue_snapshot', {
         p_payroll_run_id: runId, p_employee_id: employeeId, p_actor_id: identity.user.id,
@@ -147,6 +192,7 @@ Deno.serve(async (request) => {
       return reply(200, { documentId, signedUrl: signed.signedUrl }, origin)
     }
     if (action === 'download') {
+      operation = 'download'
       const { data: authorized, error } = await caller.rpc('payslip_authorized_document', { p_document_id: text(body.documentId) })
       if (error) throw error
       const path = text(object(authorized).storage_path)
@@ -155,14 +201,14 @@ Deno.serve(async (request) => {
       return reply(200, { signedUrl: signed.signedUrl }, origin)
     }
     if (action === 'email' || action === 'retry-email') {
+      operation = 'email'
       const idResult = action === 'email'
         ? await caller.rpc('payslip_email_enqueue', { p_document_id: text(body.documentId) })
         : await caller.rpc('payslip_email_retry', { p_delivery_id: text(body.deliveryId) })
       if (idResult.error) throw idResult.error
       const deliveryId = idResult.data as string
       const key = Deno.env.get('RESEND_API_KEY'), from = Deno.env.get('PAYSLIP_FROM_EMAIL')
-      const allowlist = (Deno.env.get('PAYSLIP_EMAIL_ALLOWED_RECIPIENTS') ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)
-      if (!key || !from || !allowlist.length) return reply(202, { deliveryId, status: 'QUEUED', deliveryConfigured: false, message: 'Delivery is queued. Configure the server email provider and recipient allowlist to send.' }, origin)
+      if (!key || !from) return reply(202, { deliveryId, status: 'QUEUED', deliveryConfigured: false, message: 'Delivery is queued. Configure the server email provider and verified sender address to send.' }, origin)
       const { data: claimed, error: claimError } = await admin.rpc('payslip_email_claim', { p_delivery_id: deliveryId, p_actor_id: identity.user.id })
       if (claimError) throw claimError
       const job = object(claimed)
@@ -171,17 +217,15 @@ Deno.serve(async (request) => {
         return reply(200, { deliveryId, status: state?.status ?? 'UNKNOWN', deliveryConfigured: true }, origin)
       }
       const recipient = text(job.recipient_email).toLowerCase()
-      if (!allowlist.includes(recipient)) {
-        await admin.from('payslip_email_deliveries').update({ status: 'FAILED', last_error_code: 'RECIPIENT_NOT_ALLOWLISTED', updated_at: new Date().toISOString() }).eq('id', deliveryId)
-        return reply(403, { deliveryId, status: 'FAILED', error: 'This recipient is not in the configured delivery allowlist.' }, origin)
-      }
       try {
-        const { data: file, error: fileError } = await admin.storage.from('gb-payslips').download(text(job.storage_path))
-        if (fileError || !file) throw new Error('PDF_DOWNLOAD_FAILED')
-        const attachment = b64(new Uint8Array(await file.arrayBuffer()))
+        const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(text(job.storage_path), 86_400, { download: true })
+        if (signedError || !signed?.signedUrl) throw new Error('PRIVATE_PDF_LINK_FAILED')
+        const safeUrl = escapeHtml(signed.signedUrl)
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'Idempotency-Key': `gb-payslip-${deliveryId}` },
-          body: JSON.stringify({ from, to: [recipient], subject: 'Your finalized payslip', html: '<p>Your finalized payslip is attached as a secure PDF.</p><p>Golden Baobab HR</p>', attachments: [{ filename: 'payslip.pdf', content: attachment }] }),
+          body: JSON.stringify({ from, to: [recipient], subject: 'Your finalized payslip',
+            html: `<p>Your finalized payslip is ready.</p><p><a href="${safeUrl}">Open your private payslip PDF</a></p><p>This private link expires in 24 hours. Do not forward it.</p><p>Golden Baobab HR</p>`,
+            text: `Your finalized payslip is ready. Open the private PDF link: ${signed.signedUrl}\nThis link expires in 24 hours. Do not forward it.\nGolden Baobab HR` }),
         })
         if (!response.ok) throw new Error(`PROVIDER_HTTP_${response.status}`)
         const result = object(await response.json())
@@ -194,9 +238,18 @@ Deno.serve(async (request) => {
       }
     }
     return reply(400, { error: 'Unsupported payslip action.' }, origin)
-  } catch {
-    // Do not return provider details, database payloads, or private records.
-    console.error('Payslip operation failed')
-    return reply(400, { error: 'The payslip operation could not be completed under the current access and record state.' }, origin)
+  } catch (error) {
+    // Return only a fixed allow-listed error code; database/provider detail and
+    // employee/payroll data remain in the trusted logs and never reach clients.
+    const code = safeFailureCode(error)
+    console.error(`Payslip ${operation} failed (${code})`)
+    const userMessage = code === 'ISSUANCE_NOT_AUTHORIZED'
+      ? 'Your account does not have payslip issuance access for this company and branch.'
+      : code === 'FINALIZED_PAYROLL_NOT_FOUND'
+        ? 'This payroll run has no finalized payslip for the selected employee.'
+        : code === 'IMMUTABLE_DOCUMENT_CONFLICT'
+          ? 'A payslip already exists for this finalized payroll version and could not be replaced.'
+          : 'The secure payslip operation could not be completed. Check the service configuration or contact an administrator.'
+    return reply(code === 'ISSUANCE_NOT_AUTHORIZED' ? 403 : 400, { code, error: userMessage }, origin)
   }
 })

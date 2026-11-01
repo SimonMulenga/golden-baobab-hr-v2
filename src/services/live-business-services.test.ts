@@ -60,6 +60,14 @@ describe('live Supabase business service adapter', () => {
     expect(delivery).not.toHaveProperty('recipient_email')
   })
 
+  it('loads period-scoped leave and advance balances through the payroll-view RPC', async () => {
+    const details = { leave: { monthly_entitlement_days: 2, balance_days: 3, policies: [] }, deductions: [] }
+    const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: details, error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.payslips.statementDetails('run-final', 'employee-1')).resolves.toEqual(details)
+    expect(rpc).toHaveBeenCalledWith('payslip_statement_details', { p_payroll_run_id: 'run-final', p_employee_id: 'employee-1' })
+  })
+
   it('filters and paginates payroll runs using the live scoped table query', async () => {
     const range = vi.fn(async () => ({ data: [{ id: 'run-26' }], count: 26, error: null }))
     const filters = vi.fn()

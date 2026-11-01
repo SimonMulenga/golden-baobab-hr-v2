@@ -5,6 +5,7 @@ param(
   [int]$ExpectedMigrationCount = 48,
   [switch]$ValidateMigration050,
   [switch]$ValidateMigration051,
+  [switch]$ValidateMigration052,
   [int]$Port = 55432
 )
 
@@ -20,6 +21,7 @@ $manifestPath = Join-Path $backupRoot "$archiveStem-manifest.json"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $migration050 = Join-Path $repoRoot 'supabase\migrations\20261101005000_employee_review_and_user_assignment_lifecycle.sql'
 $migration051 = Join-Path $repoRoot 'supabase\migrations\20261101005100_overall_hr_payroll_approval_scope.sql'
+$migration052 = Join-Path $repoRoot 'supabase\migrations\20261101005200_payslip_statement_details_and_delivery.sql'
 $workflowTest050 = Join-Path $repoRoot 'supabase\tests\rls\hr_payroll_workflows.test.sql'
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $workRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'GoldenBaobab\restore-validation') "local-pg18-$runId"
@@ -286,6 +288,38 @@ reset role;
       if ($permissionOutput -notcontains $expected) { throw "Migration 051 isolated security check failed: $expected. See $workRoot\m051-permissions.out" }
     }
     Write-Output 'ISOLATED_M051_VALIDATED migration 051 applied to the restored local copy; function grants, scoped Overall HR gate, and unauthenticated denial passed.'
+  }
+
+  if ($ValidateMigration052) {
+    $baselineThrough050 = $ValidateMigration051 -and $ExpectedLatestMigration -eq '20261101005000' -and $ExpectedMigrationCount -eq 50
+    $baselineThrough051 = -not $ValidateMigration051 -and $ExpectedLatestMigration -eq '20261101005100' -and $ExpectedMigrationCount -eq 51
+    if (-not ($baselineThrough050 -or $baselineThrough051)) {
+      throw 'Migration 052 validation requires either a baseline through 050 plus sequential validation of 051, or a verified baseline already through 051.'
+    }
+    if (-not (Test-Path -LiteralPath $migration052 -PathType Leaf)) { throw 'Migration 052 isolated-validation input is missing.' }
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration052) 'migration 052 isolated application' 60 (Join-Path $workRoot 'm052-apply') | Out-Null
+    $statementChecks = @"
+select 'statement_function|' || count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='payslip_statement_details' and pg_get_function_identity_arguments(p.oid)='p_payroll_run_id uuid, p_employee_id uuid';
+select 'authenticated_execute|' || has_function_privilege('authenticated','public.payslip_statement_details(uuid,uuid)','EXECUTE');
+select 'anon_execute|' || has_function_privilege('anon','public.payslip_statement_details(uuid,uuid)','EXECUTE');
+select 'private_helper_authenticated_execute|' || has_function_privilege('authenticated','app_private.payslip_financial_details(uuid,uuid)','EXECUTE');
+select 'payroll_view_gate|' || (position('payroll.view' in pg_get_functiondef(p.oid)) > 0 and position('FINALIZED' in pg_get_functiondef(p.oid)) > 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='payslip_statement_details';
+select 'period_scoped_details|' || (position('v_period_end' in pg_get_functiondef(p.oid)) > 0 and position('deduction_transactions' in pg_get_functiondef(p.oid)) > 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='app_private' and p.proname='payslip_financial_details';
+set role authenticated;
+select set_config('request.jwt.claim.sub','',false);
+do `$gb$ begin
+  perform public.payslip_statement_details(null, null);
+  raise exception 'Unauthenticated payslip statement access unexpectedly succeeded';
+exception when sqlstate '42501' then null;
+end `$gb$;
+reset role;
+"@
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',$statementChecks) 'migration 052 permission and isolation checks' 20 (Join-Path $workRoot 'm052-checks') | Out-Null
+    $statementOutput = Get-Content -LiteralPath (Join-Path $workRoot 'm052-checks.out')
+    foreach ($expected in @('statement_function|1','authenticated_execute|true','anon_execute|false','private_helper_authenticated_execute|false','payroll_view_gate|true','period_scoped_details|true')) {
+      if ($statementOutput -notcontains $expected) { throw "Migration 052 isolated security check failed: $expected. See $workRoot\m052-checks.out" }
+    }
+    Write-Output 'ISOLATED_M052_VALIDATED migration 052 applied after 051 to the restored local copy; scoped grants, private helper, finalized/payroll-view checks, period-scoped balances, and unauthenticated denial passed.'
   }
 
   $validationSql = @"

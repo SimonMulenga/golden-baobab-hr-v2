@@ -1,11 +1,13 @@
 import type { Company, Branch } from '../companies/types'
-import type { EmployeeDirectoryRecord, FinalizedPayslipItemRecord, FinalizedPayslipRunRecord } from '../../services/live-business-services'
+import type { EmployeeDirectoryRecord, FinalizedPayslipItemRecord, FinalizedPayslipRunRecord, PayslipStatementDetails } from '../../services/live-business-services'
 
 export type PayslipLine = { label: string; amount: number; detail?: string; memoOnly?: boolean }
 export type PayslipViewModel = {
   reference: string; companyName: string; companyMark: string; companyAddress: string;
   employeeName: string; employeeNumber: string; jobTitle: string; department: string; branchName: string;
   periodLabel: string; earnings: PayslipLine[]; deductions: PayslipLine[];
+  leavePolicies: Array<{ leaveType: string; monthlyEntitlementDays: number; balanceDays: number }>;
+  advanceBalances: Array<{ description: string; deductionType: string; totalAmount: number; amountRecovered: number; balance: number }>;
   gross: number; totalDeductions: number; net: number;
 }
 
@@ -21,8 +23,9 @@ const monthLabel = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateS
 export function buildPayslipView(input: {
   company: Company; branch?: Branch; employee: EmployeeDirectoryRecord;
   run: FinalizedPayslipRunRecord; item: FinalizedPayslipItemRecord;
+  statementDetails?: PayslipStatementDetails | null;
 }): PayslipViewModel {
-  const { company, branch, employee, run, item } = input
+  const { company, branch, employee, run, item, statementDetails } = input
   const breakdown = item.calculation_breakdown ?? {}
   const approvedEarnings = Array.isArray(breakdown.approved_earning_items)
     ? breakdown.approved_earning_items as Array<Record<string, unknown>> : []
@@ -74,6 +77,18 @@ export function buildPayslipView(input: {
     employeeName: [employee.first_name, employee.middle_name, employee.last_name].filter(Boolean).join(' '),
     employeeNumber: employee.employee_number, jobTitle: employee.job_title, department: employee.department,
     branchName: branch?.name ?? 'Assigned branch', periodLabel: monthLabel(run.payroll_periods.period_start),
+    leavePolicies: (statementDetails?.leave?.policies ?? []).map((policy) => ({
+      leaveType: label(policy.leave_type) || 'Paid leave',
+      monthlyEntitlementDays: amount(policy.monthly_entitlement_days),
+      balanceDays: amount(policy.balance_days),
+    })),
+    advanceBalances: (statementDetails?.deductions ?? []).map((deduction) => ({
+      description: deduction.description || label(deduction.deduction_type) || 'Approved advance or loan',
+      deductionType: label(deduction.deduction_type) || 'Approved deduction',
+      totalAmount: amount(deduction.total_amount),
+      amountRecovered: amount(deduction.amount_recovered),
+      balance: amount(deduction.balance),
+    })),
     earnings, deductions, gross: amount(item.gross_pay),
     totalDeductions: (cents(amount(item.gross_pay)) - cents(amount(item.net_pay))) / 100,
     net: amount(item.net_pay),

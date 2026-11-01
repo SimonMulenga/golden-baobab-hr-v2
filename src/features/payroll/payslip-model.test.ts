@@ -48,4 +48,14 @@ describe('finalized payslip view model', () => {
     expect(result.earnings.find((line) => line.label === 'Unpaid leave adjustment')?.memoOnly).toBe(true)
     expect(result.totalDeductions).toBe(7017.15)
   })
+
+  it('shows monthly leave entitlement, period-end balance and an outstanding advance breakdown', () => {
+    const result = buildPayslipView({ company, employee, run, item, statementDetails: {
+      leave: { monthly_entitlement_days: 2, balance_days: 3, policies: [{ leave_type: 'ANNUAL_LEAVE', monthly_entitlement_days: 2, balance_days: 3 }] },
+      deductions: [{ description: '100025 Advance recovery', deduction_type: 'SALARY_ADVANCE', total_amount: 3000, amount_recovered: 2000, balance: 1000 }],
+    } })
+    expect(result.leavePolicies).toEqual([{ leaveType: 'Annual Leave', monthlyEntitlementDays: 2, balanceDays: 3 }])
+    expect(result.advanceBalances).toEqual([{ description: '100025 Advance recovery', deductionType: 'Salary Advance', totalAmount: 3000, amountRecovered: 2000, balance: 1000 }])
+    expect(result.net).toBe(item.net_pay)
+  })
 })
