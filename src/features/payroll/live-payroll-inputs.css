@@ -72,3 +72,68 @@
 .payroll-run-confirmation ul{display:grid;gap:8px;margin:0;padding-left:22px;color:var(--text-muted);font-size:14px;line-height:1.5}
 .payroll-run-confirmation footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
 @media(max-width:640px){.payroll-run-choice-actions{width:100%;display:grid}.payroll-run-choice-actions button{width:100%;min-height:46px}.payroll-run-confirmation{padding:18px}.payroll-run-confirmation footer{flex-direction:column-reverse}.payroll-run-confirmation footer button{width:100%;min-height:44px}}
+
+/* Keep payroll content inside the application column. Dense tables scroll only
+   inside their own frame; small screens get accessible expandable summaries. */
+.live-payroll-inputs,.live-payroll-inputs>*{min-width:0;max-width:100%;box-sizing:border-box}
+.live-payroll-inputs .live-inputs-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:14px}
+.live-payroll-inputs .live-inputs-filters label{min-width:0;width:100%}
+.live-payroll-inputs .live-inputs-filters select,.live-payroll-inputs .live-inputs-filters input{width:100%;min-width:0;max-width:100%}
+.live-payroll-inputs .live-inputs-filters button{min-width:0;white-space:normal}
+.live-payroll-inputs .live-inputs-summary>div{min-width:0}
+.live-payroll-inputs .live-inputs-summary strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.live-payroll-inputs .payroll-live-totals{grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr))}
+.live-payroll-inputs .live-inputs-table-wrap{width:100%;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-gutter:stable}
+.live-payroll-inputs .payroll-mobile-breakdown{display:none}
+.live-payroll-inputs .payroll-separation-note{flex:1 1 100%;margin:0;padding:12px 14px;border:1px solid #e6d7b6;border-radius:8px;background:color-mix(in srgb,#f6ead1 35%,var(--panel));color:var(--text-primary);font-size:14px;line-height:1.5}
+.live-payroll-inputs .payroll-live-run{min-width:0;overflow-wrap:anywhere}
+.live-payroll-inputs .payroll-live-run>span:last-child{white-space:nowrap;font-variant-numeric:tabular-nums}
+.live-payroll-inputs .live-earning-form>*{min-width:0}
+.live-payroll-inputs .live-earning-form input,.live-payroll-inputs .live-earning-form select{max-width:100%;min-width:0}
+
+@media(max-width:900px){
+  .live-payroll-inputs .live-inputs-filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .live-payroll-inputs .live-inputs-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-payroll-inputs .payroll-live-selected>header,.live-payroll-inputs .payroll-live-runs>header,.live-payroll-inputs .payroll-live-payout>header{align-items:flex-start}
+}
+@media(max-width:640px){
+  .live-payroll-inputs{gap:12px}
+  .live-payroll-inputs .live-inputs-note,.live-payroll-inputs .live-inputs-filters,.live-payroll-inputs .payroll-live-runs,.live-payroll-inputs .payroll-live-selected,.live-payroll-inputs .payroll-live-payout{padding:14px}
+  .live-payroll-inputs .live-inputs-filters{grid-template-columns:minmax(0,1fr);gap:10px}
+  .live-payroll-inputs .live-inputs-filters button{width:100%;min-height:44px;justify-content:center}
+  .live-payroll-inputs .live-inputs-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px}
+  .live-payroll-inputs .live-inputs-summary strong{font-size:14px;line-height:1.4}
+  .live-payroll-inputs .payroll-live-totals{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:12px}
+  .live-payroll-inputs .payroll-live-totals>div{padding:8px;min-width:0;border:1px solid var(--border);border-radius:7px}
+  .live-payroll-inputs .payroll-live-totals strong{font-size:14px}
+  .live-payroll-inputs .payroll-desktop-breakdown{display:none}
+  .live-payroll-inputs .payroll-mobile-breakdown{display:grid;gap:9px;min-width:0}
+  .live-payroll-inputs .payroll-mobile-card{min-width:0;border:1px solid var(--border);border-radius:9px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden}
+  .live-payroll-inputs .payroll-mobile-card>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;cursor:pointer;list-style:none}
+  .live-payroll-inputs .payroll-mobile-card>summary::-webkit-details-marker{display:none}
+  .live-payroll-inputs .payroll-mobile-card>summary:focus-visible{outline:2px solid #258779;outline-offset:-2px}
+  .live-payroll-inputs .payroll-mobile-card>summary>span{display:grid;min-width:0;gap:3px}
+  .live-payroll-inputs .payroll-mobile-card>summary>span:last-child{text-align:right;flex:none}
+  .live-payroll-inputs .payroll-mobile-card>summary strong{font-size:14px;line-height:1.35;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .live-payroll-inputs .payroll-mobile-card>summary small{font-size:12px;color:var(--text-muted);line-height:1.4}
+  .live-payroll-inputs .payroll-mobile-card>dl{display:grid;grid-template-columns:minmax(0,1fr);gap:0;margin:0;padding:0 13px 8px}
+  .live-payroll-inputs .payroll-mobile-card>dl>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);align-items:start;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+  .live-payroll-inputs .payroll-mobile-card dt{font-size:13px;color:var(--text-muted);line-height:1.4}
+  .live-payroll-inputs .payroll-mobile-card dd{display:grid;justify-items:end;gap:7px;margin:0;text-align:right;min-width:0;font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .live-payroll-inputs .payroll-mobile-card dd select{width:100%;max-width:190px;min-width:0;min-height:40px;padding:6px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit}
+  .live-payroll-inputs .payroll-mobile-card dd button{width:100%;max-width:190px;min-height:40px;justify-content:center;white-space:normal}
+  .live-payroll-inputs .payroll-mobile-warning dd{color:#8b5713}
+  .live-payroll-inputs .payroll-run-filters{align-items:stretch;flex-direction:column}
+  .live-payroll-inputs .payroll-run-filters select{width:100%;min-width:0}
+  .live-payroll-inputs .payroll-live-run-list{min-width:0}
+  .live-payroll-inputs .payroll-live-run{align-items:flex-start;padding:11px;gap:7px}
+  .live-payroll-inputs .payroll-live-run>span:last-child{font-size:12px}
+  .live-payroll-inputs .payroll-run-pagination button{min-height:42px;min-width:92px}
+  .live-payroll-inputs .live-earning-form{grid-template-columns:minmax(0,1fr);padding:12px}
+  .live-payroll-inputs .live-earning-list article{align-items:flex-start}
+  .live-payroll-inputs .payroll-live-actions{display:grid;grid-template-columns:minmax(0,1fr)}
+  .live-payroll-inputs .payroll-live-actions button{width:100%;min-height:44px;justify-content:center}
+  .live-payroll-inputs .payroll-live-selected>header,.live-payroll-inputs .payroll-live-runs>header,.live-payroll-inputs .payroll-live-payout>header{flex-direction:column}
+  .live-payroll-inputs .payroll-live-selected>header button,.live-payroll-inputs .payroll-live-payout>header button{width:100%;min-height:44px;justify-content:center}
+  .live-payroll-inputs .live-trial-history li{grid-template-columns:minmax(0,1fr);gap:4px;overflow-wrap:anywhere}
+}

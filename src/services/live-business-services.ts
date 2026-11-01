@@ -105,7 +105,7 @@ export type PayrollPreviewItem = {
 
 export type PayrollPreviewInputs = {
   portfolio_id: string; company_id: string; branch_id: string; period_start: string; period_end: string;
-  attendance_period_id: string; attendance_approved_at: string; items: PayrollPreviewItem[]; earning_inputs: PayrollEarningInputRecord[];
+  attendance_period_id: string; attendance_approved_at: string | null; items: PayrollPreviewItem[]; earning_inputs: PayrollEarningInputRecord[];
 };
 
 export type BranchWorkCalendarRecord = {

@@ -8,10 +8,10 @@ import '@testing-library/jest-dom/vitest'
 const mocks = vi.hoisted(() => ({
   previewInputs: vi.fn(), list: vi.fn(), byId: vi.fn(), createDraft: vi.fn(), calculate: vi.fn(), listCalculationHistory: vi.fn(),
   submitForApproval: vi.fn(), reviewSubmission: vi.fn(), finalize: vi.fn(), preparePayoutInstructions: vi.fn(), record: null as Record<string, unknown> | null,
-  createEarningInput: vi.fn(), createOvertimeInput: vi.fn(), reviewEarningInput: vi.fn(), setUnpaidLeaveMethod: vi.fn(),
+  createEarningInput: vi.fn(), createOvertimeInput: vi.fn(), reviewEarningInput: vi.fn(), setUnpaidLeaveMethod: vi.fn(), getUser: vi.fn(),
 }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payroll: mocks }) }))
-vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
+vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({ auth: { getUser: mocks.getUser } }) }))
 
 const company = { ...mockCompanies[0], id: 'company-1', portfolioId: 'portfolio-1', name: 'Synthetic Demo Company', branches: [{ ...mockCompanies[0].branches[0], id: 'branch-1', name: 'Lusaka Demo Branch' }] }
 const inputs = { portfolio_id: 'portfolio-1', company_id: 'company-1', branch_id: 'branch-1', period_start: '2026-10-01', period_end: '2026-10-31', attendance_period_id: 'attendance-1', attendance_approved_at: '2026-10-29T10:00:00Z', items: [{ employee_id: 'employee-1', employee_number: 'SYN-001', employee_name: 'Synthetic Employee', contract_type: 'PERMANENT', employment_type: 'PERMANENT', salary_frequency: 'MONTHLY', compensation_effective_from: '2026-01-01', basic_pay: 15092, housing_allowance: 3018.4, meal_allowance: 0, transport_allowance: 1509.2, other_allowances: 0, overtime_eligible: false, overtime_monthly_hours_divisor: 208 as const, allowance_tax_treatment: {}, attendance: { scheduled_working_days: 22, actual_days_worked: 20, paid_leave_days: 2, unpaid_leave_days: 0, other_payable_absence_days: 0 }, approved_leave_requests: [], due_approved_deductions: [], input_warnings: [] }] }
@@ -25,7 +25,7 @@ function renderScreen() {
 async function loadAndCreate() {
   fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
   fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-  await screen.findByText('Synthetic Employee')
+  await screen.findAllByText('Synthetic Employee')
   fireEvent.click(screen.getByRole('button', { name: 'Trial run · Save draft' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Yes, run trial' }))
   expect(await screen.findByText(/Trial run calculated and saved/i)).toBeInTheDocument()
@@ -49,6 +49,7 @@ describe('LIVE persistent payroll workflow', () => {
     mocks.createOvertimeInput.mockResolvedValue('overtime-1')
     mocks.reviewEarningInput.mockResolvedValue('earning-1')
     mocks.setUnpaidLeaveMethod.mockResolvedValue('compensation-2')
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'reviewer-1' } }, error: null })
     vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
@@ -67,7 +68,7 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    expect(await screen.findByText(/prorated over scheduled weekdays/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/prorated over scheduled weekdays/i)).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Trial run · Save draft' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Final run · Submit for approval' })).toBeDisabled()
     expect(screen.queryByText(/blocked until an approved partial-month pay rule is configured/i)).not.toBeInTheDocument()
@@ -111,11 +112,34 @@ describe('LIVE persistent payroll workflow', () => {
     expect(mocks.preparePayoutInstructions).toHaveBeenCalledWith('run-1')
   })
 
+  it('does not offer self-review and explains that an independent reviewer is required', async () => {
+    mocks.record = makeRun('SUBMITTED_FOR_APPROVAL', true)
+    mocks.list.mockResolvedValue({ items: [makeRun('SUBMITTED_FOR_APPROVAL', true)], total: 1 })
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'creator-1' } }, error: null })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
+    fireEvent.click(await screen.findByRole('button', { name: /SUBMITTED FOR APPROVAL/ }))
+    expect(await screen.findByText(/You prepared this payroll run\. Another authorized payroll reviewer must review it\./i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve and close period' })).not.toBeInTheDocument()
+  })
+
+  it('requires a calculated run to be submitted before approval is available', async () => {
+    mocks.record = makeRun('CALCULATED', true)
+    mocks.list.mockResolvedValue({ items: [makeRun('CALCULATED', true)], total: 1 })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
+    fireEvent.click(await screen.findByRole('button', { name: /CALCULATED/ }))
+    expect(await screen.findByRole('button', { name: 'Submit this version for approval' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
+  })
+
   it('does not invent a calculation when Supabase denies the request', async () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    await screen.findByText('Synthetic Employee')
+    await screen.findAllByText('Synthetic Employee')
     mocks.calculate.mockRejectedValue(new Error('permission denied'))
     fireEvent.click(screen.getByRole('button', { name: 'Trial run · Save draft' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Yes, run trial' }))
@@ -136,8 +160,26 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    expect(await screen.findByText(/No employees are ready for this period/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/No employees are ready for this period/i)).length).toBeGreaterThan(0)
     expect(screen.queryByText('Synthetic Employee')).not.toBeInTheDocument()
+  })
+
+  it('shows the date-only attendance period and never formats a null approval timestamp as 1970', async () => {
+    mocks.previewInputs.mockResolvedValue({ ...inputs, attendance_approved_at: null })
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
+    expect((await screen.findAllByText('01/10/2026 – 31/10/2026')).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/1970/)).not.toBeInTheDocument()
+  })
+
+  it('keeps payroll input controls and details available in the responsive disclosure view', async () => {
+    renderScreen()
+    fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
+    expect(await screen.findByRole('region', { name: 'Payroll input details' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Mobile overtime divisor for SYN-001')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mobile unpaid leave rule for SYN-001')).toBeInTheDocument()
   })
 
   it('shows the server-provided scheduled-day proration breakdown for partial-month pay', async () => {
@@ -149,9 +191,9 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    await screen.findByText('Synthetic Employee')
-    expect(screen.getByText('K2,250.00')).toBeInTheDocument()
-    expect(screen.getByText('Scheduled-day proration: 11 / 22 days')).toBeInTheDocument()
+    await screen.findAllByText('Synthetic Employee')
+    expect((await screen.findAllByText('K2,250.00')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Scheduled-day proration: 11 / 22 days')).length).toBeGreaterThan(0)
   })
 
   it('requires explicit reason for returned or rejected payroll', async () => {
@@ -168,7 +210,7 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    await screen.findByText('Synthetic Employee')
+    await screen.findAllByText('Synthetic Employee')
     fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'employee-1' } })
     fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'BONUS' } })
     fireEvent.change(screen.getByLabelText('Approved amount (ZMW)'), { target: { value: '500.00' } })
@@ -189,7 +231,7 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    await screen.findByText('Synthetic Employee')
+    await screen.findAllByText('Synthetic Employee')
     fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'employee-1' } })
     fireEvent.change(screen.getByLabelText('Work date'), { target: { value: '2026-10-20' } })
     fireEvent.change(screen.getByLabelText('Week starting'), { target: { value: '2026-10-19' } })
@@ -212,9 +254,9 @@ describe('LIVE persistent payroll workflow', () => {
     renderScreen()
     fireEvent.change(screen.getByLabelText('Payroll month'), { target: { value: '2026-10' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load payroll inputs' }))
-    await screen.findByText('Synthetic Employee')
+    await screen.findAllByText('Synthetic Employee')
     fireEvent.change(screen.getByLabelText('Unpaid leave rule for SYN-001'), { target: { value: 'BASIC_PER_SCHEDULED_WORKDAY' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save rule' })[0])
     expect(mocks.setUnpaidLeaveMethod).toHaveBeenCalled()
     expect(await screen.findByText(/saved as a new effective compensation version/i)).toBeInTheDocument()
     expect(mocks.setUnpaidLeaveMethod).toHaveBeenCalledWith('employee-1', '2026-10-01', 'BASIC_PER_SCHEDULED_WORKDAY')

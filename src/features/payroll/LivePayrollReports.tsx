@@ -47,15 +47,20 @@ export function LivePayrollReports({ mode = 'payroll' }: { mode?: ReportMode }) 
     if (!companyId) return
     let cancelled = false
     api().payslips.finalizedRuns(companyId, branchId === 'all' ? undefined : branchId)
-      .then((result) => { if (!cancelled) { setError(''); setRuns(result); setLoading(Boolean(result[0])); setRunId(result[0]?.id ?? '') } })
-      .catch(() => { if (!cancelled) { setRuns([]); setError('Finalized payroll is unavailable for your current reporting permissions.') } })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .then((result) => {
+        if (!cancelled) {
+          setError(''); setRuns(result); setRunId(result[0]?.id ?? '')
+          if (!result[0] || (result[0].id === runId && result[0].version === selectedRunVersion)) setLoading(false)
+        }
+      })
+      .catch(() => { if (!cancelled) { setRuns([]); setRunId(''); setLoading(false); setError('Finalized payroll is unavailable for your current reporting permissions.') } })
     return () => { cancelled = true }
   }, [companyId, branchId])
 
   useEffect(() => {
     if (!selectedRunId || selectedRunVersion == null) return
     let cancelled = false
+    setLoading(true); setItems([]); setEmployees([])
     api().payslips.finalizedItems(selectedRunId, selectedRunVersion, page)
       .then(async (result) => {
         const people = await api().employees.byIds(result.items.map((item) => item.employee_id))

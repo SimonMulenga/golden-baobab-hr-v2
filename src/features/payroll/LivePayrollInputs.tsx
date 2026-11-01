@@ -8,6 +8,8 @@ import './live-payroll-inputs.css'
 import { estimateOvertime, type OvertimeDayType, type OvertimeDivisor } from './overtime-calculation'
 import { payrollInputLoadGuidance, payrollWarningGuidance } from './payroll-input-guidance'
 import { isScheduledDayProrationConsistent } from './scheduled-day-proration'
+import { formatPayrollPeriodRange } from './payroll-period-display'
+import { payrollReviewGuidance } from './payroll-review-guidance'
 
 const currentMonth = new Date().toISOString().slice(0, 7)
 const monthStart = (month: string) => `${month}-01`
@@ -52,6 +54,8 @@ export function LivePayrollInputs() {
   const [runPage, setRunPage] = useState(1)
   const [runStatusFilter, setRunStatusFilter] = useState('')
   const [run, setRun] = useState<PayrollRunRecord | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserResolved, setCurrentUserResolved] = useState(false)
   const [calculation, setCalculation] = useState<PayrollCalculationSnapshot | null>(null)
   const [history, setHistory] = useState<PayrollCalculationHistoryEntry[]>([])
   const [payout, setPayout] = useState<PayrollPayoutInstructions | null>(null)
@@ -67,6 +71,24 @@ export function LivePayrollInputs() {
     if (company?.branches.some((item) => item.id === branchId)) return
     setBranchId(company?.branches[0]?.id ?? '')
   }, [companyId, company, branchId])
+
+  useEffect(() => {
+    let active = true
+    try {
+      const auth = getSupabaseClient().auth
+      if (!auth?.getUser) { setCurrentUserResolved(true); return () => { active = false } }
+      void auth.getUser().then(({ data, error: authError }) => {
+        if (!active) return
+        if (!authError) setCurrentUserId(data.user?.id ?? null)
+        setCurrentUserResolved(true)
+      }).catch(() => {
+        if (active) { setCurrentUserId(null); setCurrentUserResolved(true) }
+      })
+    } catch {
+      setCurrentUserId(null); setCurrentUserResolved(true)
+    }
+    return () => { active = false }
+  }, [])
 
   const services = () => createLiveBusinessServices(getSupabaseClient())
   const refreshRuns = async () => {
@@ -254,7 +276,14 @@ export function LivePayrollInputs() {
         setMonth(next); setInputs(null); setEarningInputs([])
         setNotice(`Payroll approved. ${month} is closed to changes and ${next} is selected for the next run. Finalization remains a separate authorized step.`)
       } else setNotice(action === 'START_REVIEW' ? 'Review started for this exact payroll version.' : `Payroll ${action.toLowerCase().replaceAll('_', ' ')} recorded.`)
-    } catch { setError('Review action was denied or failed. The server enforces separation of duties, role permissions and version matching.') }
+    } catch (reviewError) {
+      let latestRun: PayrollRunRecord | null = null
+      try {
+        latestRun = await services().payroll.byId(run.id)
+        setRun(latestRun)
+      } catch { /* Keep the current run visible; the server remains authoritative. */ }
+      setError(payrollReviewGuidance(run, currentUserId, latestRun, reviewError))
+    }
     finally { setTransitioning(false) }
   }
   const finalize = async () => {
@@ -310,11 +339,27 @@ export function LivePayrollInputs() {
     {error && <div className="panel live-inputs-error" role="alert">{error}</div>}
     {notice && <div className="panel live-inputs-note" role="status"><strong>{notice}</strong>{run && <span>Run reference: {run.id} · {run.status} · version {run.version}</span>}</div>}
     {inputs && <>
-      <div className="panel live-inputs-summary"><div><small>Attendance period</small><strong>{formatWorkspaceDateTime(inputs.attendance_approved_at, preferences)}</strong></div><div><small>Employees ready for payroll</small><strong>{inputs.items.length}</strong></div><div><small>Items to resolve</small><strong>{inputs.items.reduce((sum, item) => sum + item.input_warnings.length, 0)}</strong></div></div>
-      <div className="panel live-inputs-table-wrap"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Frequency</th><th>Basic pay</th><th>Allowances</th><th>Worked / scheduled</th><th>Paid / unpaid leave</th><th>Overtime basis</th><th>Unpaid leave method</th><th>Due deductions</th></tr></thead><tbody>
+      <div className="panel live-inputs-summary"><div><small>Attendance period</small><strong>{formatPayrollPeriodRange(inputs.period_start, inputs.period_end, preferences)}</strong></div><div><small>Employees ready for payroll</small><strong>{inputs.items.length}</strong></div><div><small>Items to resolve</small><strong>{inputs.items.reduce((sum, item) => sum + item.input_warnings.length, 0)}</strong></div></div>
+      <div className="panel live-inputs-table-wrap payroll-desktop-breakdown"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Frequency</th><th>Basic pay</th><th>Allowances</th><th>Worked / scheduled</th><th>Paid / unpaid leave</th><th>Overtime basis</th><th>Unpaid leave method</th><th>Due deductions</th></tr></thead><tbody>
         {inputs.items.map((item) => <tr key={item.employee_id}><td><strong>{item.employee_name}</strong><small>{item.employee_number} · {item.contract_type}</small></td><td>{item.salary_frequency ?? 'Missing'}</td><td>{money(item.basic_pay)}{item.basic_salary_proration && <small>Scheduled-day proration: {item.basic_salary_proration.eligible_scheduled_days ?? 0} / {item.basic_salary_proration.total_scheduled_days ?? 0} days</small>}</td><td>{money((item.housing_allowance ?? 0) + (item.meal_allowance ?? 0) + (item.transport_allowance ?? 0) + (item.other_allowances ?? 0))}</td><td>{item.attendance ? `${item.attendance.actual_days_worked} / ${item.attendance.scheduled_working_days}` : 'Missing'}</td><td>{item.attendance ? `${item.attendance.paid_leave_days} / ${item.attendance.unpaid_leave_days}` : 'Missing'}</td><td><select aria-label={`Overtime divisor for ${item.employee_number}`} value={overtimeDivisors[item.employee_id] ?? 208} onChange={(event) => setOvertimeDivisors((current) => ({ ...current, [item.employee_id]: Number(event.target.value) as OvertimeDivisor }))}><option value={208}>208 · Act full-time</option><option value={176}>176 · five-day schedule</option><option value={240}>240 · watchperson/guard</option></select><button className="secondary-button" type="button" disabled={transitioning} onClick={() => void saveOvertimeDivisor(item)}>Save overtime basis</button></td><td><select aria-label={`Unpaid leave rule for ${item.employee_number}`} value={unpaidMethods[item.employee_id] ?? 'BLOCK'} onChange={(event) => setUnpaidMethods((current) => ({ ...current, [item.employee_id]: event.target.value as PayrollPreviewItem['unpaid_leave_deduction_method'] }))}><option value="BLOCK">HR review required</option><option value="BASIC_PER_SCHEDULED_WORKDAY">Basic / scheduled day</option><option value="GROSS_PER_SCHEDULED_WORKDAY">Recurring gross / scheduled day</option></select><button className="secondary-button" type="button" disabled={transitioning || !item.attendance?.unpaid_leave_days} onClick={() => void saveUnpaidMethod(item)}>Save rule</button></td><td>{money(item.due_approved_deductions.reduce((sum, deduction) => sum + Number(deduction.scheduled_amount), 0))}</td></tr>)}
         {inputs.items.length === 0 && <tr><td colSpan={9} className="empty-row">No employees are ready for this period. Confirm employee onboarding is approved and active, compensation covers eligible scheduled workdays, and attendance has been approved.</td></tr>}
       </tbody></table></div>
+      <div className="payroll-mobile-breakdown" role="region" aria-label="Payroll input details">
+        {inputs.items.map((item) => <details className="payroll-mobile-card" key={item.employee_id}>
+          <summary><span><strong>{item.employee_name}</strong><small>{item.employee_number} · {item.contract_type}</small></span><span><small>Basic pay</small><strong>{money(item.basic_pay)}</strong></span></summary>
+          <dl>
+            <div><dt>Frequency</dt><dd>{item.salary_frequency ?? 'Missing'}</dd></div>
+            <div><dt>Allowances</dt><dd>{money((item.housing_allowance ?? 0) + (item.meal_allowance ?? 0) + (item.transport_allowance ?? 0) + (item.other_allowances ?? 0))}</dd></div>
+            <div><dt>Worked / scheduled</dt><dd>{item.attendance ? `${item.attendance.actual_days_worked} / ${item.attendance.scheduled_working_days}` : 'Missing'}</dd></div>
+            <div><dt>Paid / unpaid leave</dt><dd>{item.attendance ? `${item.attendance.paid_leave_days} / ${item.attendance.unpaid_leave_days}` : 'Missing'}</dd></div>
+            <div><dt>Overtime basis</dt><dd><select aria-label={`Mobile overtime divisor for ${item.employee_number}`} value={overtimeDivisors[item.employee_id] ?? 208} onChange={(event) => setOvertimeDivisors((current) => ({ ...current, [item.employee_id]: Number(event.target.value) as OvertimeDivisor }))}><option value={208}>208 · Act full-time</option><option value={176}>176 · five-day schedule</option><option value={240}>240 · watchperson/guard</option></select><button className="secondary-button" type="button" disabled={transitioning} onClick={() => void saveOvertimeDivisor(item)}>Save overtime basis</button></dd></div>
+            <div><dt>Unpaid leave method</dt><dd><select aria-label={`Mobile unpaid leave rule for ${item.employee_number}`} value={unpaidMethods[item.employee_id] ?? 'BLOCK'} onChange={(event) => setUnpaidMethods((current) => ({ ...current, [item.employee_id]: event.target.value as PayrollPreviewItem['unpaid_leave_deduction_method'] }))}><option value="BLOCK">HR review required</option><option value="BASIC_PER_SCHEDULED_WORKDAY">Basic / scheduled day</option><option value="GROSS_PER_SCHEDULED_WORKDAY">Recurring gross / scheduled day</option></select><button className="secondary-button" type="button" disabled={transitioning || !item.attendance?.unpaid_leave_days} onClick={() => void saveUnpaidMethod(item)}>Save rule</button></dd></div>
+            <div><dt>Due deductions</dt><dd>{money(item.due_approved_deductions.reduce((sum, deduction) => sum + Number(deduction.scheduled_amount), 0))}</dd></div>
+            {item.input_warnings.map((warning) => <div className="payroll-mobile-warning" key={warning}><dt>Readiness</dt><dd>{payrollWarningGuidance(warning)}</dd></div>)}
+          </dl>
+        </details>)}
+        {inputs.items.length === 0 && <p className="payroll-live-empty">No employees are ready for this period. Confirm onboarding, compensation, attendance and leave entries before running payroll.</p>}
+      </div>
       <section className="panel live-payroll-earnings"><header><div><div className="section-eyebrow">PERIOD EARNINGS</div><h2>Overtime, bonus and other earnings</h2><p>Overtime uses the employee’s approved basic pay. Ordinary overtime starts after 48 hours (60 for watchpersons); rest-day and public-holiday work qualifies at double time only outside the normal working week.</p></div></header>
         <form className="live-earning-form" onSubmit={(event) => void createEarning(event)}>
           <label>Employee<select required value={earningEmployeeId} onChange={(event) => setEarningEmployeeId(event.target.value)}><option value="">Select employee</option>{inputs.items.map((item) => <option key={item.employee_id} value={item.employee_id}>{item.employee_number} · {item.employee_name}</option>)}</select></label>
@@ -349,12 +394,38 @@ export function LivePayrollInputs() {
     {run && <section className="panel payroll-live-selected"><header><div><div className="section-eyebrow">{run.status.replaceAll('_',' ')}</div><h2>Payroll run</h2><p>{run.id} · calculation version {run.version}</p></div>{['DRAFT','CALCULATED','RETURNED_FOR_CORRECTION'].includes(run.status) && <button className="primary-button" type="button" disabled={calculating} onClick={() => void calculate()}>{calculating ? 'Calculating…' : calculation ? 'Recalculate payroll' : 'Calculate payroll'}</button>}</header>
       {calculation && <>
         <div className="panel live-inputs-summary payroll-live-totals"><div><small>Employees</small><strong>{calculation.totals.employee_count}</strong></div><div><small>Gross pay</small><strong>{money(calculation.totals.gross_earnings)}</strong></div><div><small>PAYE</small><strong>{money(calculation.totals.paye)}</strong></div><div><small>Employee NAPSA</small><strong>{money(calculation.totals.napsa_employee)}</strong></div><div><small>Employer NAPSA</small><strong>{money(calculation.totals.napsa_employer)}</strong></div><div><small>Employee NHIMA</small><strong>{money(calculation.totals.nhima_employee)}</strong></div><div><small>Employer NHIMA</small><strong>{money(calculation.totals.nhima_employer)}</strong></div><div><small>Net pay</small><strong>{money(calculation.totals.net_pay)}</strong></div><div><small>Total employer cost</small><strong>{money(calculation.totals.total_employer_cost)}</strong></div></div>
-        <div className="panel live-inputs-table-wrap"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Basic (adjusted)</th><th>Taxable allowances</th><th>Overtime</th><th>Bonus / other earnings</th><th>Gross</th><th>Taxable income</th><th>PAYE</th><th>NAPSA EE / ER</th><th>NHIMA EE / ER</th><th>Unpaid-leave adjustment</th><th>Approved deductions</th><th>Net pay</th><th>Employer cost</th></tr></thead><tbody>{calculation.items.map((item) => <tr key={item.employee_id}><td><strong>{item.employee_name}</strong><small>{item.employee_number}</small></td><td>{money(item.basic_salary)}</td><td>{money(item.taxable_allowances)}</td><td>{money(item.overtime)}</td><td>{money(item.bonuses_and_other_earnings)}</td><td>{money(item.gross_earnings)}</td><td>{money(item.paye_taxable_income)}</td><td>{money(item.paye)}</td><td>{money(item.napsa_employee)} / {money(item.napsa_employer)}</td><td>{money(item.nhima_employee)} / {money(item.nhima_employer)}</td><td>{money(item.attendance_deduction)}</td><td>{money(item.other_approved_deductions)}</td><td>{money(item.net_pay)}</td><td>{money(item.total_employer_cost)}</td></tr>)}</tbody></table></div>
+        <div className="panel live-inputs-table-wrap payroll-desktop-breakdown"><table className="live-inputs-table"><thead><tr><th>Employee</th><th>Basic (adjusted)</th><th>Taxable allowances</th><th>Overtime</th><th>Bonus / other earnings</th><th>Gross</th><th>Taxable income</th><th>PAYE</th><th>NAPSA EE / ER</th><th>NHIMA EE / ER</th><th>Unpaid-leave adjustment</th><th>Approved deductions</th><th>Net pay</th><th>Employer cost</th></tr></thead><tbody>{calculation.items.map((item) => <tr key={item.employee_id}><td><strong>{item.employee_name}</strong><small>{item.employee_number}</small></td><td>{money(item.basic_salary)}</td><td>{money(item.taxable_allowances)}</td><td>{money(item.overtime)}</td><td>{money(item.bonuses_and_other_earnings)}</td><td>{money(item.gross_earnings)}</td><td>{money(item.paye_taxable_income)}</td><td>{money(item.paye)}</td><td>{money(item.napsa_employee)} / {money(item.napsa_employer)}</td><td>{money(item.nhima_employee)} / {money(item.nhima_employer)}</td><td>{money(item.attendance_deduction)}</td><td>{money(item.other_approved_deductions)}</td><td>{money(item.net_pay)}</td><td>{money(item.total_employer_cost)}</td></tr>)}</tbody></table></div>
+        <div className="payroll-mobile-breakdown" role="region" aria-label="Payroll calculation details">
+          {calculation.items.map((item) => <details className="payroll-mobile-card" key={item.employee_id}>
+            <summary><span><strong>{item.employee_name}</strong><small>{item.employee_number} · Payroll calculation</small></span><span><small>Net pay</small><strong>{money(item.net_pay)}</strong></span></summary>
+            <dl>
+              <div><dt>Basic pay</dt><dd>{money(item.basic_salary)}</dd></div><div><dt>Taxable allowances</dt><dd>{money(item.taxable_allowances)}</dd></div>
+              <div><dt>Overtime</dt><dd>{money(item.overtime)}</dd></div><div><dt>Bonus / other earnings</dt><dd>{money(item.bonuses_and_other_earnings)}</dd></div>
+              <div><dt>Gross pay</dt><dd>{money(item.gross_earnings)}</dd></div><div><dt>Taxable income</dt><dd>{money(item.paye_taxable_income)}</dd></div>
+              <div><dt>PAYE</dt><dd>{money(item.paye)}</dd></div><div><dt>Employee NAPSA</dt><dd>{money(item.napsa_employee)}</dd></div>
+              <div><dt>Employer NAPSA</dt><dd>{money(item.napsa_employer)}</dd></div><div><dt>Employee NHIMA</dt><dd>{money(item.nhima_employee)}</dd></div>
+              <div><dt>Employer NHIMA</dt><dd>{money(item.nhima_employer)}</dd></div><div><dt>Unpaid-leave adjustment</dt><dd>{money(item.attendance_deduction)}</dd></div>
+              <div><dt>Approved deductions</dt><dd>{money(item.other_approved_deductions)}</dd></div><div><dt>Employer cost</dt><dd>{money(item.total_employer_cost)}</dd></div>
+            </dl>
+          </details>)}
+        </div>
         <p className="live-trial-footnote">Calculated using the approved Zambia payroll rules for this period. Values are rounded to two decimal places.</p>
         <div className="payroll-live-actions">
           {run.status === 'CALCULATED' && <button className="primary-button" disabled={transitioning} onClick={() => void submit()}><Send size={14}/> Submit this version for approval</button>}
-          {run.status === 'SUBMITTED_FOR_APPROVAL' && <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve and close period</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button></>}
-          {run.status === 'UNDER_REVIEW' && <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve version {run.version}</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll for correction'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for rejecting this payroll'); if (reason?.trim()) void review('REJECT', reason) }}>Reject</button></>}
+          {run.status === 'SUBMITTED_FOR_APPROVAL' && (!currentUserResolved
+            ? <p className="payroll-separation-note" role="status">Checking reviewer access…</p>
+            : currentUserId && run.created_by === currentUserId
+              ? <p className="payroll-separation-note" role="status">You prepared this payroll run. Another authorized payroll reviewer must review it.</p>
+              : !currentUserId
+                ? <p className="payroll-separation-note" role="status">Your signed-in account could not be confirmed. Refresh your session before reviewing payroll.</p>
+                : <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve and close period</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button></>)}
+          {run.status === 'UNDER_REVIEW' && (!currentUserResolved
+            ? <p className="payroll-separation-note" role="status">Checking reviewer access…</p>
+            : currentUserId && run.created_by === currentUserId
+              ? <p className="payroll-separation-note" role="status">You prepared this payroll run. Another authorized payroll reviewer must review it.</p>
+              : !currentUserId
+                ? <p className="payroll-separation-note" role="status">Your signed-in account could not be confirmed. Refresh your session before reviewing payroll.</p>
+                : <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve version {run.version}</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll for correction'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for rejecting this payroll'); if (reason?.trim()) void review('REJECT', reason) }}>Reject</button></>)}
           {run.status === 'APPROVED' && <button className="primary-button" disabled={transitioning} onClick={() => void finalize()}><Check size={14}/> Finalize approved version</button>}
           {run.status === 'FINALIZED' && <button className="primary-button" disabled={transitioning} onClick={() => void preparePayout()}><CircleDollarSign size={14}/> Prepare payout instructions</button>}
         </div>
