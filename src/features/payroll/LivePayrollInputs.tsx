@@ -28,7 +28,7 @@ const csvCell = (value: unknown) => {
   return `"${text.replaceAll('"', '""')}"`
 }
 
-export function LivePayrollInputs() {
+export function LivePayrollInputs({ allowOwnApproval = false }: { allowOwnApproval?: boolean }) {
   const { companies, preferences } = useWorkspace()
   const { companyId, company, setCompanyId } = useCompanySelection()
   const [branchId, setBranchId] = useState(company?.branches[0]?.id ?? '')
@@ -228,7 +228,8 @@ export function LivePayrollInputs() {
         await services().payroll.submitForApproval(id)
         await selectRun(id)
         await refreshRuns()
-        setNotice('Final run submitted for independent HR review. The period remains locked after approval; payroll finalization is a separate authorized step.')
+        window.dispatchEvent(new Event('gbhr-payroll-approvals-changed'))
+        setNotice('Final run submitted for HR approval. An Overall HR Manager can approve within their authorized portfolio; finalization remains a separate authorized step.')
       } else {
         await selectRun(id)
         await refreshRuns()
@@ -261,7 +262,8 @@ export function LivePayrollInputs() {
     try {
       await services().payroll.submitForApproval(run.id)
       await selectRun(run.id); await refreshRuns()
-      setNotice('Payroll submitted. An independent payroll reviewer must review this version.')
+      window.dispatchEvent(new Event('gbhr-payroll-approvals-changed'))
+      setNotice('Payroll submitted for approval. An Overall HR Manager or another authorized payroll approver can review this version.')
     } catch { setError('Submission was denied or failed. Confirm this user created the run and the calculated version is still open.') }
     finally { setTransitioning(false) }
   }
@@ -271,6 +273,7 @@ export function LivePayrollInputs() {
     try {
       await services().payroll.reviewSubmission(run.id, action, run.version, reason)
       await selectRun(run.id); await refreshRuns()
+      window.dispatchEvent(new Event('gbhr-payroll-approvals-changed'))
       if (action === 'APPROVE') {
         const next = followingMonth(month)
         setMonth(next); setInputs(null); setEarningInputs([])
@@ -282,7 +285,7 @@ export function LivePayrollInputs() {
         latestRun = await services().payroll.byId(run.id)
         setRun(latestRun)
       } catch { /* Keep the current run visible; the server remains authoritative. */ }
-      setError(payrollReviewGuidance(run, currentUserId, latestRun, reviewError))
+      setError(payrollReviewGuidance(run, currentUserId, latestRun, reviewError, allowOwnApproval))
     }
     finally { setTransitioning(false) }
   }
@@ -332,9 +335,9 @@ export function LivePayrollInputs() {
         {(company?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
       <label>Payroll month<input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setInputs(null); setRun(null); setCalculation(null); setPayout(null) }} /></label>
-      <button className="secondary-button" type="button" disabled={busy || !companyId || !branchId} onClick={() => void load()}>{busy ? <RefreshCw size={15} className="spin"/> : <FileCheck2 size={15}/>} Load payroll inputs</button>
-      <button className="secondary-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('TRIAL')}>Trial run · Save draft</button>
-      <button className="primary-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('FINAL')}>Final run · Submit for approval</button>
+      <button className="secondary-button payroll-action-button" type="button" disabled={busy || !companyId || !branchId} onClick={() => void load()}>{busy ? <RefreshCw size={15} className="spin"/> : <FileCheck2 size={15}/>} Load payroll inputs</button>
+      <button className="secondary-button payroll-action-button payroll-trial-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('TRIAL')}>Trial run · Save draft</button>
+      <button className="primary-button payroll-action-button payroll-submit-button" type="button" disabled={busy || creating || calculating || transitioning || !companyId || !branchId || inputsHaveWarnings} onClick={() => setRunConfirmation('FINAL')}>Final run · Submit for approval</button>
     </section>
     {error && <div className="panel live-inputs-error" role="alert">{error}</div>}
     {notice && <div className="panel live-inputs-note" role="status"><strong>{notice}</strong>{run && <span>Run reference: {run.id} · {run.status} · version {run.version}</span>}</div>}
@@ -414,14 +417,14 @@ export function LivePayrollInputs() {
           {run.status === 'CALCULATED' && <button className="primary-button" disabled={transitioning} onClick={() => void submit()}><Send size={14}/> Submit this version for approval</button>}
           {run.status === 'SUBMITTED_FOR_APPROVAL' && (!currentUserResolved
             ? <p className="payroll-separation-note" role="status">Checking reviewer access…</p>
-            : currentUserId && run.created_by === currentUserId
+            : currentUserId && run.created_by === currentUserId && !allowOwnApproval
               ? <p className="payroll-separation-note" role="status">You prepared this payroll run. Another authorized payroll reviewer must review it.</p>
               : !currentUserId
                 ? <p className="payroll-separation-note" role="status">Your signed-in account could not be confirmed. Refresh your session before reviewing payroll.</p>
                 : <><button className="primary-button" disabled={transitioning} onClick={() => void review('APPROVE')}><Check size={14}/> Approve and close period</button><button className="secondary-button" disabled={transitioning} onClick={() => { const reason = window.prompt('Reason for returning this payroll'); if (reason?.trim()) void review('RETURN', reason) }}>Return for correction</button></>)}
           {run.status === 'UNDER_REVIEW' && (!currentUserResolved
             ? <p className="payroll-separation-note" role="status">Checking reviewer access…</p>
-            : currentUserId && run.created_by === currentUserId
+            : currentUserId && run.created_by === currentUserId && !allowOwnApproval
               ? <p className="payroll-separation-note" role="status">You prepared this payroll run. Another authorized payroll reviewer must review it.</p>
               : !currentUserId
                 ? <p className="payroll-separation-note" role="status">Your signed-in account could not be confirmed. Refresh your session before reviewing payroll.</p>

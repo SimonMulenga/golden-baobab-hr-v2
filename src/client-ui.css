@@ -139,6 +139,41 @@ body {
   font-size: 14px;
 }
 
+.app-shell main button.primary-button,
+.app-shell main button.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-weight: 700;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.app-shell main button.primary-button {
+  color: #fff;
+  background: #16786c;
+  border-color: #12675d;
+  box-shadow: 0 2px 5px #0b544b24;
+}
+.app-shell main button.primary-button:hover:not(:disabled) { background: #105f55; box-shadow: 0 3px 8px #0b544b35; }
+.app-shell main button.secondary-button {
+  color: #155e55;
+  background: #e9f4f1;
+  border-color: #a9d0c8;
+}
+.app-shell main button.secondary-button:hover:not(:disabled) { background: #dceee9; border-color: #79b5a9; }
+.dark .app-shell main button.secondary-button { color: #c5e9df; background: #203a35; border-color: #42685f; }
+.dark .app-shell main button.secondary-button:hover:not(:disabled) { background: #294a42; }
+.app-shell main button.primary-button:focus-visible,
+.app-shell main button.secondary-button:focus-visible { outline: 3px solid #e0b858; outline-offset: 2px; }
+.app-shell main button.primary-button:disabled,
+.app-shell main button.secondary-button:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+
 .app-shell .metric-label {
   font-size: 15px;
   line-height: 1.4;

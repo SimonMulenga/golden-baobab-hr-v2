@@ -12,6 +12,10 @@ describe('payroll review guidance', () => {
     expect(payrollReviewGuidance(run('SUBMITTED_FOR_APPROVAL'), 'preparer')).toMatch(/another authorized payroll reviewer/i)
   })
 
+  it('does not mislabel an Overall HR self-approval failure as a separation-of-duties denial', () => {
+    expect(payrollReviewGuidance(run('SUBMITTED_FOR_APPROVAL'), 'preparer', null, { code: '42501' }, true)).toMatch(/does not have permission/i)
+  })
+
   it('requires submission before a calculated run can be approved', () => {
     expect(payrollReviewGuidance(run('CALCULATED'), 'reviewer')).toMatch(/submit this payroll run for approval/i)
   })

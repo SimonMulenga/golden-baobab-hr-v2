@@ -79,6 +79,21 @@ describe('live Supabase business service adapter', () => {
     expect(range).toHaveBeenCalledWith(25, 49)
   })
 
+  it('loads only RLS-visible pending payroll approvals and provides an exact count for the sidebar badge', async () => {
+    const rows = [{ id: 'run-submitted', status: 'SUBMITTED_FOR_APPROVAL' }, { id: 'run-review', status: 'UNDER_REVIEW' }]
+    const range = vi.fn(async () => ({ data: rows, count: 2, error: null }))
+    const listBuilder: any = { in: vi.fn(() => listBuilder), order: vi.fn(() => listBuilder), range }
+    const countBuilder: any = { in: vi.fn(async () => ({ data: null, count: 2, error: null })) }
+    const from = vi.fn(() => ({ select: vi.fn((_fields: string, options?: { head?: boolean }) => options?.head ? countBuilder : listBuilder) }))
+    const services = createLiveBusinessServices({ from } as unknown as SupabaseClient)
+
+    await expect(services.payroll.pendingApprovals({ page: 1, pageSize: 25 })).resolves.toEqual({ items: rows, total: 2 })
+    await expect(services.payroll.pendingApprovalCount()).resolves.toBe(2)
+    expect(listBuilder.in).toHaveBeenCalledWith('status', ['SUBMITTED_FOR_APPROVAL', 'UNDER_REVIEW'])
+    expect(countBuilder.in).toHaveBeenCalledWith('status', ['SUBMITTED_FOR_APPROVAL', 'UNDER_REVIEW'])
+    expect(range).toHaveBeenCalledWith(0, 24)
+  })
+
   it('uses scoped database RPCs for work-calendar requests and independent review', async () => {
     const rpc = vi.fn(async (name: string) => ({
       data: name === 'branch_work_calendar_capabilities' ? { can_manage: true } : 'calendar-synthetic-1', error: null,

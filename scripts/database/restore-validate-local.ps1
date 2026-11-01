@@ -4,6 +4,7 @@ param(
   [string]$ExpectedLatestMigration = '20261031004800',
   [int]$ExpectedMigrationCount = 48,
   [switch]$ValidateMigration050,
+  [switch]$ValidateMigration051,
   [int]$Port = 55432
 )
 
@@ -18,6 +19,7 @@ $rolesDump = Join-Path $backupRoot "$archiveStem-roles.sql"
 $manifestPath = Join-Path $backupRoot "$archiveStem-manifest.json"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $migration050 = Join-Path $repoRoot 'supabase\migrations\20261101005000_employee_review_and_user_assignment_lifecycle.sql'
+$migration051 = Join-Path $repoRoot 'supabase\migrations\20261101005100_overall_hr_payroll_approval_scope.sql'
 $workflowTest050 = Join-Path $repoRoot 'supabase\tests\rls\hr_payroll_workflows.test.sql'
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $workRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'GoldenBaobab\restore-validation') "local-pg18-$runId"
@@ -255,6 +257,35 @@ grant execute on all functions in schema extensions to public;
     if ($workflowOutput -match '(?m)^not ok\s' -or $workflowOutput -match 'Looks like you failed') { throw "Migration 050 authorization regression tests failed; see $workRoot\m050-workflows.out" }
     if ($workflowOutput -notmatch '(?m)^\s*1\.\.90\s*$') { throw "Migration 050 authorization regression test plan was not completed; see $workRoot\m050-workflows.out" }
     Write-Output 'ISOLATED_M050_VALIDATED migration 050 applied to the restored local copy; rollback authorization tests passed.'
+  }
+
+  if ($ValidateMigration051) {
+    if ($ExpectedLatestMigration -ne '20261101005000' -or $ExpectedMigrationCount -ne 50) {
+      throw 'Migration 051 validation requires a restored baseline ending exactly at migration 050 (50 migrations).'
+    }
+    if (-not (Test-Path -LiteralPath $migration051 -PathType Leaf)) { throw 'Migration 051 isolated-validation input is missing.' }
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration051) 'migration 051 isolated application' 60 (Join-Path $workRoot 'm051-apply') | Out-Null
+    $permissionChecks = @"
+select 'function|' || count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='payroll_review_submission' and pg_get_function_identity_arguments(p.oid)='p_payroll_run_id uuid, p_action text, p_expected_version integer, p_reason text';
+select 'authenticated_execute|' || has_function_privilege('authenticated','public.payroll_review_submission(uuid,text,integer,text)','EXECUTE');
+select 'anon_execute|' || has_function_privilege('anon','public.payroll_review_submission(uuid,text,integer,text)','EXECUTE');
+select 'portfolio_role_helper|' || count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='app_private' and p.proname='has_portfolio_role';
+select 'scoped_hr_override|' || (position('OVERALL_HR_MANAGER' in pg_get_functiondef(p.oid)) > 0 and position('p_action = ''APPROVE''' in pg_get_functiondef(p.oid)) > 0 and position('has_permission(''payroll.approve''' in pg_get_functiondef(p.oid)) > 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='payroll_review_submission';
+set role authenticated;
+select set_config('request.jwt.claim.sub','',false);
+do `$gb$ begin
+  perform public.payroll_review_submission(null, 'APPROVE', 1, null);
+  raise exception 'Unauthenticated payroll review unexpectedly succeeded';
+exception when sqlstate '22023' then null;
+end `$gb$;
+reset role;
+"@
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',$permissionChecks) 'migration 051 permission and denial checks' 20 (Join-Path $workRoot 'm051-permissions') | Out-Null
+    $permissionOutput = Get-Content -LiteralPath (Join-Path $workRoot 'm051-permissions.out')
+    foreach ($expected in @('function|1','authenticated_execute|true','anon_execute|false','portfolio_role_helper|1','scoped_hr_override|true')) {
+      if ($permissionOutput -notcontains $expected) { throw "Migration 051 isolated security check failed: $expected. See $workRoot\m051-permissions.out" }
+    }
+    Write-Output 'ISOLATED_M051_VALIDATED migration 051 applied to the restored local copy; function grants, scoped Overall HR gate, and unauthenticated denial passed.'
   }
 
   $validationSql = @"

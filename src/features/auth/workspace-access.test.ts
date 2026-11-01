@@ -38,6 +38,7 @@ describe('role scoped navigation', () => {
     expect(roleCanOpenPath(routes, '/employee-approvals')).toBe(true)
     expect(roleCanOpenPath(routes, '/companies/new')).toBe(false)
     expect(roleCanOpenPath(routes, '/users')).toBe(false)
+    expect(roleCanOpenPath(routes, '/payroll-approvals')).toBe(true)
   })
 
   it('limits branch managers to branch operations and payroll preparation', () => {
@@ -48,5 +49,15 @@ describe('role scoped navigation', () => {
     expect(roleCanOpenPath(routes, '/employee-approvals')).toBe(false)
     expect(roleCanOpenPath(routes, '/companies')).toBe(false)
     expect(roleCanOpenPath(routes, '/users')).toBe(false)
+    expect(roleCanOpenPath(routes, '/payroll-approvals')).toBe(false)
+  })
+
+  it('shows the pending payroll queue only to payroll approvers and HR administrators', () => {
+    for (const role of ['PORTFOLIO_ADMIN', 'COMPANY_ADMIN', 'OVERALL_HR_MANAGER', 'COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_REVIEWER'] as const) {
+      expect(roleCanOpenPath(visibleWorkspaceRoutes([role]), '/payroll-approvals')).toBe(true)
+    }
+    for (const role of ['BRANCH_MANAGER', 'COMPANY_PAYROLL_PREPARER', 'PAYROLL_PROCESSOR'] as const) {
+      expect(roleCanOpenPath(visibleWorkspaceRoutes([role]), '/payroll-approvals')).toBe(false)
+    }
   })
 })

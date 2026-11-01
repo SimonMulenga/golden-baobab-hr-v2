@@ -35,6 +35,7 @@ export type PayrollRunRecord = {
   created_by: string;
   created_at: string;
   calculations?: PayrollCalculationSnapshot | null;
+  payroll_periods?: { period_start: string; period_end: string } | null;
 };
 
 export type FinalizedPayslipRunRecord = {
@@ -396,6 +397,8 @@ export interface LiveBusinessServices {
   };
   payroll: {
     list(request?: PageRequest & { companyId?: string; branchId?: string; status?: string }): Promise<PageResult<PayrollRunRecord>>;
+    pendingApprovals(request?: PageRequest): Promise<PageResult<PayrollRunRecord>>;
+    pendingApprovalCount(): Promise<number>;
     byId(runId: string): Promise<PayrollRunRecord>;
     previewInputs(input: { companyId: string; branchId: string; periodStart: string; periodEnd: string }): Promise<PayrollPreviewInputs>;
     workCalendarCapabilities(companyId: string, branchId: string): Promise<{ can_manage: boolean }>;
@@ -798,6 +801,24 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const result = await query;
         if (result.error) throw result.error;
         return { items: (result.data ?? []) as PayrollRunRecord[], total: result.count ?? 0 };
+      },
+      async pendingApprovals(request = {}) {
+        const page = Math.max(0, (request.page ?? 1) - 1);
+        const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
+        const result = await client.from('payroll_runs')
+          .select('id,company_id,branch_id,payroll_period_id,status,version,created_by,created_at,calculations,payroll_periods!inner(period_start,period_end)', { count: 'exact' })
+          .in('status', ['SUBMITTED_FOR_APPROVAL', 'UNDER_REVIEW'])
+          .order('created_at', { ascending: false })
+          .range(page * pageSize, page * pageSize + pageSize - 1);
+        if (result.error) throw result.error;
+        return { items: (result.data ?? []) as unknown as PayrollRunRecord[], total: result.count ?? 0 };
+      },
+      async pendingApprovalCount() {
+        const result = await client.from('payroll_runs')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['SUBMITTED_FOR_APPROVAL', 'UNDER_REVIEW']);
+        if (result.error) throw result.error;
+        return result.count ?? 0;
       },
       async byId(runId) {
         const result = await client.from('payroll_runs')

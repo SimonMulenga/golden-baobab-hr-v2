@@ -7,8 +7,9 @@ export function payrollReviewGuidance(
   currentUserId: string | null,
   latestRun?: PayrollRunRecord | null,
   error?: unknown,
+  allowOverallHrSelfApproval = false,
 ): string {
-  if (currentUserId && run.created_by === currentUserId) {
+  if (currentUserId && run.created_by === currentUserId && !allowOverallHrSelfApproval) {
     return 'You prepared this payroll run. Another authorized payroll reviewer must review it.'
   }
 

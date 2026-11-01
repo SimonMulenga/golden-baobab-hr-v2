@@ -15,17 +15,18 @@ export function visibleWorkspaceRoutes(roles: WorkspaceRole[]): Set<string> {
     [
       '/companies', '/branches', '/employees', '/employee-approvals', '/departments', '/job-roles',
       '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory',
-      '/reports', '/users', '/audit', '/settings', '/notifications',
+      '/reports', '/users', '/audit', '/settings', '/notifications', '/payroll-approvals',
     ].forEach((path) => routes.add(path))
   }
   if (portfolioAdministrator) routes.add('/companies/new')
   if (roles.includes('OVERALL_HR_MANAGER')) {
-    ['/employees', '/employee-approvals', '/departments', '/job-roles', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/audit', '/notifications'].forEach((path) => routes.add(path))
+    ['/employees', '/employee-approvals', '/departments', '/job-roles', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/audit', '/notifications', '/payroll-approvals'].forEach((path) => routes.add(path))
   }
   if (roles.includes('BRANCH_MANAGER')) ['/employees', '/attendance', '/leave', '/payroll', '/deductions', '/payslips', '/reports'].forEach((path) => routes.add(path))
   if (roles.some((role) => ['COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_REVIEWER', 'COMPANY_PAYROLL_PREPARER', 'PAYROLL_PROCESSOR'].includes(role))) {
     ['/employees', '/payroll', '/payslips', '/reports'].forEach((path) => routes.add(path))
   }
+  if (roles.some((role) => ['COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_REVIEWER'].includes(role))) routes.add('/payroll-approvals')
   return routes
 }
 

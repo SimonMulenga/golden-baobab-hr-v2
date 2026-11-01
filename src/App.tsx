@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, Bell, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
+import { Activity, Bell, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
 import { WorkspaceContext, defaultWorkspacePreferences, useWorkspace, type WorkspacePreferences } from './features/companies/WorkspaceContext'
 import { AuthProvider } from './features/auth/AuthContext'
 import { useAuth } from './features/auth/auth-context'
@@ -9,6 +9,7 @@ import { mergeWorkspaceRoles, roleCanOpenPath, visibleWorkspaceRoutes, type Work
 import { isLiveMode } from './lib/data-mode'
 import { getSupabaseClient } from './lib/supabase/client'
 import { createLiveCompanyServices } from './services/live-company-services'
+import { createLiveBusinessServices } from './services/live-business-services'
 import { createLiveOperationsServices } from './services/live-operations-services'
 import { loadDashboardMetrics, type DashboardMetrics } from './services/live-dashboard-services'
 import type { Company } from './features/companies/types'
@@ -21,6 +22,7 @@ const LiveEmployeeImport = lazy(() => import('./features/employees/LiveEmployeeI
 const LiveAttendance = lazy(() => import('./features/people-ops/LiveAttendance').then((module) => ({ default: module.LiveAttendance })))
 const LiveLeave = lazy(() => import('./features/people-ops/LiveLeave').then((module) => ({ default: module.LiveLeave })))
 const LivePayrollInputs = lazy(() => import('./features/payroll/LivePayrollInputs').then((module) => ({ default: module.LivePayrollInputs })))
+const LivePayrollApprovals = lazy(() => import('./features/payroll/LivePayrollApprovals').then((module) => ({ default: module.LivePayrollApprovals })))
 const LivePayrollReconciliation = lazy(() => import('./features/payroll/LivePayrollReconciliation').then((module) => ({ default: module.LivePayrollReconciliation })))
 const LivePayslips = lazy(() => import('./features/payroll/LivePayslips').then((module) => ({ default: module.LivePayslips })))
 const LivePayrollReports = lazy(() => import('./features/payroll/LivePayrollReports').then((module) => ({ default: module.LivePayrollReports })))
@@ -39,7 +41,7 @@ import './enterprise-ui.css'
 const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },
   { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
-  { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
+  { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Pending payroll approval', path: '/payroll-approvals', icon: ClipboardCheck }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
   { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
 function AppShell() {
@@ -58,12 +60,14 @@ function AppShell() {
   const [activeCompanyId, setActiveCompanyId] = useState('all')
   const [workspacePreferences, setWorkspacePreferences] = useState<{ companyId: string; value: WorkspacePreferences } | null>(null)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
+  const [pendingPayrollApprovals, setPendingPayrollApprovals] = useState(0)
   const [authActionError, setAuthActionError] = useState('')
   const location = useLocation()
   const currentName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name ?? 'Dashboard'
   const currentCompany = companies.find((company) => company.id === activeCompanyId)
   const workspaceName = activeCompanyId === 'all' ? 'All companies' : currentCompany?.name ?? 'Company workspace'
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
+  const canOpenPayrollApprovals = allowedRoutes.has('/payroll-approvals')
   const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes])
   const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
   const maySelectCompany = !branchOnly && companies.length > 1
@@ -92,6 +96,20 @@ function AppShell() {
     const interval = window.setInterval(() => void loadUnread(), 60_000)
     return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-notifications-changed', loadUnread) }
   }, [authUserId, location.pathname])
+  useEffect(() => {
+    if (!authUserId || !canOpenPayrollApprovals) { setPendingPayrollApprovals(0); return }
+    let cancelled = false
+    const loadCount = async () => {
+      try {
+        const count = await createLiveBusinessServices(getSupabaseClient()).payroll.pendingApprovalCount()
+        if (!cancelled) setPendingPayrollApprovals(count)
+      } catch { if (!cancelled) setPendingPayrollApprovals(0) }
+    }
+    void loadCount()
+    window.addEventListener('gbhr-payroll-approvals-changed', loadCount)
+    const interval = window.setInterval(() => void loadCount(), 60_000)
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-payroll-approvals-changed', loadCount) }
+  }, [authUserId, canOpenPayrollApprovals, location.pathname])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
   useEffect(() => {
     if (!mobileOpen) {
@@ -180,7 +198,7 @@ function AppShell() {
     <aside id="workspace-navigation" className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span>GB</span></div><span className="brand-word">Golden Baobab <span>HR</span></span><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN') ? 'Portfolio Administrator' : roleContext.roles.includes('PORTFOLIO_ADMIN') ? 'Platform Super Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
-      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</NavLink>)}</div>)}</nav>
+      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom">{!isLiveMode && <div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div>}<div className="profile-row"><div className="profile-avatar">{isLiveMode ? initials(profileName) : 'CM'}</div><div className="profile-copy"><strong>{profileName}</strong><span>{isLiveMode ? 'Signed-in account' : 'Workspace admin'}</span></div>{!isLiveMode && <MoreHorizontal size={18} />}</div></div>
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label="Collapse sidebar"><ChevronLeft size={15} /></button>
     </aside>
@@ -203,7 +221,8 @@ function AppShell() {
           <Route path="/leave" element={<LiveLeave />} />
           <Route path="/departments" element={<LiveHrCatalog type="departments" />} />
           <Route path="/job-roles" element={<LiveHrCatalog type="jobRoles" />} />
-          <Route path="/payroll" element={<LivePayrollInputs />} />
+          <Route path="/payroll" element={<LivePayrollInputs allowOwnApproval={roleContext.roles.includes('OVERALL_HR_MANAGER')} />} />
+          <Route path="/payroll-approvals" element={<LivePayrollApprovals allowOwnApproval={roleContext.roles.includes('OVERALL_HR_MANAGER')} />} />
           <Route path="/payslips" element={<LivePayslips />} />
           <Route path="/reconciliation" element={<LivePayrollReconciliation />} />
           <Route path="/deductions" element={<LiveDeductions />} />
