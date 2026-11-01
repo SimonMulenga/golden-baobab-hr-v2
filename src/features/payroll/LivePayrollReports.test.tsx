@@ -5,8 +5,8 @@ import { mockCompanies } from '../companies/mockData'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { LivePayrollReports } from './LivePayrollReports'
 
-const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), byIds: vi.fn() }))
-vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payslips: mocks, employees: { byIds: mocks.byIds } }) }))
+const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), byIds: vi.fn(), authorizeAndAuditExport: vi.fn() }))
+vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payslips: mocks, employees: { byIds: mocks.byIds }, reports: { authorizeAndAuditExport: mocks.authorizeAndAuditExport } }) }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 
 const company = { ...mockCompanies[0], id: 'co-report', branches: [{ ...mockCompanies[0].branches[0], id: 'br-report', name: 'Demo branch' }] }
@@ -17,29 +17,22 @@ const employee = { id: 'emp-report', portfolio_id: 'p1', company_id: company.id,
 describe('LIVE finalized payroll reports', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.finalizedRuns.mockResolvedValue([run]); mocks.finalizedItems.mockResolvedValue({ items: [item], total: 1 }); mocks.byIds.mockResolvedValue([employee])
+    mocks.finalizedRuns.mockResolvedValue([run]); mocks.finalizedItems.mockResolvedValue({ items: [item], total: 1 }); mocks.byIds.mockResolvedValue([employee]); mocks.authorizeAndAuditExport.mockResolvedValue(undefined)
   })
 
-  it('renders a persisted finalized payroll register and statutory disclosure', async () => {
+  it('renders a persisted finalized payroll register with version and scope', async () => {
     render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: company.id }}><LivePayrollReports /></WorkspaceContext.Provider>)
+    expect(await screen.findByRole('heading', { name: 'Payroll Register (internal)' })).toBeInTheDocument()
     expect(await screen.findByText('K11,500.00')).toBeInTheDocument()
     expect(screen.getByText('K8,825.00')).toBeInTheDocument()
-    expect(screen.getByText('NHIMA EE')).toBeInTheDocument()
-    expect(screen.getByText('NHIMA ER')).toBeInTheDocument()
-    expect(screen.getAllByText('K100.00')).toHaveLength(2)
-    expect(screen.getByText(/not filings with ZRA, NAPSA or NHIMA/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/finalized version 1/)).toHaveLength(2)
     expect(mocks.finalizedItems).toHaveBeenCalledWith(run.id, run.version, 1)
   })
 
-  it('shows statutory employer and employee contribution columns', async () => {
+  it('discloses why compliance return exports are blocked rather than fabricating fields', async () => {
     render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: company.id }}><LivePayrollReports mode="statutory" /></WorkspaceContext.Provider>)
-    expect(await screen.findByRole('heading', { name: 'Statutory summaries' })).toBeInTheDocument()
-    expect(await screen.findByText(/Synthetic Person/)).toBeInTheDocument()
-    expect(screen.getByText('NAPSA EE')).toBeInTheDocument()
-    expect(screen.getByText('NAPSA ER')).toBeInTheDocument()
-    expect(screen.getByText('NHIMA employee')).toBeInTheDocument()
-    expect(screen.getByText('NHIMA employer')).toBeInTheDocument()
-    expect(screen.getByText(/employee share reduces net pay; the employer share is a separate employer cost/i)).toBeInTheDocument()
-    expect(screen.getAllByText('K100.00')).toHaveLength(2)
+    expect(await screen.findByRole('heading', { name: 'PAYE Return' })).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent(/do not retain a tax-credit amount/i)
+    expect(screen.getByRole('button', { name: /Export Excel/i })).toBeDisabled()
   })
 })

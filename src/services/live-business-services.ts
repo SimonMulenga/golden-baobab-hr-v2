@@ -445,6 +445,9 @@ export interface LiveBusinessServices {
   audit: {
     list(request: PageRequest & { companyId?: string; branchId?: string; action?: string; from?: string; to?: string }): Promise<PageResult<AuditLogRecord>>;
   };
+  reports: {
+    authorizeAndAuditExport(payrollRunId: string, reportType: string, rowCount: number, action?: 'PREVIEW' | 'EXPORT'): Promise<void>;
+  };
 }
 
 function unwrap<T>(result: { data: T | null; error: unknown }): T {
@@ -1033,6 +1036,18 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const result = await query;
         if (result.error) throw result.error;
         return { items: (result.data ?? []) as AuditLogRecord[], total: result.count ?? 0 };
+      },
+    },
+    reports: {
+      async authorizeAndAuditExport(payrollRunId, reportType, rowCount, action = 'EXPORT') {
+        const result = await client.rpc('report_export_authorize', {
+          p_payroll_run_id: payrollRunId,
+          p_report_type: reportType,
+          p_row_count: rowCount,
+          p_action: action,
+        });
+        if (result.error) throw result.error;
+        if (result.data !== true) throw new Error('Report export authorization was not confirmed.');
       },
     },
   };

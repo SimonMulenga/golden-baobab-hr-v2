@@ -6,6 +6,7 @@ param(
   [switch]$ValidateMigration050,
   [switch]$ValidateMigration051,
   [switch]$ValidateMigration052,
+  [switch]$ValidateMigration053,
   [int]$Port = 55432
 )
 
@@ -22,6 +23,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $migration050 = Join-Path $repoRoot 'supabase\migrations\20261101005000_employee_review_and_user_assignment_lifecycle.sql'
 $migration051 = Join-Path $repoRoot 'supabase\migrations\20261101005100_overall_hr_payroll_approval_scope.sql'
 $migration052 = Join-Path $repoRoot 'supabase\migrations\20261101005200_payslip_statement_details_and_delivery.sql'
+$migration053 = Join-Path $repoRoot 'supabase\migrations\20261101005300_audited_payroll_report_exports.sql'
 $workflowTest050 = Join-Path $repoRoot 'supabase\tests\rls\hr_payroll_workflows.test.sql'
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $workRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'GoldenBaobab\restore-validation') "local-pg18-$runId"
@@ -320,6 +322,41 @@ reset role;
       if ($statementOutput -notcontains $expected) { throw "Migration 052 isolated security check failed: $expected. See $workRoot\m052-checks.out" }
     }
     Write-Output 'ISOLATED_M052_VALIDATED migration 052 applied after 051 to the restored local copy; scoped grants, private helper, finalized/payroll-view checks, period-scoped balances, and unauthenticated denial passed.'
+  }
+
+  if ($ValidateMigration053) {
+    if ($ExpectedLatestMigration -ne '20261101005200' -or $ExpectedMigrationCount -ne 52 -or $ValidateMigration052) {
+      throw 'Migration 053 validation requires a verified restored baseline ending at migration 052 (52 migrations).'
+    }
+    if (-not (Test-Path -LiteralPath $migration053 -PathType Leaf)) { throw 'Migration 053 isolated-validation input is missing.' }
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-1','-f',$migration053) 'migration 053 isolated application' 60 (Join-Path $workRoot 'm053-apply') | Out-Null
+    $reportChecks = @"
+select 'function|' || count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='report_export_authorize' and pg_get_function_identity_arguments(p.oid)='p_payroll_run_id uuid, p_report_type text, p_row_count integer, p_action text';
+select 'authenticated_execute|' || has_function_privilege('authenticated','public.report_export_authorize(uuid,text,integer,text)','EXECUTE');
+select 'anon_execute|' || has_function_privilege('anon','public.report_export_authorize(uuid,text,integer,text)','EXECUTE');
+select 'public_execute_revoked|' || not exists (
+  select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace,
+    lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
+  where n.nspname='public' and p.proname='report_export_authorize' and acl.grantee=0 and acl.privilege_type='EXECUTE'
+);
+select 'finalized_and_current_version|' || (position('FINALIZED' in pg_get_functiondef(p.oid)) > 0 and position('approved_version' in pg_get_functiondef(p.oid)) > 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='report_export_authorize';
+select 'scoped_permissions|' || (position('reports.view' in pg_get_functiondef(p.oid)) > 0 and position('payroll.view' in pg_get_functiondef(p.oid)) > 0 and position('reports.export' in pg_get_functiondef(p.oid)) > 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='report_export_authorize';
+select 'metadata_audit_only|' || (position('REPORT_EXPORTED' in pg_get_functiondef(p.oid)) > 0 and position('REPORT_PREVIEWED' in pg_get_functiondef(p.oid)) > 0 and position('p_employee' in pg_get_functiondef(p.oid)) = 0)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='report_export_authorize';
+set role authenticated;
+select set_config('request.jwt.claim.sub','',false);
+do `$gb`$ begin
+  perform public.report_export_authorize(null, 'PAYROLL_REGISTER', 0, 'PREVIEW');
+  raise exception 'Unauthenticated report authorization unexpectedly succeeded';
+exception when sqlstate '42501' then null;
+end `$gb`$;
+reset role;
+"@
+    Invoke-LocalProcess $psql @('-X','-w','-v','ON_ERROR_STOP=1','-A','-t','-c',$reportChecks) 'migration 053 permission and denial checks' 20 (Join-Path $workRoot 'm053-checks') | Out-Null
+    $reportOutput = Get-Content -LiteralPath (Join-Path $workRoot 'm053-checks.out')
+    foreach ($expected in @('function|1','authenticated_execute|true','anon_execute|false','public_execute_revoked|true','finalized_and_current_version|true','scoped_permissions|true','metadata_audit_only|true')) {
+      if ($reportOutput -notcontains $expected) { throw "Migration 053 isolated security check failed: $expected. See $workRoot\m053-checks.out" }
+    }
+    Write-Output 'ISOLATED_M053_VALIDATED migration 053 applied to the restored local copy; finalized-version gate, tenant-scoped permissions, authenticated-only execute, metadata audit and unauthenticated denial passed.'
   }
 
   $validationSql = @"
