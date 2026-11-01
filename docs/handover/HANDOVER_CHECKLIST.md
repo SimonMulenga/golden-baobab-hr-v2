@@ -3,12 +3,13 @@
 ## Release identity
 
 - [x] Existing GitHub repository and branch retained.
-- [x] Production commit `adb46ce715740298d352c6d2e7d9ab348b3a7468` identified.
-- [x] Existing Vercel project deployment was READY at <https://golden-baobab-hr-v2.vercel.app>.
+- [x] Production commit `9a0095bcff4f6071af37083fd782f81535e4bac3` identified.
+- [x] Existing Vercel project deployment `dpl_9d68j4NA2Xmbo6KnztRWme2aGAEb` is READY at <https://golden-baobab-hr-v2.vercel.app>.
 - [x] Production HTML and compiled bundle returned HTTP 200; bundle referenced Supabase project `jssuaebiizjcoqmngxzk`.
 - [x] Supabase read-only migration history matched local migrations through 053.
 - [x] Public browser smoke: sign-in/recovery shell and signed-out route guards passed in Microsoft Edge (22 checks).
 - [x] Sign-in shell overflow checks passed at 320–1920px and landscape.
+- [x] Post-deployment public browser smoke passed 22/22.
 
 ## Before client operation
 

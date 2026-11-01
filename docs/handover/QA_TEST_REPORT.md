@@ -1,7 +1,7 @@
 # QA Test Report
 
 **Date:** 1 November 2026
-**Reviewed release:** `adb46ce715740298d352c6d2e7d9ab348b3a7468` (`feature/supabase-auth`)
+**Reviewed release:** `9a0095bcff4f6071af37083fd782f81535e4bac3` (`feature/supabase-auth`)
 **Production:** <https://golden-baobab-hr-v2.vercel.app>
 **Supabase:** `jssuaebiizjcoqmngxzk`
 
@@ -15,10 +15,10 @@
 | Oxlint | PASS, 54 warnings, 0 errors | Existing React hook dependency/state-in-effect, render-purity and memoization diagnostics remain. |
 | Supabase migration list | PASS, read-only | Local and remote migration versions match through `20261101005300`. |
 | Playwright production smoke | PASS, 22/22 | Microsoft Edge, one worker: public sign-in/recovery UI, 19 signed-out protected-path redirects, and responsive sign-in checks. No credentials or forms were submitted. |
-| Production deployment | PASS for reviewed baseline | Existing Vercel project deployment was READY for `adb46ce715740298d352c6d2e7d9ab348b3a7468`. |
-| Production HTTP smoke | PASS | App HTML and compiled JS returned HTTP 200; bundle references the intended Supabase project. No sign-in performed. |
+| Production deployment | PASS | Existing Vercel project production deployment `dpl_9d68j4NA2Xmbo6KnztRWme2aGAEb` is READY for reviewed commit `9a0095bcff4f6071af37083fd782f81535e4bac3`. |
+| Production HTTP/browser smoke | PASS | Canonical app and compiled JS returned HTTP 200; bundle references the intended Supabase project. Post-deployment public browser smoke passed 22/22. No sign-in performed. |
 
-## Current local-only changes
+## Changes in this release
 
 Fixed mojibake in auth and application-shell loading messages, reduced the global body minimum width from 360px to 320px, corrected the root README, marked four older status reports as historical snapshots, added the Playwright smoke suite/config, and added eight sanitized handover guides. The final application source tree passed the test suite, typecheck, build and browser checks above. Playwright installation reported zero vulnerabilities.
 
