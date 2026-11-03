@@ -105,6 +105,17 @@ describe('LIVE company administrator management', () => {
     expect(screen.queryByText(/Invitation sent to qa@example.invalid/)).not.toBeInTheDocument()
   })
 
+  it('invites a portfolio-scoped Company Administrator without assigning a single-company scope', async () => {
+    functionMocks.invoke.mockResolvedValue({ data: { invited: true, accessAssigned: true }, error: null })
+    render(<LiveUserAdmin portfolioCompanyAdmin />)
+    fireEvent.change(screen.getByLabelText('Invite email address'), { target: { value: 'portfolio-admin@example.invalid' } })
+    fireEvent.change(screen.getByLabelText('Invitation access level'), { target: { value: 'PORTFOLIO_COMPANY_ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }))
+    await waitFor(() => expect(functionMocks.invoke).toHaveBeenCalledWith('invite-user', { body: expect.objectContaining({
+      email: 'portfolio-admin@example.invalid', portfolioId: 'portfolio-demo', role: 'PORTFOLIO_COMPANY_ADMIN', companyId: null,
+    }) }))
+  })
+
   it('assigns a branch-scoped manager role only to selected branches via the live adapter', async () => {
     render(<LiveUserAdmin />)
     expect(await screen.findByText('HR and branch roles')).toBeInTheDocument()
@@ -118,7 +129,7 @@ describe('LIVE company administrator management', () => {
     render(<LiveUserAdmin />)
     const role = await screen.findByLabelText('Invitation access level')
     expect(Array.from((role as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
-      'Branch Manager (selected branches)', 'Payroll Processor (selected branches)', 'Company Administrator',
+      'Branch Manager (selected branches)', 'Payroll Processor (selected branches)', 'Company Administrator (selected company)',
     ])
     expect(screen.queryByRole('button', { name: /Assign Company Payroll (Approver|Reviewer)|Assign Company HR\/Payroll Preparer/ })).not.toBeInTheDocument()
   })
@@ -129,9 +140,9 @@ describe('LIVE company administrator management', () => {
     expect(screen.getByLabelText('Company Administrator account UUID')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Choose a company' })).toBeInTheDocument()
     const invitationRole = screen.getByLabelText('Invitation access level') as HTMLSelectElement
-    expect(Array.from(invitationRole.options).map((option) => option.value)).toEqual(['PORTFOLIO_ADMIN', 'OVERALL_HR_MANAGER', 'BRANCH_MANAGER', 'PAYROLL_PROCESSOR', 'COMPANY_ADMIN'])
+    expect(Array.from(invitationRole.options).map((option) => option.value)).toEqual(['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER', 'BRANCH_MANAGER', 'PAYROLL_PROCESSOR', 'COMPANY_ADMIN'])
     const assignmentRole = screen.getByLabelText('Role access level') as HTMLSelectElement
-    expect(Array.from(assignmentRole.options).map((option) => option.value)).toEqual(['PORTFOLIO_ADMIN', 'OVERALL_HR_MANAGER', 'BRANCH_MANAGER', 'PAYROLL_PROCESSOR'])
+    expect(Array.from(assignmentRole.options).map((option) => option.value)).toEqual(['PORTFOLIO_ADMIN', 'COMPANY_ADMIN', 'OVERALL_HR_MANAGER', 'BRANCH_MANAGER', 'PAYROLL_PROCESSOR'])
     expect(screen.getByRole('heading', { name: 'HR and branch roles' })).toBeInTheDocument()
   })
 

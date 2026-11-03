@@ -27,8 +27,10 @@ Deno.serve(async (request) => {
   const portfolioId = body.portfolioId ?? ''
   const role = body.role ?? ''
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !portfolioId) return response(400, { error: 'A valid email and portfolio are required.' }, origin)
-  if (role !== 'COMPANY_ADMIN' && !allowedRoles.includes(role as PortfolioRole)) return response(400, { error: 'This role cannot be invited through the workspace.' }, origin)
+  if (!['COMPANY_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role) && !allowedRoles.includes(role as PortfolioRole)) return response(400, { error: 'This role cannot be invited through the workspace.' }, origin)
   if (role === 'COMPANY_ADMIN' && !body.companyId) return response(400, { error: 'Choose a company for this invitation.' }, origin)
+  if (role === 'PORTFOLIO_COMPANY_ADMIN' && body.companyId) return response(400, { error: 'Portfolio Company Administrator access cannot be limited to one company.' }, origin)
+  const membershipRole = role === 'PORTFOLIO_COMPANY_ADMIN' ? 'COMPANY_ADMIN' : role
   const branchScoped = role === 'BRANCH_MANAGER' || role === 'PAYROLL_PROCESSOR'
   if (branchScoped && (!Array.isArray(body.branchIds) || body.branchIds.length === 0 || body.branchIds.some((id) => typeof id !== 'string'))) return response(400, { error: 'Choose at least one branch for this role.' }, origin)
 
@@ -36,7 +38,7 @@ Deno.serve(async (request) => {
   const { data: actorData, error: actorError } = await caller.auth.getUser()
   if (actorError || !actorData.user) return response(401, { error: 'Your session is no longer valid. Sign in again.' }, origin)
   const preflight = await caller.rpc('authorize_member_invitation', {
-    p_portfolio_id: portfolioId, p_role: role, p_company_id: body.companyId ?? null,
+    p_portfolio_id: portfolioId, p_role: membershipRole, p_company_id: body.companyId ?? null,
   })
   if (preflight.error) return response(403, { error: 'You are not authorized to invite users in this scope.' }, origin)
 
@@ -47,11 +49,11 @@ Deno.serve(async (request) => {
 
   const membership = role === 'COMPANY_ADMIN'
     ? await caller.rpc('assign_company_admin', { p_portfolio_id: portfolioId, p_company_id: body.companyId, p_user_id: invited.user.id })
-    : await caller.rpc('assign_portfolio_membership', { p_portfolio_id: portfolioId, p_user_id: invited.user.id, p_role: role, p_branch_ids: branchScoped ? body.branchIds : [] })
+    : await caller.rpc('assign_portfolio_membership', { p_portfolio_id: portfolioId, p_user_id: invited.user.id, p_role: membershipRole, p_branch_ids: branchScoped ? body.branchIds : [] })
   if (membership.error) {
     // The Auth invitation exists and was sent, but no business access was granted.
     return response(200, { invited: true, accessAssigned: false, userId: invited.user.id, error: 'Invitation was sent but role assignment did not complete. The account has no business access; an authorized administrator must assign access after activation.' }, origin)
   }
-  return response(200, { invited: true, accessAssigned: true, userId: invited.user.id, role }, origin)
+  return response(200, { invited: true, accessAssigned: true, userId: invited.user.id, role: membershipRole }, origin)
 })
 
