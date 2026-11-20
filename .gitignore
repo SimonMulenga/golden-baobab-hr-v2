@@ -34,5 +34,6 @@ supabase/.temp/
 *.xlsx
 *.xls
 *.xlsm
+!public/employee-template.xlsx
 OCTOBER_PAYROLL_*.csv
 

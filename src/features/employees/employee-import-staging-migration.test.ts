@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import migration from '../../../supabase/migrations/20261120005500_secure_employee_import_staging.sql?raw'
 import pendingBranchMigration from '../../../supabase/migrations/20261120005600_allow_pending_import_branch_assignment.sql?raw'
+import allowanceMigration from '../../../supabase/migrations/20261120005700_employee_import_allowance_components.sql?raw'
 
 describe('secure employee import staging migration contract', () => {
   it('is additive and retains the existing portfolio/company/branch and employee approval model', () => {
@@ -52,5 +53,17 @@ describe('secure employee import staging migration contract', () => {
     expect(pendingBranchMigration).toMatch(/has_permission\('employee\.private\.view',p_portfolio_id,c\.id,null\)/i)
     expect(pendingBranchMigration).toMatch(/p_company_id is not null and p_branch_id is not null then v_status:='READY_FOR_APPROVAL'/i)
     expect(pendingBranchMigration).not.toMatch(/\bdrop\s+(table|schema)\b|\btruncate\b/i)
+  })
+
+  it('adds optional medical compensation without changing payroll calculations and enforces housing review server-side', () => {
+    expect(allowanceMigration).toMatch(/add column medical_allowance numeric\(14,2\) check \(medical_allowance is null or medical_allowance >= 0\)/i)
+    expect(allowanceMigration).toMatch(/employee_compensation_preserve_medical_allowance/i)
+    expect(allowanceMigration).toMatch(/medical_allowance.*nullif\(p_compensation ->> 'medical_allowance'/is)
+    expect(allowanceMigration).toMatch(/'medical_allowance',nullif\(v_data->>'medical_allowance'/i)
+    expect(allowanceMigration).toMatch(/create trigger employee_import_allowance_guard/i)
+    expect(allowanceMigration).toMatch(/resolve the housing allowance discrepancy before marking this record ready/i)
+    expect(allowanceMigration).toMatch(/grant execute on function public\.employee_import_submit_staged[\s\S]*?to authenticated/i)
+    expect(allowanceMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
+    expect(allowanceMigration).not.toMatch(/insert into public\.(payroll_runs|payroll_items|payroll_input_items)/i)
   })
 })

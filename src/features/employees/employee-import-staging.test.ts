@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
-import { duplicateWarningsForRow, extractEmployeeWorkbook, validateStagedEmployee } from './employee-import-staging'
+import ExcelJS from 'exceljs'
+import { readFileSync } from 'node:fs'
+import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, recalculateStagedHousingAllowance, validateStagedEmployee } from './employee-import-staging'
+import { calculateGrossEarningsPreview, calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
+import { employeeTemplateColumns } from './live-import-model'
 
 function workbookBuffer() {
   const workbook = XLSX.utils.book_new()
@@ -28,7 +32,8 @@ describe('employee workbook staging', () => {
       ['GBI', 2], ['GBI', 3], ['Chinese Staff', 2],
     ])
     expect(result.records[2].company_id).toBe('company-1')
-    expect(result.records[2].branch_id).toBe('branch-1')
+    expect(result.records[2].branch_id).toBeNull()
+    expect(result.records[2].current_data.branch_name).toBe('')
   })
 
   it('keeps incomplete employee candidates in staging and reports non-employee rows separately', () => {
@@ -49,9 +54,10 @@ describe('employee workbook staging', () => {
     expect(result.records).toHaveLength(1)
     expect(result.records[0]).toMatchObject({ source_sheet: 'Payroll Inputs', source_row: 2 })
     expect(result.records[0].original_data).toMatchObject({ 'Employee Name': 'Kai Example' })
-    expect(result.records[0].current_data.first_name).toBe('')
+    expect(result.records[0].current_data.first_name).toBe('Kai')
+    expect(result.records[0].current_data.last_name).toBe('Example')
     expect(result.records[0].payroll_data).toMatchObject({ Overtime: 4, 'Loan Deduction': 'invalid amount', Bonus: 250 })
-    expect(validateStagedEmployee(result.records[0].current_data, '', '')).toContain('first_name is required')
+    expect(validateStagedEmployee(result.records[0].current_data, '', '')).toContain('Company assignment is required')
   })
 
   it('validates missing details and malformed salary without rejecting workbook extraction', () => {
@@ -82,5 +88,90 @@ describe('employee workbook staging', () => {
         'Retirement age must be a whole number from 18 to 100',
         'Overtime eligibility must be yes or no',
       ]))
+  })
+
+  it('generates a blank Employees template with the exact approved 35 columns and a 30% housing formula', async () => {
+    const buffer = new Uint8Array(readFileSync('public/employee-template.xlsx')).buffer
+    const template = XLSX.read(buffer, { type: 'array', cellFormula: true })
+    expect(template.SheetNames).toEqual(['Employees'])
+    const worksheet = template.Sheets.Employees
+    expect(XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, raw: true })[0]).toEqual(employeeTemplateColumns.map((column) => column.heading))
+    expect(employeeTemplateColumns).toHaveLength(35)
+    const excel = new ExcelJS.Workbook()
+    const loaded = await excel.xlsx.load(Buffer.from(buffer) as never)
+    const sheet = loaded.getWorksheet('Employees')!
+    expect(sheet.getCell('A1').font.bold).toBe(true)
+    expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 })
+    expect(sheet.getColumn(1).width).toBeGreaterThan(0)
+    expect(sheet.getCell('A2').value).toBeNull()
+    expect(sheet.getCell('AE2').value).toMatchObject({ formula: 'IF(S2="","",ROUND(S2*30%,2))' })
+    expect(sheet.getCell('AE501').value).toMatchObject({ formula: 'IF(S501="","",ROUND(S501*30%,2))' })
+    const parsedBlank = extractEmployeeWorkbook(buffer, companies)
+    expect(parsedBlank.records).toEqual([])
+  })
+
+  it('round-trips the template, recalculates housing from salary, and maps all allowance columns', () => {
+    const excel = new ExcelJS.Workbook()
+    const source = readFileSync('public/employee-template.xlsx')
+    return excel.xlsx.load(source as never).then(async (template) => {
+    const worksheet = template.getWorksheet('Employees')!
+    const indexes = Object.fromEntries(employeeTemplateColumns.map((column, index) => [column.key, index]))
+    const values: Record<string, string | number> = {
+      employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office',
+      basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, medical_allowance: 120, other_allowances: 80,
+      phone: '0970000007', tpin: '0000001234', contract_start_date: '2026-11-01',
+    }
+    for (const [key, value] of Object.entries(values)) {
+      worksheet.getCell(2, indexes[key] + 1).value = value
+    }
+    const output = await template.xlsx.writeBuffer()
+    const buffer = new Uint8Array(output).buffer as ArrayBuffer
+    const result = extractEmployeeWorkbook(buffer, [{ ...companies[0], branches: [{ id: 'north-1', name: 'North Office', status: 'ACTIVE' }] }])
+    expect(result.records).toHaveLength(1)
+    const employee = result.records[0]
+    expect(employee.current_data).toMatchObject({
+      employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', basic_pay: '8000',
+      housing_allowance: '2400.00', housing_allowance_source: 'DEFAULT_30', meal_allowance: '450',
+      transport_allowance: '250', medical_allowance: '120', other_allowances: '80', phone: '0970000007', tpin: '0000001234',
+    })
+    expect(employee.company_id).toBe('company-1')
+    expect(employee.branch_id).toBe('north-1')
+    expect(employee.original_data['Housing Allowance']).toBe('')
+    expect(employee.payroll_data).toMatchObject({ 'Lunch': 450, 'Transport': 250, 'Medical Allowance': 120, 'Other Allowances': 80 })
+    })
+  })
+
+  it('supports UTF-8 CSV, keeps incomplete rows, and rejects extension/content mismatches', () => {
+    const csv = new TextEncoder().encode('Employee No,Staff Name,Basic Pay,Work Location\nSYN-1,Ada Example,,Unknown Branch\n').buffer
+    expect(detectEmployeeUploadFormat('staff.csv', csv)).toBe('csv')
+    const parsed = extractEmployeeWorkbook(csv, companies)
+    expect(parsed.records).toHaveLength(1)
+    expect(parsed.records[0].current_data).toMatchObject({ employee_number: 'SYN-1', first_name: 'Ada', last_name: 'Example', basic_pay: '', branch_name: 'Unknown Branch' })
+    expect(parsed.records[0].branch_id).toBeNull()
+    expect(() => detectEmployeeUploadFormat('staff.xlsx', csv)).toThrow(/extension does not match/)
+    expect(() => detectEmployeeUploadFormat('staff.csv', new Uint8Array([0, 1, 2, 3]).buffer)).toThrow(/extension does not match/)
+  })
+
+  it('flags an uploaded housing amount that differs from 30% and recalculates proposals after salary corrections', () => {
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Employee Number','First Name','Last Name','Basic Salary','Housing Allowance'],
+      ['SYN-2','Ada','Example',5000,1000],
+    ]), 'Employees')
+    const row = extractEmployeeWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer, []).records[0]
+    expect(row.current_data).toMatchObject({ housing_allowance: '1000.00', housing_allowance_proposed: '1500.00', housing_allowance_review_required: 'true' })
+    expect(validateStagedEmployee(row.current_data, 'company-1', 'branch-1')).toContain('Review the imported housing allowance against the 30% default and choose which amount to keep')
+    const recalculated = calculateHousingAllowanceCents('8050.01')
+    expect(formatCurrencyCents(recalculated)).toBe('2415.00')
+    expect(calculateHousingAllowanceCents('5000')).toBe(150000)
+    expect(calculateHousingAllowanceCents('8000')).toBe(240000)
+    expect(calculateHousingAllowanceCents('10000')).toBe(300000)
+    const reviewed = recalculateStagedHousingAllowance({ basic_pay: '8000', housing_allowance: '2400', housing_allowance_source: 'IMPORTED', housing_allowance_resolution: 'USE_UPLOADED' }, 'basic_pay', '10000')
+    expect(reviewed).toMatchObject({ housing_allowance_proposed: '3000.00', housing_allowance_resolution: '', housing_allowance_review_required: 'true' })
+  })
+
+  it('keeps blank allowances unconfirmed in the compensation preview and totals explicit values in cents', () => {
+    expect(calculateGrossEarningsPreview({ basic_pay: '5000', housing_allowance: '1500', meal_allowance: '0', transport_allowance: '', medical_allowance: '', other_allowances: '80.25' }))
+      .toEqual({ total: '6580.25', incomplete: ['transport_allowance', 'medical_allowance'] })
   })
 })
