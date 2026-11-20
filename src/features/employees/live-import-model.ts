@@ -1,4 +1,5 @@
 import employeeTemplateColumnsData from './employee-template-columns.json'
+import employeeTemplateValuesData from './employee-template-values.json'
 
 export type LiveImportField = {
   key: string
@@ -30,12 +31,12 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'nhima_number', label: 'NHIMA number', required: false, aliases: ['nhima', 'nhima number', 'nhima reference'] },
   { key: 'job_title', label: 'Job title', required: false, aliases: ['job title', 'job role', 'position', 'position title', 'role', 'title'] },
   { key: 'department', label: 'Department', required: false, aliases: ['department', 'department name', 'team', 'division'] },
-  { key: 'employment_type', label: 'Employment type', required: false, aliases: ['employment type', 'employee type'] },
-  { key: 'contract_type', label: 'Contract type', required: false, aliases: ['contract type', 'contract category'] },
+  { key: 'employment_type', label: 'Employment type', required: false, aliases: ['employment type', 'employee type', 'type of employment'] },
+  { key: 'contract_type', label: 'Contract type', required: false, aliases: ['contract type', 'contract category', 'contract classification'] },
   { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'date joined', 'contract start date'], type: 'date' },
   { key: 'contract_end_date', label: 'Contract end date', required: false, aliases: ['contract end date', 'end date'], type: 'date' },
   { key: 'retirement_age', label: 'Retirement age', required: false, aliases: ['retirement age'], type: 'number' },
-  { key: 'salary_frequency', label: 'Salary frequency', required: false, aliases: ['salary frequency', 'pay frequency'] },
+  { key: 'salary_frequency', label: 'Salary frequency', required: false, aliases: ['salary frequency', 'pay frequency', 'payroll frequency', 'payment frequency'] },
   { key: 'basic_pay', label: 'Basic pay', required: true, aliases: ['basic pay', 'basic salary', 'monthly salary'], type: 'number' },
   { key: 'housing_allowance', label: 'Housing allowance', required: false, aliases: ['housing allowance', 'housing allowance 30% of basic pay', 'house allowance', 'housing', 'housing 30%'], type: 'number' },
   { key: 'meal_allowance', label: 'Lunch allowance', required: false, aliases: ['meal allowance', 'lunch allowance', 'lunch', 'lunch allwance', 'lunch allowance amount', 'meal'], type: 'number' },
@@ -48,10 +49,10 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'deduction_label', label: 'Deduction label', required: false, aliases: ['deduction label', 'deduction name'] },
   { key: 'overtime_eligible', label: 'Overtime eligible', required: false, aliases: ['overtime eligible', 'overtime eligibility'], type: 'boolean' },
   { key: 'payment_method', label: 'Payment method', required: false, aliases: ['payment method', 'payment channel', 'pay method'] },
-  { key: 'bank_name', label: 'Bank name', required: false, aliases: ['bank name'] },
-  { key: 'bank_account_name', label: 'Bank account name', required: false, aliases: ['bank account name', 'account name'] },
-  { key: 'bank_account_number', label: 'Bank account number', required: false, aliases: ['bank account number', 'account number'] },
-  { key: 'bank_branch_name', label: 'Bank branch name', required: false, aliases: ['branch', 'bank branch name', 'bank branch'] },
+  { key: 'bank_name', label: 'Bank name', required: false, aliases: ['bank name', 'bank'] },
+  { key: 'bank_account_name', label: 'Bank account name', required: false, aliases: ['bank account name', 'account name', 'account holder', 'account holder name'] },
+  { key: 'bank_account_number', label: 'Bank account number', required: false, aliases: ['bank account number', 'account number', 'bank account'] },
+  { key: 'bank_branch_name', label: 'Bank branch name', required: false, aliases: ['bank branch name', 'bank branch'] },
   { key: 'sort_code', label: 'Bank sort code', required: false, aliases: ['sort code', 'bank sort code'] },
   { key: 'mobile_money_provider', label: 'Mobile money provider or wallet', required: false, aliases: ['mobile money provider', 'mobile money network', 'wallet name'] },
   { key: 'mobile_money_number', label: 'Mobile money number', required: false, aliases: ['mobile money number'] },
@@ -92,12 +93,8 @@ export const originalEmployeeTemplateHeaders = [
 ] as const
 
 export const unsupportedTemplateFieldHeaders = ['Annual Leave Days', 'Loan or Other Deduction', 'Deduction Label', 'Sort Code'] as const
-export const allowedTemplateBanks = [
-  'AB Bank Zambia', 'Absa Bank Zambia', 'Access Bank Zambia', 'Bank of China (Zambia)', 'Citibank Zambia', 'Ecobank Zambia',
-  'First Alliance Bank Zambia', 'First Capital Bank Zambia', 'First National Bank Zambia (FNB)', 'Indo-Zambia Bank',
-  'Stanbic Bank Zambia', 'Standard Chartered Zambia', 'United Bank for Africa (UBA) Zambia',
-  'Zambia Industrial Commercial Bank (ZICB)', 'Zambia National Commercial Bank (Zanaco)',
-] as const
+export const employeeTemplateValues = employeeTemplateValuesData
+export const allowedTemplateBanks = employeeTemplateValuesData.banks
 
 export function templateFieldsWithUnsupportedData(headers: string[], populatedHeaders: string[]): string[] {
   const normalizedPopulated = new Set(populatedHeaders.map(normalizeImportHeader))
@@ -114,7 +111,23 @@ export function hasTemplateExampleInstruction(rows: unknown[][]): boolean {
 }
 
 export function isAllowedTemplateBank(value: string): boolean {
-  return allowedTemplateBanks.some((bank) => normalizeImportHeader(bank) === normalizeImportHeader(value))
+  return normalizeTemplateBank(value) !== null
+}
+
+export function normalizeTemplateBank(value: string): string | null {
+  const normalized = normalizeImportHeader(value).replace(/\bzambia\b/g, '').replace(/\s+/g, ' ').trim()
+  const aliases: Record<string, string> = {
+    absa: 'Absa Bank Zambia',
+    fnb: 'First National Bank Zambia (FNB)',
+    zanaco: 'Zambia National Commercial Bank (Zanaco)',
+    uba: 'United Bank for Africa (UBA) Zambia',
+    zicb: 'Zambia Industrial Commercial Bank (ZICB)',
+  }
+  if (aliases[normalized]) return aliases[normalized]
+  return allowedTemplateBanks.find((bank) => {
+    const canonical = normalizeImportHeader(bank).replace(/\bzambia\b/g, '').replace(/\s+/g, ' ').trim()
+    return canonical === normalized
+  }) ?? null
 }
 
 export function isValidTemplateMobileNumber(value: string, paymentMethod: string): boolean {

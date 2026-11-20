@@ -1,0 +1,13 @@
+{
+  "gender": ["Male", "Female"],
+  "employmentType": ["Permanent", "Fixed-term", "Part-time", "Casual", "Daily-rated"],
+  "salaryFrequency": ["Monthly", "Fortnightly", "Weekly", "Daily"],
+  "paymentMethod": ["Bank transfer", "Airtel Money", "MTN MoMo", "Zamtel Kwacha", "Cash"],
+  "banks": [
+    "AB Bank Zambia", "Absa Bank Zambia", "Access Bank Zambia", "Bank of China (Zambia)", "Citibank Zambia", "Ecobank Zambia",
+    "First Alliance Bank Zambia", "First Capital Bank Zambia", "First National Bank Zambia (FNB)", "Indo-Zambia Bank",
+    "Stanbic Bank Zambia", "Standard Chartered Zambia", "United Bank for Africa (UBA) Zambia",
+    "Zambia Industrial Commercial Bank (ZICB)", "Zambia National Commercial Bank (Zanaco)"
+  ],
+  "mobileMoneyProvider": ["Airtel Money", "MTN MoMo", "Zamtel Kwacha"]
+}

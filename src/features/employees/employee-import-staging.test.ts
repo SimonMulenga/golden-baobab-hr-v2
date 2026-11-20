@@ -90,13 +90,21 @@ describe('employee workbook staging', () => {
       ]))
   })
 
-  it('generates a blank Employees template with the exact approved 35 columns and a 30% housing formula', async () => {
+  it('generates the exact blank 38-column template and supporting sheets with allowance formulas', async () => {
     const buffer = new Uint8Array(readFileSync('public/employee-template.xlsx')).buffer
     const template = XLSX.read(buffer, { type: 'array', cellFormula: true })
-    expect(template.SheetNames).toEqual(['Employees'])
+    expect(template.SheetNames).toEqual(['Employees', 'Instructions', 'Valid Values'])
     const worksheet = template.Sheets.Employees
     expect(XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, raw: true })[0]).toEqual(employeeTemplateColumns.map((column) => column.heading))
-    expect(employeeTemplateColumns).toHaveLength(35)
+    expect(employeeTemplateColumns).toHaveLength(38)
+    expect(employeeTemplateColumns.map(({ heading }) => heading)).toEqual([
+      'Employee Number','First Name','Middle Name','Last Name','Date of Birth','Gender','Nationality','NRC / ID Number',
+      'Residential Address','Phone Number','Email','Email Unavailable Reason','Company','Branch','Department','Job Title',
+      'Employment Type','Contract Type','Date Joined','Salary Frequency','Basic Salary','Housing allowance 30% of basic pay',
+      'Lunch Allwance','Transport Alwance','Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name',
+      'Bank Account Name','Bank Account Number','Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number',
+      'Emergency Contact Name','Emergency Contact Relationship','Emergency Contact Phone Number',
+    ])
     const excel = new ExcelJS.Workbook()
     const loaded = await excel.xlsx.load(Buffer.from(buffer) as never)
     const sheet = loaded.getWorksheet('Employees')!
@@ -104,12 +112,23 @@ describe('employee workbook staging', () => {
     expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 })
     expect(sheet.getColumn(1).width).toBeGreaterThan(0)
     expect(sheet.getCell('A2').value).toBeNull()
-    expect(sheet.getCell('T2').value).toMatchObject({ formula: 'IF(S2="","",ROUND(S2*30%,2))' })
-    expect(sheet.getCell('T501').value).toMatchObject({ formula: 'IF(S501="","",ROUND(S501*30%,2))' })
-    expect(sheet.getCell('X2').value).toMatchObject({ formula: 'IF(S2="","",SUM(S2:W2))' })
-    expect(sheet.getCell('X501').value).toMatchObject({ formula: 'IF(S501="","",SUM(S501:W501))' })
+    expect(sheet.getCell('V2').value).toMatchObject({ formula: 'IF(U2="","",ROUND(U2*30%,2))' })
+    expect(sheet.getCell('V501').value).toMatchObject({ formula: 'IF(U501="","",ROUND(U501*30%,2))' })
+    expect(sheet.getCell('Z2').value).toMatchObject({ formula: 'IF(U2="","",SUM(U2:Y2))' })
+    expect(sheet.getCell('Z501').value).toMatchObject({ formula: 'IF(U501="","",SUM(U501:Y501))' })
+    expect(sheet.getCell('AD2').numFmt).toBe('@')
+    expect(sheet.getCell('V2').protection?.locked ?? true).toBe(true)
+    expect(sheet.getCell('U2').protection.locked).toBe(false)
+    expect(loaded.getWorksheet('Valid Values')?.getCell('A2').value).toBe('Male')
+    const validations = (sheet as unknown as { dataValidations: { model: Record<string, { formulae: string[] }> } }).dataValidations.model
+    expect(validations.F2.formulae).toEqual(['=GenderValues'])
+    expect(validations.Q2.formulae).toEqual(['=EmploymentTypeValues'])
+    expect(validations.T2.formulae).toEqual(['=SalaryFrequencyValues'])
+    expect(validations.AA2.formulae).toEqual(['=PaymentMethodValues'])
+    expect(validations.AB2.formulae).toEqual(['=BankNameValues'])
     const parsedBlank = extractEmployeeWorkbook(buffer, companies)
     expect(parsedBlank.records).toEqual([])
+    expect(parsedBlank.worksheetMappings.map(({ sheet }) => sheet)).toEqual(['Employees'])
   })
 
   it('round-trips the template, recalculates housing from salary, and maps all allowance columns', () => {
@@ -122,6 +141,8 @@ describe('employee workbook staging', () => {
       employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office',
       basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, other_allowances: 80, gross_pay: 10980,
       phone: '0970000007', tpin: '0000001234', contract_start_date: '2026-11-01',
+      contract_type: 'Permanent', salary_frequency: 'Monthly', bank_account_name: 'Mina Test', bank_account_number: '00012345',
+      gender: 'F', employment_type: 'Fixed-term contract', payment_method: 'Bank transfer', bank_name: 'ABSA',
     }
     for (const [key, value] of Object.entries(values)) {
       worksheet.getCell(2, indexes[key] + 1).value = value
@@ -135,13 +156,43 @@ describe('employee workbook staging', () => {
       employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', basic_pay: '8000',
       housing_allowance: '2400.00', housing_allowance_source: 'DEFAULT_30', meal_allowance: '450',
       transport_allowance: '250', other_allowances: '80', phone: '0970000007', tpin: '0000001234', gross_pay_proposed: '11180.00', gross_pay_review_required: 'true',
+      contract_type: 'Permanent', salary_frequency: 'MONTHLY', bank_account_name: 'Mina Test', bank_account_number: '00012345',
+      gender: 'FEMALE', employment_type: 'FIXED_TERM', payment_method: 'BANK_TRANSFER', bank_name: 'Absa Bank Zambia',
     })
     expect(employee.company_id).toBe('company-1')
     expect(employee.branch_id).toBe('north-1')
     expect(employee.original_data['Housing allowance 30% of basic pay']).toBe('')
-    expect(employee.payroll_data).toMatchObject({ 'Groce Pay (Sum of all the earnings)': 10980 })
+    expect(employee.payroll_data).toMatchObject({ 'Basic Salary': 8000, 'Groce Pay (Sum of all the earnings)': 10980, 'Bank Account Name': 'Mina Test', 'Bank Account Number': '00012345' })
     expect(employee.current_data.gross_pay).toBe('10980')
     })
+  })
+
+  it('keeps the reported incomplete candidate stageable with bank, contract, frequency, and branch details missing', async () => {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(readFileSync('public/employee-template.xlsx') as never)
+    const worksheet = workbook.getWorksheet('Employees')!
+    const columns = Object.fromEntries(employeeTemplateColumns.map((column, index) => [column.key, index + 1]))
+    worksheet.getCell(2, columns.employee_number).value = 'BEN-002'
+    worksheet.getCell(2, columns.first_name).value = 'SIMON'
+    worksheet.getCell(2, columns.last_name).value = 'MULENGA'
+    worksheet.getCell(2, columns.department).value = 'IT'
+    worksheet.getCell(2, columns.basic_pay).value = 5000
+    worksheet.getCell(2, columns.payment_method).value = 'Bank transfer'
+    const buffer = new Uint8Array(await workbook.xlsx.writeBuffer()).buffer as ArrayBuffer
+    const parsed = extractEmployeeWorkbook(buffer, companies, {}, 'company-1')
+    expect(parsed.records).toHaveLength(1)
+    expect(parsed.records[0]).toMatchObject({
+      company_id: 'company-1', branch_id: null,
+      current_data: {
+        employee_number: 'BEN-002', first_name: 'SIMON', last_name: 'MULENGA', department: 'IT',
+        basic_pay: '5000', housing_allowance: '1500.00', housing_allowance_proposed: '1500.00',
+        gross_pay_proposed: '6500.00', bank_account_name: '', contract_type: '', salary_frequency: '',
+      },
+    })
+    expect(validateStagedEmployee(parsed.records[0].current_data, 'company-1', '')).toEqual(expect.arrayContaining([
+      'contract_type is required', 'salary_frequency is required', 'Branch assignment is required',
+      'Bank details are required for bank transfer',
+    ]))
   })
 
   it('supports UTF-8 CSV, keeps incomplete rows, and rejects extension/content mismatches', () => {

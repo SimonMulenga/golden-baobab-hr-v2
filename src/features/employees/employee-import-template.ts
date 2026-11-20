@@ -1,7 +1,7 @@
 export function downloadEmployeeTemplate(): void {
   const anchor = document.createElement('a')
   anchor.href = '/employee-template.xlsx'
-  anchor.download = 'golden-baobab-employee-template.xlsx'
+  anchor.download = 'Golden_Baobab_Employee_Import_Template.xlsx'
   anchor.click()
 }
 
