@@ -117,8 +117,8 @@ describe('employee workbook staging', () => {
     expect(sheet.getCell('Z2').value).toMatchObject({ formula: 'IF(U2="","",SUM(U2:Y2))' })
     expect(sheet.getCell('Z501').value).toMatchObject({ formula: 'IF(U501="","",SUM(U501:Y501))' })
     expect(sheet.getCell('AD2').numFmt).toBe('@')
-    expect(sheet.getCell('V2').protection?.locked ?? true).toBe(true)
-    expect(sheet.getCell('U2').protection.locked).toBe(false)
+    expect((sheet.model as unknown as { sheetProtection?: unknown }).sheetProtection).toBeFalsy()
+    for (const cell of ['A2','Y2','AA2','AL2','A501','AL501']) expect(sheet.getCell(cell).protection?.locked ?? false).toBe(false)
     expect(loaded.getWorksheet('Valid Values')?.getCell('A2').value).toBe('Male')
     const validations = (sheet as unknown as { dataValidations: { model: Record<string, { formulae: string[] }> } }).dataValidations.model
     expect(validations.F2.formulae).toEqual(['=GenderValues'])
@@ -137,10 +137,11 @@ describe('employee workbook staging', () => {
     return excel.xlsx.load(source as never).then(async (template) => {
     const worksheet = template.getWorksheet('Employees')!
     const indexes = Object.fromEntries(employeeTemplateColumns.map((column, index) => [column.key, index]))
-    const values: Record<string, string | number> = {
+    const values: Record<string, string | number | Date> = {
       employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office',
       basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, other_allowances: 80, gross_pay: 10980,
       phone: '0970000007', tpin: '0000001234', contract_start_date: '2026-11-01',
+      date_of_birth: new Date('1990-04-02T00:00:00Z'),
       contract_type: 'Permanent', salary_frequency: 'Monthly', bank_account_name: 'Mina Test', bank_account_number: '00012345',
       gender: 'F', employment_type: 'Fixed-term contract', payment_method: 'Bank transfer', bank_name: 'ABSA',
     }
@@ -157,6 +158,7 @@ describe('employee workbook staging', () => {
       housing_allowance: '2400.00', housing_allowance_source: 'DEFAULT_30', meal_allowance: '450',
       transport_allowance: '250', other_allowances: '80', phone: '0970000007', tpin: '0000001234', gross_pay_proposed: '11180.00', gross_pay_review_required: 'true',
       contract_type: 'Permanent', salary_frequency: 'MONTHLY', bank_account_name: 'Mina Test', bank_account_number: '00012345',
+      date_of_birth: '1990-04-02', contract_start_date: '2026-11-01',
       gender: 'FEMALE', employment_type: 'FIXED_TERM', payment_method: 'BANK_TRANSFER', bank_name: 'Absa Bank Zambia',
     })
     expect(employee.company_id).toBe('company-1')

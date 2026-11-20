@@ -66,6 +66,15 @@ export function createEmployeeImportStagingService(client: SupabaseClient) {
         .eq('batch_id', batchId).order('source_sheet').order('source_row').limit(5000)
       return unwrap(result) as StagingRecord[]
     },
+    async listPendingReviewRecords(portfolioIds: string[], companyId?: string): Promise<StagingRecord[]> {
+      if (!portfolioIds.length) return []
+      let query = client.from('employee_import_staging_records').select('*')
+        .in('portfolio_id', portfolioIds).is('resulting_employee_id', null)
+        .in('review_status', ['PENDING_REVIEW','NEEDS_INFORMATION','DUPLICATE_REVIEW','READY_FOR_APPROVAL'])
+        .order('created_at', { ascending: false }).limit(500)
+      if (companyId) query = query.eq('company_id', companyId)
+      return unwrap(await query) as StagingRecord[]
+    },
     async listHistory(recordId: string) {
       const result = await client.from('employee_import_review_history').select('id,actor_id,action,reason,changed_fields,occurred_at')
         .eq('staging_record_id', recordId).order('occurred_at', { ascending: false }).limit(100)

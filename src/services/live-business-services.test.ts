@@ -3,6 +3,27 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createLiveBusinessServices } from './live-business-services';
 
 describe('live Supabase business service adapter', () => {
+  it('uses scoped bulk approval and permission-filtered queue summary RPCs', async () => {
+    const outcomes = [{ employee_id: 'employee-synthetic', success: true, status: 'APPROVED' }]
+    const summary = { total_pending: 2, ready_for_approval: 1, needs_correction: 1, approved: 4, rejected: 0, approval_eligible: 1, rejection_eligible: 1 }
+    const rpc = vi.fn(async (name: string) => ({ data: name === 'employee_review_submissions' ? outcomes : summary, error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.reviewSubmissions(['employee-synthetic'], 'APPROVE', undefined, 'company-synthetic')).resolves.toEqual(outcomes)
+    await expect(services.employees.approvalQueueSummary('company-synthetic')).resolves.toEqual(summary)
+    expect(rpc).toHaveBeenNthCalledWith(1, 'employee_review_submissions', { p_employee_ids: ['employee-synthetic'], p_decision: 'APPROVE', p_reason: null, p_company_id: 'company-synthetic' })
+    expect(rpc).toHaveBeenNthCalledWith(2, 'employee_approval_queue_summary', { p_company_id: 'company-synthetic' })
+  })
+
+  it('uses scoped bulk approval and permission-filtered queue summary RPCs', async () => {
+    const outcomes = [{ employee_id: 'employee-synthetic', success: true, status: 'APPROVED' }]
+    const summary = { total_pending: 2, ready_for_approval: 1, needs_correction: 1, approved: 4, rejected: 0, approval_eligible: 1, rejection_eligible: 1 }
+    const rpc = vi.fn(async (name: string) => ({ data: name === 'employee_review_submissions' ? outcomes : summary, error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.reviewSubmissions(['employee-synthetic'], 'APPROVE', undefined, 'company-synthetic')).resolves.toEqual(outcomes)
+    await expect(services.employees.approvalQueueSummary('company-synthetic')).resolves.toEqual(summary)
+    expect(rpc).toHaveBeenNthCalledWith(1, 'employee_review_submissions', { p_employee_ids: ['employee-synthetic'], p_decision: 'APPROVE', p_reason: null, p_company_id: 'company-synthetic' })
+    expect(rpc).toHaveBeenNthCalledWith(2, 'employee_approval_queue_summary', { p_company_id: 'company-synthetic' })
+  })
   it('submits imports through one idempotent atomic server workflow', async () => {
     const response = { id: 'job-1', status: 'COMPLETED', total_rows: 1, imported_rows: 0, updated_rows: 1, errors: [], replayed: false }
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: response, error: null }))

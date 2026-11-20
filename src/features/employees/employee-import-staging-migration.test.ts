@@ -3,6 +3,8 @@ import migration from '../../../supabase/migrations/20261120005500_secure_employ
 import pendingBranchMigration from '../../../supabase/migrations/20261120005600_allow_pending_import_branch_assignment.sql?raw'
 import allowanceMigration from '../../../supabase/migrations/20261120005700_employee_import_allowance_components.sql?raw'
 import departmentValidationMigration from '../../../supabase/migrations/20261120005800_validate_staged_departments.sql?raw'
+import bulkApprovalMigration from '../../../supabase/migrations/20261120005900_employee_bulk_approval_and_queue_summary.sql?raw'
+import approvalSummaryScopeMigration from '../../../supabase/migrations/20261120006000_refine_employee_approval_summary_scope.sql?raw'
 
 describe('secure employee import staging migration contract', () => {
   it('is additive and retains the existing portfolio/company/branch and employee approval model', () => {
@@ -77,5 +79,26 @@ describe('secure employee import staging migration contract', () => {
     expect(departmentValidationMigration).toMatch(/create trigger employee_import_department_guard/i)
     expect(departmentValidationMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
     expect(departmentValidationMigration).not.toMatch(/insert into public\.(employees|employee_compensation|payroll_runs|payroll_items)/i)
+  })
+
+  it('keeps bulk approval within the authoritative per-employee permission, validation, and audit workflow', () => {
+    expect(bulkApprovalMigration).toMatch(/perform public\.employee_review_submission\(v_id, p_decision/i)
+    expect(bulkApprovalMigration).toMatch(/p_decision = 'REJECT' and nullif\(btrim\(p_reason\),''\) is null/i)
+    expect(bulkApprovalMigration).toMatch(/grant execute on function public\.employee_review_submissions[\s\S]*?to authenticated/i)
+    expect(bulkApprovalMigration).toMatch(/app_private\.has_permission\('employee\.import'/i)
+    expect(bulkApprovalMigration).toMatch(/app_private\.has_permission\('employee\.private\.view'/i)
+    expect(bulkApprovalMigration).toMatch(/revoke all on function public\.employee_approval_queue_summary/i)
+    expect(bulkApprovalMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
+    expect(bulkApprovalMigration).not.toMatch(/insert into public\.(payroll_runs|payroll_items|payroll_input_items)/i)
+  })
+
+  it('keeps final approval counts permission-scoped and the refinement forward-only', () => {
+    expect(approvalSummaryScopeMigration).toMatch(/has_permission\('employee\.approve'/i)
+    expect(approvalSummaryScopeMigration).toMatch(/has_permission\('employee\.reject'/i)
+    expect(approvalSummaryScopeMigration).toMatch(/has_permission\('employee\.import'/i)
+    expect(approvalSummaryScopeMigration).toMatch(/has_permission\('employee\.private\.view'/i)
+    expect(approvalSummaryScopeMigration).toMatch(/revoke all on function public\.employee_approval_queue_summary\(uuid\) from public, anon/i)
+    expect(approvalSummaryScopeMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
+    expect(approvalSummaryScopeMigration).not.toMatch(/insert into public\.(employees|payroll_runs|payroll_items)/i)
   })
 })

@@ -66,6 +66,7 @@ function AppShell() {
   const [workspacePreferences, setWorkspacePreferences] = useState<{ companyId: string; value: WorkspacePreferences } | null>(null)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
   const [pendingPayrollApprovals, setPendingPayrollApprovals] = useState(0)
+  const [pendingEmployeeApprovals, setPendingEmployeeApprovals] = useState(0)
   const [authActionError, setAuthActionError] = useState('')
   const location = useLocation()
   const routeName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name
@@ -74,6 +75,7 @@ function AppShell() {
   const workspaceName = activeCompanyId === 'all' ? 'All companies' : currentCompany?.name ?? 'Company workspace'
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
   const canOpenPayrollApprovals = allowedRoutes.has('/payroll-approvals')
+  const canOpenEmployeeApprovals = allowedRoutes.has('/employee-approvals')
   const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes])
   const searchItems = useMemo(() => visibleNav.flatMap((section) => section.items).filter((item) => item.name.toLowerCase().includes(searchQuery.trim().toLowerCase())), [visibleNav, searchQuery])
   const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
@@ -117,6 +119,20 @@ function AppShell() {
     const interval = window.setInterval(() => void loadCount(), 60_000)
     return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-payroll-approvals-changed', loadCount) }
   }, [authUserId, canOpenPayrollApprovals, location.pathname])
+  useEffect(() => {
+    if (!authUserId || !canOpenEmployeeApprovals) { setPendingEmployeeApprovals(0); return }
+    let cancelled = false
+    const loadCount = async () => {
+      try {
+        const summary = await createLiveBusinessServices(getSupabaseClient()).employees.approvalQueueSummary(activeCompanyId !== 'all' ? activeCompanyId : undefined)
+        if (!cancelled) setPendingEmployeeApprovals(summary.total_pending)
+      } catch { if (!cancelled) setPendingEmployeeApprovals(0) }
+    }
+    void loadCount()
+    window.addEventListener('gbhr-employee-approvals-changed', loadCount)
+    const interval = window.setInterval(() => void loadCount(), 60_000)
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-employee-approvals-changed', loadCount) }
+  }, [authUserId, canOpenEmployeeApprovals, activeCompanyId, location.pathname])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -217,7 +233,7 @@ function AppShell() {
     <aside id="workspace-navigation" className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span>GB</span></div><span className="brand-word">Golden Baobab <span>HR</span></span><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN') ? 'Portfolio Administrator' : roleContext.roles.includes('PORTFOLIO_ADMIN') ? 'Platform Super Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
-      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/' || path === '/employees'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined} onClick={() => setMobileOpen(false)}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
+      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/' || path === '/employees'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined} onClick={() => setMobileOpen(false)}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Employee Approvals' && pendingEmployeeApprovals > 0 && <span className="nav-count" aria-label={`${pendingEmployeeApprovals} pending employee approvals`}>{pendingEmployeeApprovals > 99 ? '99+' : pendingEmployeeApprovals}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom">{!isLiveMode && <div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div>}<div className="profile-row"><div className="profile-avatar">{isLiveMode ? initials(profileName) : 'CM'}</div><div className="profile-copy"><strong>{profileName}</strong><span>{isLiveMode ? 'Signed-in account' : 'Workspace admin'}</span></div>{!isLiveMode && <MoreHorizontal size={18} />}</div></div>
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label="Collapse sidebar"><ChevronLeft size={15} /></button>
     </aside>
@@ -232,7 +248,7 @@ function AppShell() {
           <Route path="/companies/:companyId" element={<CompanyProfile />} />
           <Route path="/branches" element={<BranchManagement />} />
           <Route path="/employees" element={<LiveEmployeeDirectory />} />
-          <Route path="/employee-approvals" element={<LiveEmployeeApprovals />} />
+          <Route path="/employee-approvals" element={<LiveEmployeeApprovals roles={roleContext.roles} />} />
           <Route path="/employees/new" element={<LiveEmployeeForm />} />
           <Route path="/employees/import" element={<LiveEmployeeImport />} />
           <Route path="/employees/import/staging" element={<LiveEmployeeImportStaging />} />

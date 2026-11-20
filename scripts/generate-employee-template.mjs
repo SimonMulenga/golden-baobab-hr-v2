@@ -42,9 +42,6 @@ for (let row = 2; row <= preparedInputRows + 1; row++) {
   const grossPayCell = worksheet.getCell(row, grossPayColumn)
   grossPayCell.value = { formula: `IF(${salaryAddress}="","",SUM(${worksheet.getCell(row, basicSalaryColumn).address}:${worksheet.getCell(row, grossPayColumn - 1).address}))`, result: null }
   grossPayCell.numFmt = currencyFormat
-  worksheet.getRow(row).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
-    cell.protection = { locked: columnNumber === housingAllowanceColumn || columnNumber === grossPayColumn }
-  })
 }
 
 const instructions = workbook.addWorksheet('Instructions')
@@ -105,6 +102,8 @@ for (const [range, name] of validationRows) {
     errorStyle: 'warning', errorTitle: 'Review this value', error: 'Choose a listed value or leave it for HR review.',
   })
 }
-worksheet.protect('', { selectLockedCells: false, selectUnlockedCells: true, autoFilter: true, sort: true })
+// Keep formula cells intact, but leave sheet navigation and all input cells
+// available in Excel. Sheet protection caused Tab from column Y to wrap to A.
+worksheet.protection = undefined
 
 await workbook.xlsx.writeFile(resolve(root, 'public/employee-template.xlsx'))
