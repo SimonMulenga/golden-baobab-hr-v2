@@ -33,6 +33,7 @@ export function LiveEmployeeImportStaging() {
   const [batches, setBatches] = useState<StagingBatch[]>([])
   const [selectedBatch, setSelectedBatch] = useState<StagingBatch | null>(null)
   const [stagedRows, setStagedRows] = useState<StagingRecord[]>([])
+  const [selectedApprovalIds, setSelectedApprovalIds] = useState<string[]>([])
   const [selectedRecordId, setSelectedRecordId] = useState('')
   const [reviewHistory, setReviewHistory] = useState<{ id: number; actor_id: string; action: string; reason: string | null; changed_fields: string[]; occurred_at: string }[]>([])
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -96,6 +97,7 @@ export function LiveEmployeeImportStaging() {
     try {
       const rows = await createEmployeeImportStagingService(getSupabaseClient()).listRecords(batch.id)
       setSelectedBatch(batch); setStagedRows(rows); setSelectedRecordId(rows[0]?.id ?? '');
+      setSelectedApprovalIds([])
       setPage(0); setSearchQuery(''); setStatusFilter('ALL'); setFilterCompanyId('ALL'); setFilterBranchId('ALL')
       setSheetSummary(batch.sheet_summary ?? [])
       setReconciliation(batch.reconciliation ?? {})
@@ -240,10 +242,9 @@ export function LiveEmployeeImportStaging() {
     finally { setBusy(false) }
   }
 
-  async function approveAllEligible() {
-    const eligible = stagedRows.filter((row) => row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id))
+  async function approveSubmittedRows(eligible: StagingRecord[], actionLabel: string) {
     if (!eligible.length) return
-    if (!window.confirm(`Approve all ${eligible.length} submitted employees through the existing HR approval workflow? Each decision will use your current company and branch permissions; incomplete or unresolved records are excluded.`)) return
+    if (!window.confirm(`Approve ${actionLabel} (${eligible.length}) through the existing HR approval workflow? Each decision will use your current company and branch permissions; incomplete or unresolved records are excluded.`)) return
     setBusy(true); setError(''); setNotice('')
     const outcomes: { row: StagingRecord; error?: string }[] = []
     try {
@@ -259,6 +260,21 @@ export function LiveEmployeeImportStaging() {
       await openBatch(selectedBatch!)
       await refreshBatches()
     } finally { setBusy(false) }
+  }
+
+  async function approveSelected() {
+    const eligible = stagedRows.filter((row) => selectedApprovalIds.includes(row.id) && row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id))
+    await approveSubmittedRows(eligible, 'selected employees')
+  }
+
+  async function approveAllEligible() {
+    const eligible = stagedRows.filter((row) => row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id))
+    await approveSubmittedRows(eligible, 'all eligible submitted employees')
+  }
+
+  function toggleApprovalSelection(row: StagingRecord) {
+    if (row.review_status !== 'SUBMITTED_FOR_APPROVAL' || !row.resulting_employee_id) return
+    setSelectedApprovalIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])
   }
 
   function changeField(field: string, value: string) { setDraft((previous) => ({ ...previous, [field]: value })) }
@@ -308,12 +324,12 @@ export function LiveEmployeeImportStaging() {
       {!batches.length?<p>No staged batches are available in this authorized portfolio.</p>:batches.map((batch)=><button key={batch.id} className={`staging-batch-row ${selectedBatch?.id===batch.id?'active':''}`} onClick={()=>void openBatch(batch)}><span>{batch.uploaded_filename}</span><small>{new Date(batch.created_at).toLocaleString()}</small><strong>{batch.status.replaceAll('_',' ')}</strong><span>{batch.total_records} total · {batch.valid_records} valid · {batch.incomplete_records} need information · {batch.duplicate_warnings} duplicate warnings · {batch.approved_records} approved</span><small>{batch.reviewed_records} of {batch.total_records} reviewed; {batch.ready_records} ready for approval</small><progress aria-label={`${batch.uploaded_filename} review progress`} value={batch.reviewed_records} max={Math.max(1,batch.total_records)} /></button>)}
     </section>
 
-    {selectedBatch&&<section className="panel live-import-preview" aria-label="HR staging queue"><header><div><div className="section-eyebrow">PENDING HR REVIEW</div><h2>{selectedBatch.uploaded_filename}</h2><p>{stagedRows.length} source rows · {selectedBatch.source_sha256.slice(0,12)}… source hash</p></div><div><button className="button-secondary" onClick={downloadReconciliation}>Download redacted reconciliation CSV</button><button className="button-secondary" disabled={busy||submittedCount===0} onClick={()=>void approveAllEligible()}>Approve all eligible ({submittedCount})</button><button className="button-primary" disabled={busy||readyCount===0} onClick={()=>void submitEligible()}>Submit all {readyCount} eligible for HR approval</button></div></header>
+    {selectedBatch&&<section className="panel live-import-preview" aria-label="HR staging queue"><header><div><div className="section-eyebrow">PENDING HR REVIEW</div><h2>{selectedBatch.uploaded_filename}</h2><p>{stagedRows.length} source rows · {selectedBatch.source_sha256.slice(0,12)}… source hash</p></div><div><button className="button-secondary" onClick={downloadReconciliation}>Download redacted reconciliation CSV</button><button className="button-secondary" disabled={busy||selectedApprovalIds.length===0} onClick={()=>void approveSelected()}>Approve selected ({selectedApprovalIds.length})</button><button className="button-secondary" disabled={busy||submittedCount===0} onClick={()=>void approveAllEligible()}>Approve all eligible ({submittedCount})</button><button className="button-primary" disabled={busy||readyCount===0} onClick={()=>void submitEligible()}>Submit all {readyCount} eligible for HR approval</button></div></header>
       <div className="live-import-summary"><strong>{readyCount} ready to submit</strong><strong>{needsInfoCount} need information</strong><span>{duplicateCount} duplicate review · {submittedCount} submitted awaiting HR approval · {selectedBatch.approved_records} approved</span></div>
       {reportSummary&&<div className="auth-shell-error" role="status"><strong>{reportSummary.worksheet} reconciliation:</strong> source row count {Number(reconciliation.row_count??stagedRows.length)} vs consolidated {reportSummary.employee_count??'unavailable'}; source basic salaries ZMW {Number(reconciliation.basic_salary_total??0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} vs consolidated ZMW {reportSummary.basic_subtotal?.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})??'unavailable'}. Any payroll transaction requires a separately resolved reconciliation.</div>}
       {reportSummary?.broken_formulas?.length?<div className="auth-shell-error" role="alert">Broken workbook formulas: {reportSummary.broken_formulas.map((formula)=>`${formula.cell} (row ${formula.row}): ${formula.error}`).join('; ')}.</div>:null}
       <div className="staging-filters"><label>Search records<input value={searchQuery} onChange={(event)=>{setSearchQuery(event.target.value);setPage(0)}} placeholder="Name, employee number, sheet or row" /></label><label>Status<select value={statusFilter} onChange={(event)=>{setStatusFilter(event.target.value);setPage(0)}}><option value="ALL">All statuses</option>{['PENDING_REVIEW','NEEDS_INFORMATION','DUPLICATE_REVIEW','READY_FOR_APPROVAL','SUBMITTED_FOR_APPROVAL','APPROVED','REJECTED','IMPORT_FAILED'].map((status)=><option value={status} key={status}>{status.replaceAll('_',' ')}</option>)}</select></label><label>Company<select value={filterCompanyId} onChange={(event)=>{setFilterCompanyId(event.target.value);setFilterBranchId('ALL');setPage(0)}}><option value="ALL">All companies</option>{portfolioCompanies.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>Branch<select value={filterBranchId} onChange={(event)=>{setFilterBranchId(event.target.value);setPage(0)}}><option value="ALL">All branches</option>{portfolioCompanies.filter((item)=>filterCompanyId==='ALL'||item.id===filterCompanyId).flatMap((item)=>item.branches.map((branch)=><option value={branch.id} key={branch.id}>{item.name} · {branch.name}</option>))}</select></label></div>
-      <div className="staging-review-layout"><div className="table-scroll"><table className="employee-table"><thead><tr><th>RECORD</th><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>STATUS</th></tr></thead><tbody>{filteredRecords.slice(page*pageSize,(page+1)*pageSize).map((row)=><tr key={row.id} className={row.id===selectedRecordId?'selected':''} onClick={()=>selectRecord(row)}><td>{row.source_sheet} · {row.source_row}</td><td>{row.current_data.first_name} {row.current_data.last_name}</td><td>{companies.find((item)=>item.id===row.company_id)?.name ?? 'Unassigned'} · {companies.find((item)=>item.id===row.company_id)?.branches.find((item)=>item.id===row.branch_id)?.name??'—'}</td><td>{row.review_status.replaceAll('_',' ')}</td></tr>)}</tbody></table><div className="staging-pagination"><span>Showing {filteredRecords.length?Math.min(page*pageSize+1,filteredRecords.length):0}–{Math.min((page+1)*pageSize,filteredRecords.length)} of {filteredRecords.length}</span><button className="button-secondary" disabled={page===0} onClick={()=>setPage((value)=>Math.max(0,value-1))}>Previous</button><span>Page {page+1} of {pageCount}</span><button className="button-secondary" disabled={page+1>=pageCount} onClick={()=>setPage((value)=>Math.min(pageCount-1,value+1))}>Next</button></div></div>
+      <div className="staging-review-layout"><div className="table-scroll"><table className="employee-table"><thead><tr><th>SELECT</th><th>RECORD</th><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>STATUS</th></tr></thead><tbody>{filteredRecords.slice(page*pageSize,(page+1)*pageSize).map((row)=><tr key={row.id} className={row.id===selectedRecordId?'selected':''} onClick={()=>selectRecord(row)}><td><input type="checkbox" aria-label={`Select ${row.current_data.first_name} ${row.current_data.last_name} for approval`} checked={selectedApprovalIds.includes(row.id)} disabled={busy||row.review_status!=='SUBMITTED_FOR_APPROVAL'||!row.resulting_employee_id} onClick={(event)=>event.stopPropagation()} onChange={()=>toggleApprovalSelection(row)} /></td><td>{row.source_sheet} · {row.source_row}</td><td>{row.current_data.first_name} {row.current_data.last_name}</td><td>{companies.find((item)=>item.id===row.company_id)?.name ?? 'Unassigned'} · {companies.find((item)=>item.id===row.company_id)?.branches.find((item)=>item.id===row.branch_id)?.name??'—'}</td><td>{row.review_status.replaceAll('_',' ')}</td></tr>)}</tbody></table><div className="staging-pagination"><span>Showing {filteredRecords.length?Math.min(page*pageSize+1,filteredRecords.length):0}–{Math.min((page+1)*pageSize,filteredRecords.length)} of {filteredRecords.length}</span><button className="button-secondary" disabled={page===0} onClick={()=>setPage((value)=>Math.max(0,value-1))}>Previous</button><span>Page {page+1} of {pageCount}</span><button className="button-secondary" disabled={page+1>=pageCount} onClick={()=>setPage((value)=>Math.min(pageCount-1,value+1))}>Next</button></div></div>
       {selectedRecord&&<section className="staging-record-editor"><header><div><h3>{selectedRecord.source_sheet} row {selectedRecord.source_row}</h3><span>{selectedRecord.review_status.replaceAll('_',' ')}</span></div><button type="button" className="icon-button" aria-label="Clear selected review" onClick={()=>setSelectedRecordId('')}><X size={15}/></button></header>
         {selectedRecord.resulting_employee_id&&<div className="auth-shell-error" role="status">This staged record is linked to an existing employee workflow. Use <Link to={`/employees/${selectedRecord.resulting_employee_id}/correct`}>the employee correction screen</Link>; this importer will not create a second employee.</div>}
         <div className="staging-fields"><label><span>Company *</span><select disabled={Boolean(selectedRecord.resulting_employee_id)} value={draftCompanyId??''} onChange={(event)=>{setDraftCompanyId(event.target.value||null);setDraftBranchId(null)}}><option value="">Select company</option>{portfolioCompanies.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>Workplace branch *</span><select value={draftBranchId??''} disabled={!draftCompanyId||Boolean(selectedRecord.resulting_employee_id)} onChange={(event)=>setDraftBranchId(event.target.value||null)}><option value="">Select branch</option>{portfolioCompanies.find((item)=>item.id===draftCompanyId)?.branches.filter((item)=>item.status==='Active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div>
