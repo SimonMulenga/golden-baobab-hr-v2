@@ -1,5 +1,6 @@
 import * as XLSX from '@e965/xlsx'
-import { dateForImport, isValidImportDate, liveImportFields, mapImportHeader, normalizeImportHeader, preserveIdentifierText } from './live-import-model'
+import { dateForImport, isValidImportDate, liveImportFields, mapEmployeeColumns, normalizeImportHeader, preserveIdentifierText, type EmployeeFieldMapping } from './live-import-model'
+import { calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
 
 export type StagedWorkbookRow = {
   source_sheet: string
@@ -15,13 +16,13 @@ export type WorkbookExtraction = {
   records: StagedWorkbookRow[]
   sheetSummary: { sheet: string; extracted: number; excluded: number }[]
   exclusions: { sheet: string; row: number; reason: string }[]
+  worksheetMappings: { sheet: string; headerRow: number; headers: string[]; mapping: EmployeeFieldMapping; conflicts: string[] }[]
   reconciliation: Record<string, unknown> & { row_count: number; basic_salary_total: number; excluded_rows: number }
 }
 
 const normalizeEnum = (value: string) => normalizeImportHeader(value).replaceAll(' ', '_').toUpperCase()
-const companyHeader = (value: string) => ['location', 'company', 'company name', 'employing company', 'workplace'].includes(normalizeImportHeader(value))
 const summaryRow = (values: unknown[]) => values.some((value) => /^(grand\s+total|sub\s*total|subtotal|total\s+employees|employee\s+count)$/i.test(String(value ?? '').trim()))
-const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay'])
+const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances'])
 
 function cellValue(value: unknown, format?: string): unknown {
   if (value && typeof value === 'object' && 'v' in value) {
@@ -71,14 +72,14 @@ function amountValue(value: unknown): number | null {
   return /^\d+(?:\.\d{1,2})?$/.test(raw) ? Number(raw) : null
 }
 
-const payrollHeader = /allowance|overtime|o\/t|earning|income|loan|advance|deduction|napsa|nhima|paye|levy|net pay|gross pay|bonus|commission|gratuity|arrears|reimburse|benefit|cash|bank|mobile|salary/i
-const combinedNameHeader = (value: string) => ['name','employee name','full name','staff name','name of employee'].includes(normalizeImportHeader(value))
+const payrollHeader = /allowance|lunch|meal|transport|medical|overtime|o\/t|earning|income|loan|advance|deduction|napsa|nhima|paye|levy|net pay|gross pay|bonus|commission|gratuity|arrears|reimburse|benefit|cash|bank|mobile|salary/i
 
-export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; branches: { id: string; name: string; status: string }[] }[]): WorkbookExtraction {
+export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; branches: { id: string; name: string; status: string }[] }[], mappingOverrides: Record<string, EmployeeFieldMapping> = {}): WorkbookExtraction {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellNF: true, dense: false })
   const records: StagedWorkbookRow[] = []
   const exclusions: WorkbookExtraction['exclusions'] = []
   const sheetSummary: WorkbookExtraction['sheetSummary'] = []
+  const worksheetMappings: WorkbookExtraction['worksheetMappings'] = []
   let basicSalaryTotal = 0
 
   let consolidatedReport: Record<string, unknown> | undefined
@@ -105,9 +106,14 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
     const headerIndex = findEmployeeHeader(matrix)
     if (headerIndex < 0) continue
     const headers = (matrix[headerIndex] ?? []).map((item, index) => String(item ?? '').trim() || `Column ${index + 1}`)
-    const mapping = mapImportHeader(headers)
-    const mappedEmployeeHeaders = new Set(Object.values(mapping).filter(Boolean))
-    const companyColumn = headers.findIndex(companyHeader)
+    const autoMapping = mapEmployeeColumns(headers)
+    const hasOverride = Object.hasOwn(mappingOverrides, sheetName)
+    const mapping = mappingOverrides[sheetName] ?? autoMapping.mapping
+    const mappingConflicts = hasOverride ? [] : [...autoMapping.conflicts]
+    const selectedColumns = new Map<number, string[]>()
+    for (const [key, column] of Object.entries(mapping)) if (column !== null && column !== undefined) selectedColumns.set(column, [...(selectedColumns.get(column) ?? []), key])
+    for (const [column, keys] of selectedColumns) if (keys.length > 1) mappingConflicts.push(`Column ${column + 1} is mapped to multiple fields: ${keys.join(', ')}`)
+    worksheetMappings.push({ sheet: sheetName, headerRow: headerIndex + 1, headers, mapping, conflicts: [...new Set(mappingConflicts)] })
     let extracted = 0
     let excluded = 0
 
@@ -120,21 +126,26 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
         excluded++
         continue
       }
-      const original = Object.fromEntries(headers.map((header, column) => [header, cellValue(row[column], sheet[`${XLSX.utils.encode_col(column)}${excelRow}`]?.z)]))
+      const original = Object.fromEntries(headers.map((header, column) => {
+        const duplicateIndex = headers.slice(0, column).filter((prior) => prior === header).length
+        return [duplicateIndex ? `${header} (${duplicateIndex + 1})` : header, cellValue(row[column], sheet[`${XLSX.utils.encode_col(column)}${excelRow}`]?.z)]
+      }))
       const current = Object.fromEntries(liveImportFields.map((field) => {
-        const column = mapping[field.key]
-        const cell = column ? sheet[`${XLSX.utils.encode_col(headers.indexOf(column))}${excelRow}`] : undefined
-        const raw = column ? row[headers.indexOf(column)] : ''
+        const column = mapping[field.key] ?? null
+        const cell = column === null ? undefined : sheet[`${XLSX.utils.encode_col(column)}${excelRow}`]
+        const raw = column === null ? '' : row[column]
         return [field.key, canonicalValue(field.key, cellValue(raw, cell?.z), cell?.w)]
       })) as Record<string, string>
+      splitFullName(current)
       if (!current.mobile_money_provider && current.payment_method === 'MOBILE_MONEY') {
-        const paymentSource = mapping.payment_method ? String(row[headers.indexOf(mapping.payment_method)] ?? '') : ''
+        const paymentColumn = mapping.payment_method
+        const paymentSource = paymentColumn === null || paymentColumn === undefined ? '' : String(row[paymentColumn] ?? '')
         const provider = /airtel/i.test(paymentSource) ? 'AIRTEL' : /mtn/i.test(paymentSource) ? 'MTN' : /zamtel/i.test(paymentSource) ? 'ZAMTEL' : ''
         if (provider) current.mobile_money_provider = provider
       }
       const populatedSignals = [...employeeSignals].filter((key) => Boolean(current[key]?.trim()))
       const populatedEmployeeColumns = headers.some((header, column) =>
-        (combinedNameHeader(header) || mappedEmployeeHeaders.has(header) || payrollHeader.test(header))
+        (Object.values(mapping).includes(column) || payrollHeader.test(header))
         && String(row[column] ?? '').trim() !== '',
       )
       if (populatedSignals.length === 0 && !populatedEmployeeColumns) {
@@ -142,15 +153,37 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
         excluded++
         continue
       }
-      const location = companyColumn >= 0 ? String(row[companyColumn] ?? '').trim() : sheetName
+      const location = current.company_name
       const normalizedLocation = normalizeImportHeader(location)
       const company = companies.find((item) => normalizeImportHeader(item.name) === normalizedLocation)
-      const activeBranches = company?.branches.filter((item) => item.status === 'Active') ?? []
-      const branch = activeBranches.length === 1 ? activeBranches[0] : undefined
-      const salaryField = mapping.basic_pay
-      const salary = salaryField ? amountValue(row[headers.indexOf(salaryField)]) : null
+      if (company) current.company_name = company.name
+      const branchName = normalizeImportHeader(current.branch_name)
+      const branch = company && branchName ? company.branches.find((item) => item.status.toLowerCase() === 'active' && normalizeImportHeader(item.name) === branchName) : undefined
+      if (branch) current.branch_name = branch.name
+      const salary = amountValue(current.basic_pay)
+      const housingColumn = mapping.housing_allowance
+      const housingCell = housingColumn === null || housingColumn === undefined ? undefined : sheet[`${XLSX.utils.encode_col(housingColumn)}${excelRow}`]
+      const housingFormula = typeof housingCell?.f === 'string' && /\*\s*30\s*%/i.test(housingCell.f)
+      const uploadedHousing = housingFormula ? null : amountValue(current.housing_allowance)
+      const hasHousingValue = !housingFormula && Boolean(current.housing_allowance.trim())
+      const proposedHousing = salary === null ? null : calculateHousingAllowanceCents(current.basic_pay)
+      if (proposedHousing !== null) current.housing_allowance_proposed = formatCurrencyCents(proposedHousing)
+      if (hasHousingValue && uploadedHousing === null) {
+        current.housing_allowance_source = 'IMPORTED'
+        current.housing_allowance_review_required = proposedHousing === null ? 'false' : 'true'
+      } else if (uploadedHousing !== null) {
+        current.housing_allowance = formatCurrencyCents(Math.round(uploadedHousing * 100))
+        current.housing_allowance_source = 'IMPORTED'
+        if (proposedHousing !== null && Math.round(uploadedHousing * 100) !== proposedHousing) current.housing_allowance_review_required = 'true'
+      } else if (proposedHousing !== null) {
+        current.housing_allowance = formatCurrencyCents(proposedHousing)
+        current.housing_allowance_source = 'DEFAULT_30'
+      } else {
+        current.housing_allowance = ''
+        current.housing_allowance_source = ''
+      }
       if (salary !== null) basicSalaryTotal += salary
-      const payrollData = Object.fromEntries(headers.filter((header) => payrollHeader.test(header)).map((header) => [header, original[header]]))
+      const payrollData = Object.fromEntries(headers.flatMap((header, column) => payrollHeader.test(header) ? [[originalKey(headers, column), original[originalKey(headers, column)]]] : []))
       records.push({
         source_sheet: sheetName,
         source_row: excelRow,
@@ -165,18 +198,48 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
     sheetSummary.push({ sheet: sheetName, extracted, excluded })
   }
 
-  return { records, sheetSummary, exclusions, reconciliation: { row_count: records.length, basic_salary_total: Math.round(basicSalaryTotal * 100) / 100, excluded_rows: exclusions.length, consolidated_report: consolidatedReport ?? null } }
+  return { records, sheetSummary, exclusions, worksheetMappings, reconciliation: { row_count: records.length, basic_salary_total: Math.round(basicSalaryTotal * 100) / 100, excluded_rows: exclusions.length, consolidated_report: consolidatedReport ?? null } }
+}
+
+export function detectEmployeeUploadFormat(filename: string, buffer: ArrayBuffer): 'xlsx' | 'xls' | 'csv' {
+  const extension = filename.toLowerCase().split('.').pop()
+  const bytes = new Uint8Array(buffer)
+  if (extension === 'xlsx' && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) return 'xlsx'
+  if (extension === 'xls' && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) return 'xls'
+  if (extension === 'csv') {
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, '')
+      if (text.trim() && !text.includes('\0') && /[,;\t]/.test(text.split(/\r?\n/, 1)[0] ?? '')) return 'csv'
+    } catch { /* Invalid text is not an acceptable CSV payload. */ }
+  }
+  throw new Error('The selected file extension does not match a supported Excel workbook or UTF-8 CSV file.')
 }
 
 function findEmployeeHeader(matrix: unknown[][]): number {
   for (let index = 0; index < Math.min(matrix.length, 30); index++) {
     const rawHeaders = (matrix[index] ?? []).map((value) => String(value ?? '').trim())
-    const mapped = mapImportHeader(rawHeaders)
-    const hasIdentitySignal = Boolean(mapped.employee_number || mapped.first_name || mapped.last_name || mapped.identity_document_number || mapped.phone || mapped.email || mapped.tpin || mapped.napsa_number || mapped.nhima_number || mapped.job_title || mapped.basic_pay)
+    const mapped = mapEmployeeColumns(rawHeaders).mapping
+    const hasIdentitySignal = Boolean(mapped.employee_number !== null || mapped.first_name !== null || mapped.last_name !== null || mapped.full_name !== null || mapped.identity_document_number !== null || mapped.phone !== null || mapped.email !== null || mapped.tpin !== null || mapped.napsa_number !== null || mapped.nhima_number !== null || mapped.job_title !== null || mapped.basic_pay !== null)
     const payrollColumnCount = rawHeaders.filter((header) => payrollHeader.test(header)).length
-    if (hasIdentitySignal || rawHeaders.some(combinedNameHeader) || payrollColumnCount >= 2) return index
+    if (hasIdentitySignal || payrollColumnCount >= 2) return index
   }
   return -1
+}
+
+function splitFullName(data: Record<string, string>): void {
+  if (data.first_name?.trim() && data.last_name?.trim()) return
+  const value = data.full_name?.trim() ?? ''
+  if (!value) return
+  const commaName = value.match(/^\s*([^,]+),\s*([^,]+)\s*$/)
+  if (commaName) { data.last_name ||= commaName[1].trim(); data.first_name ||= commaName[2].trim(); return }
+  const parts = value.split(/\s+/).filter(Boolean)
+  if (parts.length === 2) { data.first_name ||= parts[0]; data.last_name ||= parts[1] }
+}
+
+function originalKey(headers: string[], column: number): string {
+  const header = headers[column]
+  const duplicateIndex = headers.slice(0, column).filter((prior) => prior === header).length
+  return duplicateIndex ? `${header} (${duplicateIndex + 1})` : header
 }
 
 export const requiredStagingFields = [
@@ -192,9 +255,10 @@ export function validateStagedEmployee(data: Record<string, string>, companyId: 
   if (!data.email?.trim() && !data.email_unavailable_reason?.trim()) errors.push('Email or email unavailable reason is required')
   if (data.email?.trim() && !/^\S+@\S+\.\S+$/.test(data.email)) errors.push('Email is invalid')
   if (data.basic_pay && (!/^\d{1,12}(?:\.\d{1,2})?$/.test(data.basic_pay) || Number(data.basic_pay) <= 0)) errors.push('Basic salary must be a positive amount with at most two decimal places')
-  for (const key of ['housing_allowance','meal_allowance','transport_allowance','other_allowances']) {
+  for (const key of ['housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances']) {
     if (data[key] && (!/^\d{1,12}(?:\.\d{1,2})?$/.test(data[key]) || Number(data[key]) < 0)) errors.push(`${key} must be a non-negative amount with at most two decimal places`)
   }
+  if (data.housing_allowance_review_required === 'true' && !['USE_CALCULATED','USE_UPLOADED'].includes(data.housing_allowance_resolution ?? '')) errors.push('Review the imported housing allowance against the 30% default and choose which amount to keep')
   if (data.employment_type && !['PERMANENT','FIXED_TERM','PART_TIME','CASUAL','DAILY_RATED'].includes(data.employment_type)) errors.push('Employment type is not supported')
   if (data.salary_frequency && !['MONTHLY','FORTNIGHTLY','WEEKLY','DAILY'].includes(data.salary_frequency)) errors.push('Salary frequency is not supported')
   if (data.payment_method && !['BANK_TRANSFER','MOBILE_MONEY','CASH'].includes(data.payment_method)) errors.push('Payment method is not supported')
@@ -207,6 +271,20 @@ export function validateStagedEmployee(data: Record<string, string>, companyId: 
   if (data.contract_end_date && !isValidImportDate(data.contract_end_date)) errors.push('Contract end date must be an unambiguous date')
   if (data.contract_start_date && data.contract_end_date && data.contract_end_date < data.contract_start_date) errors.push('Contract end date cannot precede the start date')
   return errors
+}
+
+export function recalculateStagedHousingAllowance(data: Record<string, string>, key: string, value: string): Record<string, string> {
+  const next = { ...data, [key]: value }
+  if (key === 'housing_allowance') { next.housing_allowance_source = 'HR_EDITED'; next.housing_allowance_resolution = '' }
+  if (key === 'basic_pay') next.housing_allowance_resolution = ''
+  const cents = calculateHousingAllowanceCents(next.basic_pay)
+  next.housing_allowance_proposed = formatCurrencyCents(cents)
+  const mismatch = cents !== null && ['IMPORTED', 'HR_EDITED'].includes(next.housing_allowance_source ?? '')
+    && Math.round((amountValue(next.housing_allowance) ?? -1) * 100) !== cents
+  next.housing_allowance_review_required = mismatch ? 'true' : ''
+  if (next.housing_allowance_source === 'DEFAULT_30') next.housing_allowance = formatCurrencyCents(cents)
+  if (!mismatch) next.housing_allowance_resolution = ''
+  return next
 }
 
 export function duplicateWarningsForRow(row: StagedWorkbookRow, prior: StagedWorkbookRow[]): string[] {

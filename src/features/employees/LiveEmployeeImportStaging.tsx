@@ -4,12 +4,19 @@ import { Link } from 'react-router-dom'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { createEmployeeImportStagingService, sha256File, type StagingBatch, type StagingRecord } from './employee-import-staging-service'
-import { extractEmployeeWorkbook, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
-import { liveImportFields } from './live-import-model'
+import { detectEmployeeUploadFormat, extractEmployeeWorkbook, recalculateStagedHousingAllowance, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
+import { liveImportFields, type EmployeeFieldMapping } from './live-import-model'
+import { calculateGrossEarningsPreview, downloadEmployeeTemplate } from './employee-import-template'
 import './live-employee-import.css'
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const batchKey = (portfolioId: string, digest: string) => `gbhr-staging:${portfolioId}:${digest}`
+function excelColumnLabel(index: number) {
+  let value = index + 1
+  let label = ''
+  while (value > 0) { value--; label = String.fromCharCode(65 + (value % 26)) + label; value = Math.floor(value / 26) }
+  return label
+}
 function submitKey(recordId: string) {
   const key = `gbhr-staged-submit:${recordId}`
   try {
@@ -27,6 +34,10 @@ export function LiveEmployeeImportStaging() {
   const [fileName, setFileName] = useState('')
   const [portfolioId, setPortfolioId] = useState('')
   const [records, setRecords] = useState<StagedWorkbookRow[]>([])
+  const [sourceBuffer, setSourceBuffer] = useState<ArrayBuffer | null>(null)
+  const [worksheetMappings, setWorksheetMappings] = useState<{ sheet: string; headerRow: number; headers: string[]; mapping: EmployeeFieldMapping; conflicts: string[] }[]>([])
+  const [mappingOverrides, setMappingOverrides] = useState<Record<string, EmployeeFieldMapping>>({})
+  const [selectedMappingSheet, setSelectedMappingSheet] = useState('')
   const [exclusions, setExclusions] = useState<{ sheet: string; row: number; reason: string }[]>([])
   const [sheetSummary, setSheetSummary] = useState<{ sheet: string; extracted: number; excluded: number }[]>([])
   const [reconciliation, setReconciliation] = useState<Record<string, unknown>>({})
@@ -57,6 +68,8 @@ export function LiveEmployeeImportStaging() {
   const portfolioCompanies = companies.filter((item) => !portfolioId || item.portfolioId === portfolioId)
   const selectedRecord = stagedRows.find((item) => item.id === selectedRecordId) ?? null
   const validationErrors = useMemo(() => validateStagedEmployee(draft, draftCompanyId ?? '', draftBranchId ?? ''), [draft, draftCompanyId, draftBranchId])
+  const grossPreview = useMemo(() => calculateGrossEarningsPreview(draft), [draft])
+  const mappingConflicts = worksheetMappings.flatMap((sheet) => sheet.conflicts.map((issue) => `${sheet.sheet}: ${issue}`))
   const readyCount = stagedRows.filter((row) => row.review_status === 'READY_FOR_APPROVAL').length
   const needsInfoCount = stagedRows.filter((row) => row.review_status === 'NEEDS_INFORMATION' || row.review_status === 'PENDING_REVIEW').length
   const duplicateCount = stagedRows.filter((row) => row.review_status === 'DUPLICATE_REVIEW').length
@@ -113,26 +126,35 @@ export function LiveEmployeeImportStaging() {
   }
 
   async function chooseFile(file?: File) {
-    setError(''); setNotice(''); setRecords([]); setExclusions([]); setSheetSummary([]); setFileName('')
+    setError(''); setNotice(''); setRecords([]); setExclusions([]); setSheetSummary([]); setWorksheetMappings([]); setMappingOverrides({}); setSourceBuffer(null); setFileName('')
     if (!file) return
-    if (!/\.(xlsx|xls)$/i.test(file.name)) { setError('Choose an .xlsx or .xls workbook.'); return }
-    if (!file.size || file.size > MAX_FILE_SIZE) { setError('Workbook must be smaller than 20 MB.'); return }
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) { setError('Choose an .xlsx, .xls, or .csv employee file.'); return }
+    if (!file.size || file.size > MAX_FILE_SIZE) { setError('File must be smaller than 20 MB.'); return }
     const chosenPortfolio = currentCompany?.portfolioId
     if (!chosenPortfolio) { setError('Choose an authorized company workspace before preparing a batch.'); return }
     setBusy(true)
     try {
       const buffer = await file.arrayBuffer()
-      const signature = new Uint8Array(buffer.slice(0, 4))
-      const isZip = signature[0] === 0x50 && signature[1] === 0x4b && signature[2] === 0x03 && signature[3] === 0x04
-      const isOle = signature[0] === 0xd0 && signature[1] === 0xcf && signature[2] === 0x11 && signature[3] === 0xe0
-      if (!isZip && !isOle) throw new Error('The selected file does not have a valid Excel workbook signature.')
+      detectEmployeeUploadFormat(file.name, buffer)
       const extracted = extractEmployeeWorkbook(buffer, companies.filter((item) => item.portfolioId === chosenPortfolio))
       if (extracted.records.length === 0) throw new Error('No employee rows were found in the workbook worksheets.')
-      setPortfolioId(chosenPortfolio); setFileName(file.name); setRecords(extracted.records); setExclusions(extracted.exclusions)
+      setPortfolioId(chosenPortfolio); setFileName(file.name); setSourceBuffer(buffer); setRecords(extracted.records); setExclusions(extracted.exclusions)
+      setWorksheetMappings(extracted.worksheetMappings); setSelectedMappingSheet(extracted.worksheetMappings[0]?.sheet ?? '')
       setSheetSummary(extracted.sheetSummary); setReconciliation(extracted.reconciliation)
       setNotice('Workbook parsed locally. Review every company and branch assignment, then stage it for secure HR review.')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Workbook could not be parsed.') }
     finally { setBusy(false) }
+  }
+
+  function changeMapping(sheetName: string, fieldKey: string, columnValue: string) {
+    if (!sourceBuffer) return
+    const sheet = worksheetMappings.find((item) => item.sheet === sheetName)
+    if (!sheet) return
+    const mapping = { ...sheet.mapping, [fieldKey]: columnValue === '' ? null : Number(columnValue) }
+    const overrides = { ...mappingOverrides, [sheetName]: mapping }
+    const extracted = extractEmployeeWorkbook(sourceBuffer, companies.filter((item) => item.portfolioId === portfolioId), overrides)
+    setMappingOverrides(overrides); setWorksheetMappings(extracted.worksheetMappings); setRecords(extracted.records)
+    setExclusions(extracted.exclusions); setSheetSummary(extracted.sheetSummary); setReconciliation(extracted.reconciliation)
   }
 
   function assignCompany(index: number, targetCompanyId: string) {
@@ -145,6 +167,7 @@ export function LiveEmployeeImportStaging() {
   async function stageWorkbook() {
     setError(''); setNotice('')
     if (!fileName || records.length === 0) { setError('Choose and review a workbook first.'); return }
+    if (mappingConflicts.length) { setError(`Resolve ambiguous column mappings before staging: ${mappingConflicts.join('; ')}`); return }
     if (records.length > 5000) { setError('A single staging batch is limited to 5,000 employee rows.'); return }
     setBusy(true)
     try {
@@ -277,7 +300,10 @@ export function LiveEmployeeImportStaging() {
     setSelectedApprovalIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])
   }
 
-  function changeField(field: string, value: string) { setDraft((previous) => ({ ...previous, [field]: value })) }
+  function changeField(field: string, value: string) { setDraft((previous) => recalculateStagedHousingAllowance(previous, field, value)) }
+  function resolveHousingAllowance(resolution: 'USE_CALCULATED' | 'USE_UPLOADED') {
+    setDraft((previous) => ({ ...previous, housing_allowance_resolution: resolution, housing_allowance: resolution === 'USE_CALCULATED' ? (previous.housing_allowance_proposed ?? '') : previous.housing_allowance }))
+  }
 
   const totalSalary = Number(reconciliation.basic_salary_total ?? 0)
   const reportSummary = reconciliation.consolidated_report as { worksheet?: string; employee_count?: number | null; basic_subtotal?: number | null; broken_formulas?: { cell: string; row: number; error: string }[] } | null
@@ -309,9 +335,10 @@ export function LiveEmployeeImportStaging() {
     <div className="live-data-notice"><ShieldCheck size={15}/> Workbooks are parsed in this browser. The staged records are sent only to the authenticated project under company and branch permissions. Originals are retained for comparison; no employee or payroll master record is created by upload.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="live-data-notice" role="status"><Check size={15}/>{notice}</div>}
 
-    <section className="panel live-import-upload"><label><Upload size={22}/><strong>{fileName || 'Choose an Excel workbook to stage'}</strong><span>.xlsx or .xls · up to 20 MB · up to 5,000 employee rows</span><input id="employee-staging-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label></section>
+    <section className="panel live-import-upload"><button type="button" className="button-secondary" onClick={downloadEmployeeTemplate}><FileSpreadsheet size={16}/> Download Employee Template</button><label><Upload size={22}/><strong>{fileName || 'Choose an Excel workbook or CSV to stage'}</strong><span>.xlsx, .xls, or .csv · up to 20 MB · up to 5,000 employee rows</span><input id="employee-staging-file" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label></section>
 
     {records.length > 0 && <section className="panel live-import-preview"><header><div><div className="section-eyebrow">LOCAL WORKBOOK PREVIEW</div><h2>{records.length.toLocaleString()} employee rows across {sheetSummary.length} worksheets</h2><p>Basic salary subtotal in detected rows: ZMW {totalSalary.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. These are workbook values, not recalculated statutory payroll.</p></div><button type="button" className="button-primary" disabled={busy} onClick={() => void stageWorkbook()}>{busy ? 'Staging…' : 'Save batch for HR review'}</button></header>
+      <details className="employee-import-mapping" open><summary>Review automatic field mapping ({worksheetMappings.length} worksheet{worksheetMappings.length===1?'':'s'})</summary><label>Worksheet<select aria-label="Worksheet mapping" value={selectedMappingSheet} onChange={(event)=>setSelectedMappingSheet(event.target.value)}>{worksheetMappings.map((sheet)=><option value={sheet.sheet} key={sheet.sheet}>{sheet.sheet} · row {sheet.headerRow} headings</option>)}</select></label>{(() => {const sheet=worksheetMappings.find((item)=>item.sheet===selectedMappingSheet);if(!sheet)return null;const templateKeys=new Set(['employee_number','first_name','middle_name','last_name','date_of_birth','gender','nationality','identity_document_number','residential_address','phone','email','email_unavailable_reason','company_name','branch_name','department','job_title','employment_type','contract_start_date','basic_pay','payment_method','bank_name','bank_account_number','mobile_money_provider','mobile_money_number','tpin','napsa_number','nhima_number','emergency_contact_name','emergency_contact_relationship','emergency_contact_phone','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances']);const fields=liveImportFields.filter((field)=>templateKeys.has(field.key)||['contract_type','salary_frequency','bank_account_name'].includes(field.key));return <><div className="staging-fields">{fields.map((field)=><label key={field.key}><span>{field.label}</span><select aria-label={`Map ${field.label}`} value={sheet.mapping[field.key]===null||sheet.mapping[field.key]===undefined?'':String(sheet.mapping[field.key])} onChange={(event)=>changeMapping(sheet.sheet,field.key,event.target.value)}><option value="">Not mapped</option>{sheet.headers.map((header,index)=><option value={index} key={`${index}:${header}`}>{excelColumnLabel(index)}: {header||`Column ${index+1}`}{sheet.headers.slice(0,index).includes(header)?` (${index+1})`:''}</option>)}</select></label>)}</div>{mappingConflicts.length>0&&<div className="auth-shell-error" role="alert"><strong>Resolve ambiguous column mappings before staging:</strong> {mappingConflicts.join('; ')}</div>}</>})()}</details>
       <div className="live-import-summary"><strong>{records.length.toLocaleString()} extracted</strong><strong>{previewNeedsAttention.toLocaleString()} need attention</strong><span>{previewReadyForReview.toLocaleString()} ready for review</span><span>{records.filter((row) => !row.company_id || !row.branch_id).length.toLocaleString()} need company/branch assignment</span><button type="button" className="button-secondary" onClick={downloadReconciliation}>Export validation report</button></div>
       {reportSummary&&<div className="auth-shell-error" role="status"><strong>{reportSummary.worksheet} comparison:</strong> consolidated sheet reports {reportSummary.employee_count??'an unreadable count'} employees and ZMW {reportSummary.basic_subtotal?.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})??'an unreadable subtotal'}; source candidate count and basic salary subtotal are {Number(reconciliation.row_count??records.length)} and ZMW {Number(reconciliation.basic_salary_total??totalSalary).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. Difference: {reportSummary.employee_count==null?'count unavailable':Number(reconciliation.row_count??records.length)-reportSummary.employee_count} employee rows and {reportSummary.basic_subtotal==null?'subtotal unavailable':`ZMW ${(Number(reconciliation.basic_salary_total??totalSalary)-reportSummary.basic_subtotal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}. Review this variance before any payroll transaction.</div>}
       {reportSummary?.broken_formulas?.length? <div className="auth-shell-error" role="alert"><strong>Broken workbook formulas:</strong> {reportSummary.broken_formulas.map((formula)=>`${formula.cell} (row ${formula.row}): ${formula.error}`).join('; ')}. Payroll review remains separate from employee staging.</div>:null}
@@ -335,6 +362,8 @@ export function LiveEmployeeImportStaging() {
         <div className="staging-fields"><label><span>Company *</span><select disabled={Boolean(selectedRecord.resulting_employee_id)} value={draftCompanyId??''} onChange={(event)=>{setDraftCompanyId(event.target.value||null);setDraftBranchId(null)}}><option value="">Select company</option>{portfolioCompanies.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>Workplace branch *</span><select value={draftBranchId??''} disabled={!draftCompanyId||Boolean(selectedRecord.resulting_employee_id)} onChange={(event)=>setDraftBranchId(event.target.value||null)}><option value="">Select branch</option>{portfolioCompanies.find((item)=>item.id===draftCompanyId)?.branches.filter((item)=>item.status==='Active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div>
         <div className="staging-origin"><strong>Workbook original values</strong><pre>{JSON.stringify(selectedRecord.original_data,null,2)}</pre></div>
         <div className="staging-fields">{liveImportFields.map((field)=><label key={field.key}><span>{field.label}{field.required?' *':''}</span><input readOnly={Boolean(selectedRecord.resulting_employee_id)} value={draft[field.key]??''} onChange={(event)=>changeField(field.key,event.target.value)} /></label>)}</div>
+        {draft.housing_allowance_review_required==='true'&&<div className="auth-shell-error" role="alert"><strong>Housing allowance differs from the 30% default.</strong> Calculated amount: ZMW {draft.housing_allowance_proposed||'unavailable'}. Choose which value to retain.<div className="employee-form-actions"><button type="button" className="button-secondary" disabled={Boolean(selectedRecord.resulting_employee_id)} onClick={()=>resolveHousingAllowance('USE_CALCULATED')}>Use calculated 30%</button><button type="button" className="button-secondary" disabled={Boolean(selectedRecord.resulting_employee_id)} onClick={()=>resolveHousingAllowance('USE_UPLOADED')}>Keep reviewed amount</button></div></div>}
+        <section className="panel employee-compensation-preview"><h4>Compensation preview (not a payroll calculation)</h4><div className="staging-fields">{[['Basic Salary','basic_pay'],['Housing Allowance','housing_allowance'],['Lunch','meal_allowance'],['Transport','transport_allowance'],['Medical Allowance','medical_allowance'],['Other Allowances','other_allowances']].map(([label,key])=><div key={key}><strong>{label}</strong><span>{draft[key] ? `ZMW ${Number(draft[key]).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : 'Not provided'}</span></div>)}</div><p>Gross earnings preview: {grossPreview.total===null?'Invalid amount':`ZMW ${Number(grossPreview.total).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}{grossPreview.incomplete.length>0?` · Unconfirmed: ${grossPreview.incomplete.map((key)=>liveImportFields.find((field)=>field.key===key)?.label??key).join(', ')}`:''}</p></section>
         <details><summary>Payroll and payment fields retained for separate payroll review</summary><p>These values remain staged and are not sent to payroll operations by employee approval.</p><textarea readOnly={Boolean(selectedRecord.resulting_employee_id)} aria-label="Edit staged payroll fields" value={payrollJson} onChange={(event)=>{setPayrollJson(event.target.value);try{setDraftPayroll(JSON.parse(event.target.value) as Record<string,unknown>)}catch{}}} rows={8}/>{(() => {try{JSON.parse(payrollJson);return null}catch{return <small className="field-error">Enter valid JSON to save these retained source fields.</small>}})()}</details>
         {validationErrors.length>0&&<div className="auth-shell-error"><strong>Needs information:</strong> {validationErrors.join('; ')}</div>}
         {selectedRecord.duplicate_warnings.length>0&&<div className="auth-shell-error"><strong>Duplicate review:</strong> {selectedRecord.duplicate_warnings.map((warning)=>warning.message).join('; ')}</div>}

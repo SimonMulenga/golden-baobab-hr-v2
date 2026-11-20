@@ -1,3 +1,5 @@
+import employeeTemplateColumnsData from './employee-template-columns.json'
+
 export type LiveImportField = {
   key: string
   label: string
@@ -7,7 +9,7 @@ export type LiveImportField = {
 }
 
 export const liveImportFields: LiveImportField[] = [
-  { key: 'employee_number', label: 'Employee number', required: true, aliases: ['employee number', 'employee no', 'staff number', 'staff id', 'employee id'] },
+  { key: 'employee_number', label: 'Employee number', required: true, aliases: ['employee number', 'employee no', 'emp id', 'staff number', 'staff id', 'employee id'] },
   { key: 'first_name', label: 'First name', required: true, aliases: ['first name', 'firstname', 'given name', 'forename'] },
   { key: 'middle_name', label: 'Middle name', required: false, aliases: ['middle name', 'middlename', 'other names'] },
   { key: 'last_name', label: 'Last name', required: true, aliases: ['last name', 'lastname', 'surname', 'family name'] },
@@ -30,15 +32,16 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'department', label: 'Department', required: false, aliases: ['department', 'department name', 'team', 'division'] },
   { key: 'employment_type', label: 'Employment type', required: false, aliases: ['employment type', 'employee type'] },
   { key: 'contract_type', label: 'Contract type', required: false, aliases: ['contract type', 'contract category'] },
-  { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'contract start date'], type: 'date' },
+  { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'date joined', 'contract start date'], type: 'date' },
   { key: 'contract_end_date', label: 'Contract end date', required: false, aliases: ['contract end date', 'end date'], type: 'date' },
   { key: 'retirement_age', label: 'Retirement age', required: false, aliases: ['retirement age'], type: 'number' },
   { key: 'salary_frequency', label: 'Salary frequency', required: false, aliases: ['salary frequency', 'pay frequency'] },
-  { key: 'basic_pay', label: 'Basic pay', required: true, aliases: ['basic pay', 'basic salary'], type: 'number' },
-  { key: 'housing_allowance', label: 'Housing allowance', required: false, aliases: ['housing allowance', 'house allowance'], type: 'number' },
-  { key: 'meal_allowance', label: 'Meal allowance', required: false, aliases: ['meal allowance', 'lunch allowance'], type: 'number' },
-  { key: 'transport_allowance', label: 'Transport allowance', required: false, aliases: ['transport allowance'], type: 'number' },
-  { key: 'other_allowances', label: 'Other allowances', required: false, aliases: ['other allowances', 'other allowance'], type: 'number' },
+  { key: 'basic_pay', label: 'Basic pay', required: true, aliases: ['basic pay', 'basic salary', 'monthly salary'], type: 'number' },
+  { key: 'housing_allowance', label: 'Housing allowance', required: false, aliases: ['housing allowance', 'house allowance', 'housing', 'housing 30%'], type: 'number' },
+  { key: 'meal_allowance', label: 'Lunch allowance', required: false, aliases: ['meal allowance', 'lunch allowance', 'lunch', 'meal'], type: 'number' },
+  { key: 'transport_allowance', label: 'Transport allowance', required: false, aliases: ['transport allowance', 'transport', 'travel allowance', 'travel'], type: 'number' },
+  { key: 'medical_allowance', label: 'Medical allowance', required: false, aliases: ['medical allowance', 'medical', 'health allowance'], type: 'number' },
+  { key: 'other_allowances', label: 'Other allowances', required: false, aliases: ['other allowances', 'other allowance', 'miscellaneous allowances'], type: 'number' },
   { key: 'annual_leave_days', label: 'Annual leave days', required: false, aliases: ['annual leave days', 'annual leave entitlement'], type: 'number' },
   { key: 'loan_or_other_deduction', label: 'Loan or other deduction', required: false, aliases: ['loan or other deduction', 'loan deduction', 'other deduction'], type: 'number' },
   { key: 'deduction_label', label: 'Deduction label', required: false, aliases: ['deduction label', 'deduction name'] },
@@ -52,7 +55,33 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'mobile_money_provider', label: 'Mobile money provider or wallet', required: false, aliases: ['mobile money provider', 'mobile money network', 'wallet name'] },
   { key: 'mobile_money_number', label: 'Mobile money number', required: false, aliases: ['mobile money number'] },
   { key: 'employment_status', label: 'Employment status', required: false, aliases: ['status', 'employment status'] },
+  { key: 'company_name', label: 'Company', required: false, aliases: ['company', 'company name', 'employing company', 'location'] },
+  { key: 'branch_name', label: 'Workplace branch', required: false, aliases: ['branch', 'work location', 'workplace branch', 'work location branch'] },
+  { key: 'full_name', label: 'Full name', required: false, aliases: ['name', 'employee name', 'full name', 'staff name', 'name of employee'] },
 ]
+
+export const employeeTemplateColumns = employeeTemplateColumnsData
+
+export type EmployeeFieldMapping = Record<string, number | null>
+
+export function mapEmployeeColumns(headers: string[]): { mapping: EmployeeFieldMapping; conflicts: string[] } {
+  const candidates = new Map<string, number[]>()
+  for (const field of liveImportFields) {
+    const templateHeading = employeeTemplateColumns.find((column) => column.key === field.key)?.heading
+    const aliases = new Set([field.label, ...field.aliases, ...(templateHeading ? [templateHeading] : [])].map(normalizeImportHeader).filter((alias) => field.key !== 'bank_branch_name' || alias !== 'branch'))
+    candidates.set(field.key, headers.flatMap((header, index) => aliases.has(normalizeImportHeader(header)) ? [index] : []))
+  }
+  const mapping: EmployeeFieldMapping = {}
+  for (const [key, indexes] of candidates) mapping[key] = indexes.length === 1 ? indexes[0] : null
+  const conflicts = [...candidates.entries()].flatMap(([key, indexes]) => indexes.length > 1 ? [`${liveImportFields.find((field) => field.key === key)?.label ?? key} matches multiple columns`] : [])
+  const columns = new Map<number, string[]>()
+  for (const [key, index] of Object.entries(mapping)) if (index !== null) columns.set(index, [...(columns.get(index) ?? []), key])
+  for (const [index, keys] of columns) if (keys.length > 1) {
+    for (const key of keys) mapping[key] = null
+    conflicts.push(`Column ${index + 1} matches multiple fields (${keys.map((key) => liveImportFields.find((field) => field.key === key)?.label ?? key).join(', ')})`)
+  }
+  return { mapping, conflicts }
+}
 
 export const originalEmployeeTemplateHeaders = [
   'Employee No *', 'First Name *', 'Surname *', 'Other Names', 'NRC', 'Date of Birth', 'Phone', 'Email', 'Job Title', 'Department',

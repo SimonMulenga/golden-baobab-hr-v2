@@ -21,12 +21,12 @@ function makeWorkbook() {
 const companies = [{ id: 'company-1', name: 'Golden Baobab Investments', branches: [{ id: 'branch-1', name: 'Main', status: 'Active' }] }]
 
 describe('secure employee workbook staging', () => {
-  it('extracts multiple employee worksheets with source coordinates and company/branch mapping', () => {
+  it('extracts multiple employee worksheets with source coordinates and explicit company mapping without choosing a default branch', () => {
     const result = extractEmployeeWorkbook(makeWorkbook(), companies)
     expect(result.records.map((row) => [row.source_sheet, row.source_row])).toEqual([
       ['GBI', 2], ['GBI', 3], ['Payroll Inputs', 2],
     ])
-    expect(result.records[0]).toMatchObject({ company_id: 'company-1', branch_id: 'branch-1' })
+    expect(result.records[0]).toMatchObject({ company_id: 'company-1', branch_id: null })
   })
 
   it('retains incomplete fields and malformed amounts for HR review', () => {
@@ -37,12 +37,13 @@ describe('secure employee workbook staging', () => {
     expect(validateStagedEmployee(result.records[1].current_data, 'company-1', 'branch-1')).toContain('last_name is required')
   })
 
-  it('preserves combined names and payroll components without inventing employee fields', () => {
+  it('splits an unambiguous two-part name and preserves payroll components', () => {
     const row = extractEmployeeWorkbook(makeWorkbook(), companies).records[2]
     expect(row.original_data['Employee Name']).toBe('Kai Example')
-    expect(row.current_data.first_name).toBe('')
+    expect(row.current_data.first_name).toBe('Kai')
+    expect(row.current_data.last_name).toBe('Example')
     expect(row.payroll_data).toMatchObject({ Overtime: 4, Bonus: 250 })
-    expect(validateStagedEmployee(row.current_data, '', '')).toContain('first_name is required')
+    expect(validateStagedEmployee(row.current_data, '', '')).toContain('Company assignment is required')
   })
 
   it('detects within-scope duplicates while keeping identical numbers in another company separate', () => {
