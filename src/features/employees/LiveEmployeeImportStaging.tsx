@@ -9,6 +9,7 @@ import { allowedTemplateBanks, employeeTemplateValues, liveImportFields, type Em
 import { createLiveHrServices, type DepartmentRecord } from '../../services/live-hr-services'
 import { calculateGrossEarningsPreview, downloadEmployeeTemplate } from './employee-import-template'
 import './live-employee-import.css'
+import '../../module-modernization.css'
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const reviewSelectOptions: Record<string, { value: string; label: string }[]> = {

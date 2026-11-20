@@ -5,6 +5,7 @@ import { createLiveHrServices, type DepartmentRecord, type JobRoleRecord } from 
 import { useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { RowActionsMenu, StatusBadge } from '../../components/RowActionsMenu'
 import './live-hr-catalog.css'
+import '../../module-modernization.css'
 
 type CatalogType = 'departments' | 'jobRoles'
 type Draft = { id?: string; departmentId: string; name: string; code: string; description: string }

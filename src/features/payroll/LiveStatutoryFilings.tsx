@@ -6,6 +6,7 @@ import { createLiveStatutoryFilingServices, type FilingAuthority, type FilingSta
 import { formatWorkspaceDate, useWorkspace } from '../companies/WorkspaceContext'
 import { LivePayrollReports } from './LivePayrollReports'
 import './live-statutory-filings.css'
+import '../../module-modernization.css'
 import { napsaRemittanceDeadline } from './napsa-remittance-date'
 
 const PAGE_SIZE = 25

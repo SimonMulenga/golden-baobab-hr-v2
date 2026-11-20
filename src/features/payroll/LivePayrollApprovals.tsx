@@ -4,6 +4,7 @@ import { useWorkspace } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type PayrollRunRecord } from '../../services/live-business-services'
 import './live-payroll-approvals.css'
+import '../../module-modernization.css'
 
 const money = (value: number | undefined) => value == null ? '—' : `K${Number(value).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 

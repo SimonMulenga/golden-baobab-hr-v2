@@ -5,6 +5,7 @@ import { createLiveBusinessServices, type EmployeeDirectoryRecord, type Finalize
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { buildPayslipView } from './payslip-model'
 import './live-payslips.css'
+import '../../module-modernization.css'
 
 const money = (value: number) => `K${value.toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const period = (run: FinalizedPayslipRunRecord, preferences?: ReturnType<typeof useWorkspace>['preferences']) => formatWorkspaceDate(`${run.payroll_periods.period_start}T00:00:00Z`, preferences, { month: 'long', year: 'numeric', timeZone: 'UTC' })

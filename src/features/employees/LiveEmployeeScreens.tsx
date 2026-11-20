@@ -12,6 +12,7 @@ import { validateStagedEmployee } from './employee-import-staging'
 import { LiveEmployeeImportStaging } from './LiveEmployeeImportStaging'
 import './live-employee-screens.css'
 import './live-employee-ui.css'
+import '../../module-modernization.css'
 
 const PAGE_SIZE = 25
 
