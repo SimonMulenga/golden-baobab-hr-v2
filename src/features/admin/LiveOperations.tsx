@@ -5,6 +5,7 @@ import { useCompanySelection, useWorkspace, type WorkspacePreferences } from '..
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveOperationsServices, type UserNotificationRecord, type WorkspaceSettingsRecord } from '../../services/live-operations-services'
 import './live-operations.css'
+import '../../module-modernization.css'
 
 const PAGE_SIZE = 25
 const routeFor = (item: UserNotificationRecord) => item.source_type === 'EMPLOYEE' ? `/employees/${encodeURIComponent(item.source_id)}` : item.action_path

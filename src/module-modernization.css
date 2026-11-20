@@ -1,0 +1,272 @@
+/* Shared finishing layer for authenticated feature screens. Keep selectors scoped
+   so business workflows and the sign-in experience retain their existing rules. */
+:is(
+  .employee-screen,
+  .live-import-screen,
+  .staging-screen,
+  .live-hr-catalog,
+  .company-screen,
+  .live-payroll-inputs,
+  .live-payroll-approvals,
+  .live-payslips,
+  .live-payroll-reports,
+  .live-statutory-filings,
+  .live-statutory-workspace,
+  .attendance-page,
+  .peopleops-screen,
+  .live-operations-screen,
+  .live-user-admin,
+  .live-audit-screen
+) {
+  --module-ink: var(--text, #183943);
+  --module-muted: var(--muted, #61777d);
+  --module-line: var(--border, #dce6e9);
+  --module-surface: var(--panel, #fff);
+  color: var(--module-ink);
+  min-width: 0;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+    .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+    .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+    .live-audit-screen) :is(.welcome-row, .page-heading, .admin-page-heading,
+    .payroll-approvals-heading, .attendance-page-heading) {
+  min-width: 0;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+    .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+    .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+    .live-audit-screen) :is(.welcome-row, .page-heading, .admin-page-heading,
+    .payroll-approvals-heading, .attendance-page-heading) h1 {
+  color: var(--module-ink);
+  font-size: clamp(24px, 2vw, 31px);
+  font-weight: 700;
+  letter-spacing: -.035em;
+  line-height: 1.2;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+    .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+    .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+    .live-audit-screen) :is(.welcome-row, .page-heading, .admin-page-heading,
+    .payroll-approvals-heading, .attendance-page-heading) p {
+  color: var(--module-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* Shared live tables: retain horizontal scrolling within the table region. */
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals,
+    .live-payroll-reports, .live-statutory-filings, .attendance-page,
+    .peopleops-screen, .live-user-admin, .live-audit-screen)
+  :is(.table-scroll, .table-scroll.enterprise-table-scroll, .live-inputs-table-wrap,
+      .attendance-table-scroll, .report-preview-table, .statutory-filing-table) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals,
+    .live-payroll-reports, .live-statutory-filings, .attendance-page,
+    .peopleops-screen, .live-user-admin, .live-audit-screen)
+  :is(.employee-table, .import-candidate-table, .peopleops-table, .company-table,
+      .branch-table, .live-inputs-table, .attendance-table, .live-audit-table,
+      .statutory-filing-table table, .report-preview-table table) {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals,
+    .live-payroll-reports, .live-statutory-filings, .attendance-page,
+    .peopleops-screen, .live-user-admin, .live-audit-screen)
+  :is(.employee-table, .import-candidate-table, .peopleops-table, .company-table,
+      .branch-table, .live-inputs-table, .attendance-table, .live-audit-table,
+      .statutory-filing-table table, .report-preview-table table) th {
+  min-height: 44px;
+  padding: 11px 14px;
+  color: #526a70;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  line-height: 1.4;
+  vertical-align: bottom;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals,
+    .live-payroll-reports, .live-statutory-filings, .attendance-page,
+    .peopleops-screen, .live-user-admin, .live-audit-screen)
+  :is(.employee-table, .import-candidate-table, .peopleops-table, .company-table,
+      .branch-table, .live-inputs-table, .attendance-table, .live-audit-table,
+      .statutory-filing-table table, .report-preview-table table) td {
+  min-height: 48px;
+  padding: 11px 14px;
+  color: var(--module-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+
+:is(.live-payroll-inputs, .live-payslips, .live-payroll-reports,
+    .live-statutory-filings) :is(.live-inputs-table, .live-payslip-document table,
+    .report-preview-table table, .statutory-filing-table table) td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+    .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+    .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+    .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+    .live-audit-screen) :is(.panel, .live-import-preview, .live-import-mapping,
+    .live-hr-catalog-table, .employee-directory-panel, .payroll-approval-card,
+    .live-payslip-filters, .live-report-preview-panel, .live-settings-panel) {
+  border-color: var(--module-line);
+  border-radius: 12px;
+}
+
+/* Employee onboarding and review forms */
+.employee-screen :is(.live-onboarding-field, .staging-fields label,
+  .employee-approval-field-group label) {
+  min-width: 0;
+  color: var(--module-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.employee-screen :is(.live-onboarding-field input, .live-onboarding-field select,
+  .staging-fields input, .staging-fields select, .staging-fields textarea) {
+  min-height: 42px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.live-import-screen :is(.live-import-upload, .live-import-preview,
+  .live-import-mapping, .live-import-history) {
+  border-radius: 12px;
+}
+
+.live-import-screen .live-import-upload > label {
+  min-height: 168px;
+  padding: 22px;
+  color: var(--module-muted);
+  background: color-mix(in srgb, var(--module-surface) 90%, #178a82 10%);
+}
+
+.live-import-screen .live-import-fields { gap: 14px; }
+.live-import-screen .live-import-fields label { min-width: 0; font-size: 13px; line-height: 1.45; }
+.live-import-screen :is(.live-import-fields select, .live-import-selectors select) { min-height: 42px; }
+.employee-approval-field-group { background: color-mix(in srgb, var(--module-surface) 96%, #178a82 4%); }
+.employee-approval-field-group h3 { font-size: 15px; }
+
+/* Company, branch and catalog administration */
+.company-screen :is(.company-table, .branch-table) { min-width: 760px; }
+.company-screen :is(.company-table td, .branch-table td) { font-size: 13px; }
+.company-screen :is(.company-table td strong, .branch-table td strong) { font-size: 14px; }
+.company-screen :is(.company-table td small, .branch-table td small) { font-size: 12px; }
+.company-screen :is(.form-field, .field-label) { font-size: 13px; }
+.company-screen :is(.form-field input, .form-field select, .form-field textarea) { min-height: 42px; border-radius: 8px; font-size: 14px; }
+.company-screen .profile-tabs { overflow-x: auto; scrollbar-width: thin; }
+.company-screen .profile-tabs button { flex: 0 0 auto; font-size: 13px; }
+.company-screen .branch-card-main { min-width: 0; }
+
+.live-hr-catalog :is(.live-hr-catalog-controls, .live-hr-catalog-form,
+  .live-hr-catalog-table) { padding: clamp(16px, 2vw, 24px); }
+.live-hr-catalog :is(.live-hr-catalog-controls label, .live-hr-catalog-form label) { color: var(--module-ink); font-size: 13px; }
+.live-hr-catalog :is(.live-hr-catalog-controls select, .live-hr-catalog-form input,
+  .live-hr-catalog-form select, .live-hr-catalog-form textarea) { min-height: 42px; border-color: var(--module-line); background: var(--module-surface); color: var(--module-ink); font: inherit; }
+.live-hr-catalog .peopleops-table { min-width: 740px; }
+
+/* Payroll review surfaces prioritize legible money and safe actions. */
+.live-payroll-inputs .live-inputs-table { min-width: 1120px; }
+.live-payroll-inputs .live-inputs-summary { gap: 16px; }
+.live-payroll-inputs .live-inputs-summary small,
+.live-payroll-inputs .live-inputs-note span { color: var(--module-muted); line-height: 1.55; }
+.live-payroll-inputs .live-inputs-summary strong { font-size: 16px; }
+.live-payroll-inputs .payroll-live-totals > div { border-color: var(--module-line); border-radius: 10px; }
+.live-payroll-approvals .payroll-approval-card { padding: clamp(18px, 2vw, 26px); }
+.live-payroll-approvals .payroll-approval-totals dd { font-variant-numeric: tabular-nums; }
+.live-payroll-approvals .payroll-approval-warning { border: 1px solid #ead7a7; border-radius: 9px; line-height: 1.5; }
+.live-payroll-approvals .payroll-approval-card footer { flex-wrap: wrap; }
+.live-payslips .live-payslip-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); }
+.live-payslips .live-payslip-document { border-radius: 12px; }
+.live-payslips .live-payslip-net strong { font-variant-numeric: tabular-nums; }
+.live-payroll-reports .report-choice { min-height: 112px; border-radius: 11px; }
+.live-payroll-reports .report-choice strong { line-height: 1.35; }
+.live-statutory-filings .statutory-filing-table { border: 1px solid var(--module-line); border-radius: 12px; }
+.live-statutory-filings .statutory-filing-table table { min-width: 760px; }
+
+/* Attendance, leave, notifications and account operations */
+.peopleops-screen .peopleops-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); gap: 12px; }
+.peopleops-screen .peopleops-kpis > div { min-height: 88px; padding: 14px 16px; border-radius: 11px; }
+.peopleops-screen .peopleops-kpis span { color: var(--module-muted); font-size: 12px; }
+.peopleops-screen .peopleops-kpis strong { font-size: 21px; font-variant-numeric: tabular-nums; }
+.peopleops-screen .peopleops-toolbar { flex-wrap: wrap; gap: 10px; padding: 14px; }
+.peopleops-screen :is(.peopleops-search, .peopleops-toolbar input[type=date],
+  .peopleops-toolbar select) { min-height: 42px; font-size: 13px; }
+.peopleops-screen .peopleops-table { min-width: 780px; }
+.peopleops-screen .peopleops-table th { font-size: 11px; }
+.peopleops-screen .peopleops-table td { font-size: 13px; }
+.live-operations-screen .live-notification-list article { gap: 16px; }
+.live-operations-screen .live-notification-copy { line-height: 1.5; }
+.live-operations-screen .live-notification-copy strong { font-size: 14px; }
+.live-operations-screen .live-notification-copy p { font-size: 13px; }
+.live-operations-screen .live-settings-panel { padding: clamp(18px, 3vw, 28px); }
+.live-operations-screen .live-settings-panel :is(label, input, select) { font-size: 14px; }
+
+@media (max-width: 760px) {
+  :is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+      .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+      .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+      .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+      .live-audit-screen) :is(.welcome-actions, .live-employee-actions,
+      .live-import-preview header, .live-hr-catalog-controls) {
+    flex-wrap: wrap;
+  }
+
+  .live-import-screen .live-import-upload > label { min-height: 140px; }
+  .company-screen .profile-tabs { gap: 16px; }
+  .live-operations-screen .live-notification-actions { padding-left: 0; }
+}
+
+@media (max-width: 520px) {
+  :is(.employee-screen, .live-import-screen, .staging-screen, .live-hr-catalog,
+      .company-screen, .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+      .live-payroll-reports, .live-statutory-filings, .live-statutory-workspace,
+      .attendance-page, .peopleops-screen, .live-operations-screen, .live-user-admin,
+      .live-audit-screen) :is(.welcome-actions, .live-employee-actions,
+      .employee-form-actions, .live-import-preview footer, .payroll-approval-card footer) {
+    width: 100%;
+  }
+
+  .employee-screen .live-employee-actions > *,
+  .live-import-screen .live-import-confirm > button,
+  .live-payroll-approvals .payroll-approval-card footer > button {
+    min-height: 42px;
+  }
+
+  .company-screen .company-form { padding-inline: 14px; }
+  .live-hr-catalog .live-hr-catalog-form { grid-template-columns: minmax(0, 1fr); }
+  .live-hr-catalog .live-hr-catalog-form > * { grid-column: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.company-screen, .employee-screen, .live-import-screen, .live-hr-catalog,
+      .live-payroll-inputs, .live-payroll-approvals, .live-payslips,
+      .live-payroll-reports, .live-statutory-filings, .peopleops-screen,
+      .live-operations-screen) * {
+    scroll-behavior: auto;
+    transition-duration: .01ms;
+  }
+}

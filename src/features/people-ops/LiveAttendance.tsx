@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type AttendanceEntryRecord, type AttendancePeriodRecord, type EmployeeDirectoryRecord } from '../../services/live-business-services'
 import { createLiveHrServices, type AttendancePeriodHistoryRecord } from '../../services/live-hr-services'
 import './people-ops.css'
+import '../../module-modernization.css'
 
 const pageSize = 50
 const defaultMonth = new Date().toISOString().slice(0, 7)

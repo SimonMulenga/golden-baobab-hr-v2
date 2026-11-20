@@ -4,6 +4,7 @@ import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type AuditLogRecord } from '../../services/live-business-services'
 import { formatWorkspaceDateTime, useWorkspace } from '../companies/WorkspaceContext'
 import './live-audit-logs.css'
+import '../../module-modernization.css'
 
 const timestamp = (value: string, preferences?: ReturnType<typeof useWorkspace>['preferences']) => formatWorkspaceDateTime(value, preferences, { dateStyle: 'medium', timeStyle: 'short' })
 

@@ -6,6 +6,7 @@ import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../compa
 import { RowActionsMenu, StatusBadge } from '../../components/RowActionsMenu'
 import './live-user-admin.css'
 import './live-branch-picker.css'
+import '../../module-modernization.css'
 
 const companyRoleLabel = (role: string) => role === 'COMPANY_ADMIN'
   ? 'Company Administrator'

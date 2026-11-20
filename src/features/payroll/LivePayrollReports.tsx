@@ -6,6 +6,7 @@ import { createLiveBusinessServices, type EmployeeDirectoryRecord, type Finalize
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { ADVANCE_HEADINGS, BANK_HEADINGS, buildAdvanceReport, buildBankPayrollReport, buildCashPayrollReport, buildLeaveDaysReport, buildMasterPayrollReport, buildMobileMoneyPayrollReport, buildNapsaReport, buildNhimaReport, buildPayeReport, buildReportCsv, buildReportWorkbook, CASH_HEADINGS, LEAVE_HEADINGS, MASTER_HEADINGS, MOBILE_MONEY_HEADINGS, NAPSA_HEADINGS, NHIMA_HEADINGS, PAYE_HEADINGS, PAYROLL_REGISTER_HEADINGS, type DeductionReportRecord, type PrivateReportDetails, type ReportLine, type ReportValidation } from './report-export-model'
 import './live-payroll-reports.css'
+import '../../module-modernization.css'
 
 type ReportMode = 'payroll' | 'statutory'
 type ReportId = 'PAYROLL_REGISTER' | 'NAPSA' | 'NHIMA' | 'PAYE' | 'LEAVE' | 'BANK' | 'CASH' | 'ADVANCES' | 'MASTER' | 'MOBILE'

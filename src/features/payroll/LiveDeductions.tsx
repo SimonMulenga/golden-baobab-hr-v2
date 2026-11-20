@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type DeductionInstallmentRecord, type DeductionRecord, type EmployeeDirectoryRecord } from '../../services/live-business-services'
 import { buildDeductionSchedule, parseMoneyCents, type DeductionInstallment, type RepaymentMethod } from './deduction-schedule'
 import './live-deductions.css'
+import '../../module-modernization.css'
 
 const pageSize = 25
 const deductionKinds = [

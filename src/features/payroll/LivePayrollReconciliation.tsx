@@ -4,6 +4,7 @@ import { formatWorkspaceDate, useWorkspace } from '../companies/WorkspaceContext
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLivePayoutReconciliationServices, type PayoutReconciliationBatch, type PayoutReconciliationLine, type ReconciliationStatus } from '../../services/live-payout-reconciliation-services'
 import './live-payroll-reconciliation.css'
+import '../../module-modernization.css'
 
 const PAGE_SIZE = 50
 const money = (value: number) => `K${Number(value).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`

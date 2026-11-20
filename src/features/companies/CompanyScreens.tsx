@@ -7,6 +7,7 @@ import type { Branch, BranchInput, Company, CompanyInput, CompanyStatus } from '
 import { isLiveMode } from '../../lib/data-mode'
 import { normalizeCompanyLogo } from './logo-image'
 import './company-screens.css'
+import '../../module-modernization.css'
 
 const emptyCompany: CompanyInput = { name: '', registrationNumber: '', tpin: '', industry: '', email: '', phone: '', address: '', province: '', town: '', logo: '', contactPerson: '', status: 'Active' }
 const emptyBranch: BranchInput = { name: '', code: '', province: '', town: '', address: '', manager: '', phone: '', status: 'Active' }
