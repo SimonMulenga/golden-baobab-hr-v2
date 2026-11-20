@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Activity, Bell, BriefcaseBusiness, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
 import { WorkspaceContext, defaultWorkspacePreferences, useWorkspace, type WorkspacePreferences } from './features/companies/WorkspaceContext'
 import { AuthProvider } from './features/auth/AuthContext'
@@ -14,6 +14,10 @@ import { createLiveOperationsServices } from './services/live-operations-service
 import { loadDashboardMetrics, type DashboardMetrics } from './services/live-dashboard-services'
 import type { Company } from './features/companies/types'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary'
+import { PwaPrompts, PwaInstallMenuAction } from './features/pwa/PwaControls'
+import { PwaProvider } from './features/pwa/pwa-runtime'
+import { useRealtimeNotifications } from './features/notifications/useRealtimeNotifications'
+import type { UserNotificationRecord } from './services/live-operations-services'
 const { CompanyDirectory, CompanyForm, CompanyProfile, BranchManagement } = { CompanyDirectory: lazy(() => import('./features/companies/CompanyScreens').then((module) => ({ default: module.CompanyDirectory }))), CompanyForm: lazy(() => import('./features/companies/CompanyScreens').then((module) => ({ default: module.CompanyForm }))), CompanyProfile: lazy(() => import('./features/companies/CompanyScreens').then((module) => ({ default: module.CompanyProfile }))), BranchManagement: lazy(() => import('./features/companies/CompanyScreens').then((module) => ({ default: module.BranchManagement }))) }
 const LiveEmployeeDirectory = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeDirectory })))
 const LiveEmployeeApprovals = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeApprovals })))
@@ -67,10 +71,22 @@ function AppShell() {
   const [activeCompanyId, setActiveCompanyId] = useState('all')
   const [workspacePreferences, setWorkspacePreferences] = useState<{ companyId: string; value: WorkspacePreferences } | null>(null)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
+  const [realtimeNotification, setRealtimeNotification] = useState<UserNotificationRecord | null>(null)
+  const navigate = useNavigate()
   const [pendingPayrollApprovals, setPendingPayrollApprovals] = useState(0)
   const [pendingEmployeeApprovals, setPendingEmployeeApprovals] = useState(0)
   const [authActionError, setAuthActionError] = useState('')
   const location = useLocation()
+  const notificationClient = useMemo(() => isLiveMode && authUserId ? getSupabaseClient() : null, [authUserId])
+  useRealtimeNotifications(notificationClient, authUserId, setRealtimeNotification)
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const handleWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GBHR_OPEN_NOTIFICATIONS') navigate('/notifications')
+    }
+    navigator.serviceWorker.addEventListener('message', handleWorkerMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', handleWorkerMessage)
+  }, [navigate])
   const routeName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name
   const currentName = routeName ?? (location.pathname === '/companies/new' ? 'Add company' : location.pathname.endsWith('/edit') ? 'Edit company' : location.pathname.startsWith('/companies/') ? 'Company details' : location.pathname === '/employees/new' ? 'Add employee' : location.pathname.endsWith('/correct') ? 'Review employee' : location.pathname.startsWith('/employees/import') ? 'Employee import' : location.pathname.startsWith('/employees/') ? 'Employee profile' : location.pathname === '/auth/login' ? 'Sign in' : location.pathname === '/job-roles' ? 'Job roles' : 'Page not found')
   const currentCompany = companies.find((company) => company.id === activeCompanyId)
@@ -237,6 +253,7 @@ function AppShell() {
       <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN') ? 'Portfolio Administrator' : roleContext.roles.includes('PORTFOLIO_ADMIN') ? 'Platform Super Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
       <nav className="side-nav" aria-label="Primary navigation">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/' || path === '/employees'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined} onClick={() => setMobileOpen(false)}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Employee Approvals' && pendingEmployeeApprovals > 0 && <span className="nav-count" aria-label={`${pendingEmployeeApprovals} pending employee approvals`}>{pendingEmployeeApprovals > 99 ? '99+' : pendingEmployeeApprovals}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom">{!isLiveMode && <div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div>}<div className="profile-row"><div className="profile-avatar">{isLiveMode ? initials(profileName) : 'CM'}</div><div className="profile-copy"><strong>{profileName}</strong><span>{isLiveMode ? 'Signed-in account' : 'Workspace admin'}</span></div>{!isLiveMode && <MoreHorizontal size={18} />}</div></div>
+      <PwaInstallMenuAction />
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-pressed={collapsed}><ChevronLeft size={15} /></button>
     </aside>
     <div className="main-column"><header className="topbar"><div className="top-left"><button ref={mobileMenuButton} className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="workspace-navigation" aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions">{maySelectCompany ? <label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label> : companies.length === 1 && <div className="company-switch company-context" aria-label="Assigned company"><Building2 size={15}/><span>{companies[0].name}</span></div>}<button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search pages" aria-haspopup="dialog" aria-expanded={searchOpen} onClick={() => { setSearchQuery(""); setSearchOpen(true) }}><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link><div className="account-menu-anchor" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProfileMenuOpen(false) }}><button className="account-menu-trigger" type="button" aria-haspopup="menu" aria-expanded={profileMenuOpen} aria-label={"Account menu for " + profileName} onClick={() => setProfileMenuOpen((open) => !open)}><span className="top-avatar">{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</span><ChevronDown size={14}/></button>{profileMenuOpen && <div className="account-menu" role="menu"><div className="account-menu-identity"><strong>{profileName}</strong><span>{isLiveMode ? auth.user?.email : 'Workspace administrator'}</span></div><button role="menuitem" type="button" onClick={() => { setDark((value) => !value); setProfileMenuOpen(false) }}>{dark ? <Sun size={15}/> : <Moon size={15}/>} {dark ? 'Use light theme' : 'Use dark theme'}</button>{isLiveMode && <button role="menuitem" type="button" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } finally { setProfileMenuOpen(false) } }}><X size={15}/> Sign out</button>}</div>}</div></div></header>
@@ -269,11 +286,12 @@ function AppShell() {
           <Route path="/reports" element={<LivePayrollReports />} />
           <Route path="/users" element={<LiveUserAdmin portfolioCompanyAdmin={roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN')} portfolioWideAdministrator={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} companyScopedAdministrator={roleContext.roles.includes('COMPANY_ADMIN') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
           <Route path="/audit" element={<LiveAuditLogs />} />
-          <Route path="/notifications" element={<LiveNotifications />} />
+          <Route path="/notifications" element={<LiveNotifications userId={authUserId} />} />
           <Route path="/settings" element={<LiveSettings />} />
           <Route path="*" element={<main className="not-found" role="status"><span>404</span><h1>Page not found</h1><p>This workspace route does not exist or is no longer available.</p><Link className="button-primary" to="/">Return to overview</Link></main>} />
         </Routes></Suspense></RouteErrorBoundary></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span>People and payroll workspace</span></footer>
+    <PwaPrompts notification={realtimeNotification} onDismissNotification={() => setRealtimeNotification(null)} />
     </div>
   </div></WorkspaceContext.Provider>
 }
@@ -311,5 +329,5 @@ function LiveDashboard({ companies, loading, canCreateCompany, availableRoutes }
 
 function Metric({ icon, tone, label, value, note }: { icon: React.ReactNode; tone: string; label: string; value: string; note: string }) { return <article className="metric-card"><div className="metric-top"><div className={`metric-icon ${tone}`}>{icon}</div></div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-bottom"><span>{note}</span></div></article> }
 
-function App() { return <BrowserRouter><AuthProvider><AppShell /></AuthProvider></BrowserRouter> }
+function App() { return <PwaProvider><BrowserRouter><AuthProvider><AppShell /></AuthProvider></BrowserRouter></PwaProvider> }
 export default App
