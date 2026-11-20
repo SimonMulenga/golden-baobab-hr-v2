@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
 import ExcelJS from 'exceljs'
 import { readFileSync } from 'node:fs'
-import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, recalculateStagedHousingAllowance, validateStagedEmployee } from './employee-import-staging'
+import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, matchAuthorizedImportBranch, matchingInactiveImportBranch, recalculateStagedHousingAllowance, validateStagedEmployee } from './employee-import-staging'
 import { calculateGrossEarningsPreview, calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
 import { employeeTemplateColumns } from './live-import-model'
 
@@ -24,6 +24,36 @@ function workbookBuffer() {
 }
 
 const companies = [{ id: 'company-1', name: 'Golden Baobab Investments', branches: [{ id: 'branch-1', name: 'Main', status: 'Active' }] }]
+
+describe('workplace branch import mapping', () => {
+  const branches = [
+    { id: 'branch-lusaka', name: 'Lusaka Headquarters', code: 'LSK-01', status: 'ACTIVE' },
+    { id: 'branch-other', name: 'Copperbelt Office', code: 'CB-02', status: 'ACTIVE' },
+    { id: 'branch-closed', name: 'Lusaka Headqautera', code: 'LSK-OLD', status: 'INACTIVE' },
+  ]
+
+  it('maps exact normalized branch names and company-scoped branch codes only', () => {
+    expect(matchAuthorizedImportBranch('  LUSAKA—HEADQUARTERS ', branches)?.id).toBe('branch-lusaka')
+    expect(matchAuthorizedImportBranch('lsk 01', branches)?.id).toBe('branch-lusaka')
+    expect(matchAuthorizedImportBranch('Lusaka Head', branches)).toBeNull()
+    expect(matchAuthorizedImportBranch('Lusaka Headquarters', [branches[0], { ...branches[0], id: 'duplicate' }])).toBeNull()
+  })
+
+  it('does not assign an inactive exact match and reports it separately for HR', () => {
+    expect(matchAuthorizedImportBranch('LUSAKA HEADQAUTERA', branches)).toBeNull()
+    expect(matchingInactiveImportBranch('LUSAKA HEADQAUTERA', branches)?.id).toBe('branch-closed')
+  })
+
+  it('uses the workbook Branch column as the canonical workplace branch assignment', () => {
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Employee Number', 'First Name', 'Last Name', 'Company', 'Branch'],
+      ['SYN-BRANCH', 'Test', 'Worker', 'Golden Baobab Investments', 'MAIN!'],
+    ]), 'Employees')
+    const result = extractEmployeeWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer, companies)
+    expect(result.records[0]).toMatchObject({ branch_id: 'branch-1', current_data: { branch_name: 'Main' } })
+  })
+})
 
 describe('employee workbook staging', () => {
   it('extracts employee rows from multiple worksheets and preserves sheet and Excel row coordinates', () => {
