@@ -19,7 +19,7 @@ describe('LIVE operations settings and notifications', () => {
 
   it('loads only the signed-in inbox service and persists read state', async () => {
     render(<MemoryRouter>{withWorkspace(<LiveNotifications />)}</MemoryRouter>)
-    expect(await screen.findByText('Your leave record status changed to approved.')).toBeInTheDocument()
+    expect(await screen.findByText('A status changed. Open Notifications to review the update.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }))
     await waitFor(() => expect(mocks.setRead).toHaveBeenCalledWith(notification.id, true))
     expect(await screen.findByRole('status')).toHaveTextContent('Notification marked as read')

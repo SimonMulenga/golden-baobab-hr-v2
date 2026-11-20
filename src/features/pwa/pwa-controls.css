@@ -1,0 +1,39 @@
+.pwa-controls { position: fixed; z-index: 1200; right: 22px; bottom: 22px; display: grid; gap: 10px; width: min(390px, calc(100vw - 28px)); }
+.pwa-card, .workflow-toast { border: 1px solid #dce7e4; border-radius: 14px; background: #fff; color: #173d37; box-shadow: 0 14px 38px rgba(18, 61, 73, .16); }
+.pwa-card { padding: 17px 18px; }
+.pwa-card-head, .pwa-card-actions, .workflow-toast { display: flex; align-items: center; gap: 12px; }
+.pwa-card-head { justify-content: space-between; }
+.pwa-card-head strong { font-size: 14px; }
+.pwa-card p { margin: 7px 0 13px; color: #526a70; font-size: 13px; line-height: 1.5; }
+.pwa-card-actions { flex-wrap: wrap; }
+.pwa-card .button-primary, .pwa-card .button-secondary { min-height: 38px; padding: 8px 13px; }
+.pwa-card .button-secondary { border: 1px solid #dce7e4; background: #fff; color: #31535a; }
+.pwa-dismiss { border: 0; background: transparent; color: #637a7e; cursor: pointer; font: inherit; font-size: 12px; padding: 5px; }
+.workflow-toast { padding: 14px 16px; }
+.workflow-toast-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #e9f3f0; color: #178a82; }
+.workflow-toast-copy { min-width: 0; flex: 1; }
+.workflow-toast-copy strong { display: block; font-size: 13px; }
+.workflow-toast-copy span { display: block; margin-top: 3px; color: #526a70; font-size: 12px; line-height: 1.4; }
+.workflow-toast-close { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #526a70; cursor: pointer; }
+.workflow-toast-close:hover { background: #f1f6f4; }
+.pwa-settings { display: grid; gap: 14px; border: 1px solid #dce7e4; border-radius: 12px; padding: 16px; }
+.pwa-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.pwa-setting-copy { min-width: 0; }
+.pwa-setting-copy strong { display: block; color: #173d37; font-size: 13px; }
+.pwa-setting-copy span { display: block; margin-top: 3px; color: #62777b; font-size: 12px; line-height: 1.45; }
+.pwa-setting-row button { flex: 0 0 auto; min-height: 38px; }
+.pwa-permission-note { color: #8b5c18; font-size: 12px; line-height: 1.45; }
+.pwa-help-backdrop { position: fixed; z-index: 1300; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(16, 39, 38, .48); }
+.pwa-help-dialog { width: min(440px, 100%); }
+.pwa-menu-action { padding: 7px 13px; }
+.pwa-sidebar-install-button { display: flex; width: 100%; align-items: center; gap: 9px; min-height: 38px; padding: 8px 12px; border: 1px solid #dce7e4; border-radius: 9px; background: #fff; color: #31535a; cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; }
+.pwa-menu-action > span:not(.sr-only) { display: block; padding: 8px 2px 0; color: #526a70; font-size: 11px; line-height: 1.45; }
+.pwa-settings > div:first-child p { margin: 4px 0 0; color: #62777b; font-size: 12px; line-height: 1.45; }
+.pwa-settings > div:first-child strong { color: #173d37; font-size: 14px; }
+.pwa-card :focus-visible, .workflow-toast :focus-visible, .pwa-settings :focus-visible { outline: 3px solid #d89a42; outline-offset: 2px; }
+@media (max-width: 520px) {
+  .pwa-controls { right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); width: calc(100vw - 28px); }
+  .pwa-card { padding: 14px; }
+  .pwa-card-actions > * { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) { .pwa-controls *, .workflow-toast * { scroll-behavior: auto; transition-duration: .01ms; } }

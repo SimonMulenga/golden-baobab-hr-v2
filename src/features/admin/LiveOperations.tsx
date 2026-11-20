@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom'
 import { useCompanySelection, useWorkspace, type WorkspacePreferences } from '../companies/WorkspaceContext'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveOperationsServices, type UserNotificationRecord, type WorkspaceSettingsRecord } from '../../services/live-operations-services'
+import { getNotificationPreference, notificationsInAppText, playNotificationChime, setNotificationPreference } from '../notifications/notification-preferences'
 import './live-operations.css'
 import '../../module-modernization.css'
 
 const PAGE_SIZE = 25
 const routeFor = (item: UserNotificationRecord) => item.source_type === 'EMPLOYEE' ? `/employees/${encodeURIComponent(item.source_id)}` : item.action_path
 
-export function LiveNotifications() {
+export function LiveNotifications({ userId }: { userId?: string }) {
   const [page, setPage] = useState(1)
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [items, setItems] = useState<UserNotificationRecord[]>([])
@@ -20,6 +21,9 @@ export function LiveNotifications() {
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [soundEnabled, setSoundEnabled] = useState(() => userId ? getNotificationPreference(userId, 'sound') : false)
+  const [systemEnabled, setSystemEnabled] = useState(() => userId ? getNotificationPreference(userId, 'system') : false)
+  const [permission, setPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -39,10 +43,16 @@ export function LiveNotifications() {
   return <div className="live-operations-screen">
     <header className="page-heading"><div><div className="eyebrow">WORKSPACE UPDATES</div><h1>Notifications</h1><p>Workflow status updates for records you created. This inbox does not send email or external messages.</p></div><button className="button-secondary" disabled={loading || busyId !== '' || !items.some((item) => !item.read_at)} onClick={async () => { setBusyId('all'); setError(''); try { await createLiveOperationsServices(getSupabaseClient()).notifications.setManyRead(items.filter((row) => !row.read_at).map((row) => row.id), true); await load() } catch { setError('Notifications on this page could not be marked as read.') } finally { setBusyId('') } }}>Mark page read</button></header>
     <div className="live-data-notice"><Bell size={15}/> {unreadTotal} unread notification{unreadTotal === 1 ? '' : 's'} · private to your signed-in account</div>
+    {userId && <section className="panel pwa-settings" aria-label="Notification preferences">
+      <div><strong>Notification preferences</strong><p>Choose how this device lets you know when one of your workflows changes.</p></div>
+      <div className="pwa-setting-row"><div className="pwa-setting-copy"><strong>Notification sound</strong><span>A short, quiet chime plays for new in-app workflow updates.</span></div><button className="button-secondary" type="button" aria-pressed={soundEnabled} onClick={() => { const enabled = !soundEnabled; setSoundEnabled(enabled); setNotificationPreference(userId, 'sound', enabled); if (enabled) void playNotificationChime() }}>{soundEnabled ? 'Sound on' : 'Sound off'}</button></div>
+      <div className="pwa-setting-row"><div className="pwa-setting-copy"><strong>Desktop and device notifications</strong><span>System alerts use generic text and never include employee or payroll details.</span></div><button className="button-secondary" type="button" aria-pressed={systemEnabled && permission === 'granted'} disabled={permission === 'denied'} onClick={async () => { if (permission === 'granted') { const enabled = !systemEnabled; setSystemEnabled(enabled); setNotificationPreference(userId, 'system', enabled); return } if (!('Notification' in window)) return; const result = await Notification.requestPermission(); setPermission(result); const enabled = result === 'granted'; setSystemEnabled(enabled); setNotificationPreference(userId, 'system', enabled) }}>{permission === 'granted' ? (systemEnabled ? 'Device alerts on' : 'Device alerts off') : permission === 'denied' ? 'Blocked in browser' : 'Enable device alerts'}</button></div>
+      {permission === 'denied' && <span className="pwa-permission-note">Notifications are blocked in this browser. Change the site permission in browser settings, then return here.</span>}
+    </section>}
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-notice" role="status">{notice}</p>}
     <div className="live-notification-tabs"><button className={!unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(false) }}>All</button><button className={unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(true) }}>Unread ({unreadTotal})</button></div>
     <section className="panel live-notification-list" aria-label="Notifications">
-      {loading ? <div className="live-notification-empty" role="status">Loading your notifications…</div> : items.length ? items.map((item) => <article className={item.read_at ? '' : 'unread'} key={item.id}><span className="live-notification-icon"><Bell size={17}/></span><div className="live-notification-copy"><strong>{item.title}</strong><p>{item.message}</p><small><Clock3 size={12}/> {new Date(item.created_at).toLocaleString()} · {item.source_type}</small></div><div className="live-notification-actions"><Link className="button-secondary" to={routeFor(item)}>Open</Link><button className="button-secondary" disabled={busyId === item.id} onClick={() => void setRead(item, !item.read_at)}>{item.read_at ? 'Mark unread' : 'Mark read'}</button></div></article>) : <div className="live-notification-empty"><Bell size={22}/><strong>{unreadOnly ? 'No unread notifications' : 'No workflow updates yet'}</strong><span>Updates appear when a workflow you started changes.</span></div>}
+      {loading ? <div className="live-notification-empty" role="status">Loading your notifications…</div> : items.length ? items.map((item) => { const safeText = notificationsInAppText(item.source_type); return <article className={item.read_at ? '' : 'unread'} key={item.id}><span className="live-notification-icon"><Bell size={17}/></span><div className="live-notification-copy"><strong>{safeText.title}</strong><p>{safeText.message}</p><small><Clock3 size={12}/> {new Date(item.created_at).toLocaleString()} · {item.source_type}</small></div><div className="live-notification-actions"><Link className="button-secondary" to={routeFor(item)}>Open</Link><button className="button-secondary" disabled={busyId === item.id} onClick={() => void setRead(item, !item.read_at)}>{item.read_at ? 'Mark unread' : 'Mark read'}</button></div></article> }) : <div className="live-notification-empty"><Bell size={22}/><strong>{unreadOnly ? 'No unread notifications' : 'No workflow updates yet'}</strong><span>Updates appear when a workflow you started changes.</span></div>}
       <footer><span>Page {page} of {pageCount} · {total} notifications</span><div><button className="button-secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={14}/> Previous</button><button className="button-secondary" disabled={page >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={14}/></button></div></footer>
     </section>
   </div>
