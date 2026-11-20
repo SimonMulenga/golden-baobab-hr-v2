@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import migration from '../../../supabase/migrations/20261120005500_secure_employee_import_staging.sql?raw'
+import pendingBranchMigration from '../../../supabase/migrations/20261120005600_allow_pending_import_branch_assignment.sql?raw'
 
 describe('secure employee import staging migration contract', () => {
   it('is additive and retains the existing portfolio/company/branch and employee approval model', () => {
@@ -44,5 +45,12 @@ describe('secure employee import staging migration contract', () => {
     expect(migration).toMatch(/employee_review_submission/i) // status synchronization is driven by that existing employee approval transition
     expect(migration).toMatch(/after update of approval_status on public\.employees/i)
     expect(migration).not.toMatch(/update public\.employee_compensation/i)
+  })
+
+  it('permits a scoped company assignment while the branch is unresolved but blocks readiness until branch selection', () => {
+    expect(pendingBranchMigration).toMatch(/check \(branch_id is null or company_id is not null\)/i)
+    expect(pendingBranchMigration).toMatch(/has_permission\('employee\.private\.view',p_portfolio_id,c\.id,null\)/i)
+    expect(pendingBranchMigration).toMatch(/p_company_id is not null and p_branch_id is not null then v_status:='READY_FOR_APPROVAL'/i)
+    expect(pendingBranchMigration).not.toMatch(/\bdrop\s+(table|schema)\b|\btruncate\b/i)
   })
 })
