@@ -66,6 +66,10 @@ export function createEmployeeImportStagingService(client: SupabaseClient) {
         .eq('batch_id', batchId).order('source_sheet').order('source_row').limit(5000)
       return unwrap(result) as StagingRecord[]
     },
+    async getRecord(recordId: string): Promise<StagingRecord> {
+      const result = await client.from('employee_import_staging_records').select('*').eq('id', recordId).single()
+      return unwrap(result) as StagingRecord
+    },
     async listPendingReviewRecords(portfolioIds: string[], companyId?: string): Promise<StagingRecord[]> {
       if (!portfolioIds.length) return []
       let query = client.from('employee_import_staging_records').select('*')

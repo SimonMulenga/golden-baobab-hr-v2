@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check, FileSpreadsheet, RefreshCw, Save, ShieldCheck, Upload, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
+﻿import { useEffect, useMemo, useState } from 'react'
+import { Check, FileSpreadsheet, Save, ShieldCheck, Upload, X } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
-import { createEmployeeImportStagingService, sha256File, type StagingBatch, type StagingRecord } from './employee-import-staging-service'
-import { detectEmployeeUploadFormat, extractEmployeeWorkbook, recalculateStagedHousingAllowance, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
+import { createEmployeeImportStagingService, sha256File, type StagingRecord } from './employee-import-staging-service'
+import { detectEmployeeUploadFormat, extractEmployeeWorkbook, matchingInactiveImportBranch, recalculateStagedHousingAllowance, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
 import { allowedTemplateBanks, employeeTemplateValues, liveImportFields, type EmployeeFieldMapping } from './live-import-model'
 import { createLiveHrServices, type DepartmentRecord } from '../../services/live-hr-services'
 import { calculateGrossEarningsPreview, downloadEmployeeTemplate } from './employee-import-template'
@@ -41,7 +41,8 @@ function submitKey(recordId: string) {
   } catch { return `staged:${recordId}:${crypto.randomUUID()}` }
 }
 
-export function LiveEmployeeImportStaging() {
+export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false, onClose, onChanged }: { approvalRecordId?: string; canApprove?: boolean; onClose?: () => void; onChanged?: () => void }) {
+  const navigate = useNavigate()
   const { companies } = useWorkspace()
   const { companyId } = useCompanySelection()
   const [fileName, setFileName] = useState('')
@@ -54,31 +55,23 @@ export function LiveEmployeeImportStaging() {
   const [exclusions, setExclusions] = useState<{ sheet: string; row: number; reason: string }[]>([])
   const [sheetSummary, setSheetSummary] = useState<{ sheet: string; extracted: number; excluded: number }[]>([])
   const [reconciliation, setReconciliation] = useState<Record<string, unknown>>({})
-  const [batches, setBatches] = useState<StagingBatch[]>([])
-  const [selectedBatch, setSelectedBatch] = useState<StagingBatch | null>(null)
   const [stagedRows, setStagedRows] = useState<StagingRecord[]>([])
-  const [selectedApprovalIds, setSelectedApprovalIds] = useState<string[]>([])
   const [selectedRecordId, setSelectedRecordId] = useState('')
   const [reviewHistory, setReviewHistory] = useState<{ id: number; actor_id: string; action: string; reason: string | null; changed_fields: string[]; occurred_at: string }[]>([])
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [draftPayroll, setDraftPayroll] = useState<Record<string, unknown>>({})
   const [draftCompanyId, setDraftCompanyId] = useState<string | null>(null)
   const [draftBranchId, setDraftBranchId] = useState<string | null>(null)
-  const [payrollJson, setPayrollJson] = useState('{}')
   const [reviewReason, setReviewReason] = useState('')
   const [confirmDistinctMatch, setConfirmDistinctMatch] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [excludedDetails, setExcludedDetails] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('ALL')
-  const [filterCompanyId, setFilterCompanyId] = useState('ALL')
-  const [filterBranchId, setFilterBranchId] = useState('ALL')
-  const [page, setPage] = useState(0)
   const [departments, setDepartments] = useState<DepartmentRecord[]>([])
   const [departmentLoading, setDepartmentLoading] = useState(false)
   const [departmentError, setDepartmentError] = useState('')
+  const [approvalDialogLoading, setApprovalDialogLoading] = useState(false)
 
   const currentCompany = companies.find((item) => item.id === companyId)
   const portfolioCompanies = companies.filter((item) => !portfolioId || item.portfolioId === portfolioId)
@@ -103,31 +96,35 @@ export function LiveEmployeeImportStaging() {
   }, [draft, draftCompanyId, draftBranchId, departments, departmentLoading, departmentError, selectedRecord])
   const grossPreview = useMemo(() => calculateGrossEarningsPreview(draft, false), [draft])
   const mappingConflicts = worksheetMappings.flatMap((sheet) => sheet.conflicts.map((issue) => `${sheet.sheet}: ${issue}`))
-  const readyCount = stagedRows.filter((row) => row.review_status === 'READY_FOR_APPROVAL').length
-  const needsInfoCount = stagedRows.filter((row) => row.review_status === 'NEEDS_INFORMATION' || row.review_status === 'PENDING_REVIEW').length
-  const duplicateCount = stagedRows.filter((row) => row.review_status === 'DUPLICATE_REVIEW').length
-  const submittedCount = stagedRows.filter((row) => row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id)).length
   const previewNeedsAttention = records.filter((row) => validateStagedEmployee(row.current_data, row.company_id ?? '', row.branch_id ?? '').length > 0).length
   const previewReadyForReview = records.length - previewNeedsAttention
-  const filteredRecords = useMemo(() => stagedRows.filter((row) => {
-    const query=searchQuery.trim().toLowerCase()
-    const company=companies.find((item)=>item.id===row.company_id)
-    const branch=company?.branches.find((item)=>item.id===row.branch_id)
-    const matchesQuery=!query||[row.current_data.employee_number,row.current_data.first_name,row.current_data.last_name,row.source_sheet,String(row.source_row),company?.name,branch?.name].some((value)=>String(value??'').toLowerCase().includes(query))
-    return matchesQuery&&(statusFilter==='ALL'||row.review_status===statusFilter)&&(filterCompanyId==='ALL'||row.company_id===filterCompanyId)&&(filterBranchId==='ALL'||row.branch_id===filterBranchId)
-  }),[stagedRows,companies,searchQuery,statusFilter,filterCompanyId,filterBranchId])
-  const pageSize=50
-  const pageCount=Math.max(1,Math.ceil(filteredRecords.length/pageSize))
-
-  async function refreshBatches(targetPortfolio = portfolioId) {
-    if (!targetPortfolio) return
-    const items = await createEmployeeImportStagingService(getSupabaseClient()).listBatches(targetPortfolio)
-    setBatches(items)
-  }
+  useEffect(() => {
+    if (approvalRecordId) return
+    if (currentCompany?.portfolioId && !portfolioId) setPortfolioId(currentCompany.portfolioId)
+  }, [approvalRecordId, currentCompany?.portfolioId, portfolioId])
 
   useEffect(() => {
-    if (currentCompany?.portfolioId && !portfolioId) setPortfolioId(currentCompany.portfolioId)
-  }, [currentCompany?.portfolioId, portfolioId])
+    if (!approvalRecordId) return
+    let active = true
+    setApprovalDialogLoading(true); setError('')
+    const service = createEmployeeImportStagingService(getSupabaseClient())
+    void service.getRecord(approvalRecordId).then(async (record) => {
+      const [rows, history] = await Promise.all([service.listRecords(record.batch_id), service.listHistory(record.id)])
+      if (!active) return
+      setPortfolioId(record.portfolio_id)
+      setStagedRows(rows)
+      setSelectedRecordId(record.id)
+      setDraft(record.current_data)
+      setDraftPayroll(record.payroll_data)
+      setDraftCompanyId(record.company_id)
+      setDraftBranchId(record.branch_id)
+      setReviewHistory(history as typeof reviewHistory)
+      setApprovalDialogLoading(false)
+    }).catch(() => {
+      if (active) { setError('This imported employee is unavailable under your current company permissions.'); setApprovalDialogLoading(false) }
+    })
+    return () => { active = false }
+  }, [approvalRecordId])
 
   useEffect(() => {
     if (!draftCompanyId) { setDepartments([]); setDepartmentError(''); setDepartmentLoading(false); return }
@@ -150,43 +147,6 @@ export function LiveEmployeeImportStaging() {
       .finally(() => { if (active) setDepartmentLoading(false) })
     return () => { active = false }
   }, [draftCompanyId])
-
-  useEffect(() => {
-    if (!portfolioId) return
-    let active = true
-    createEmployeeImportStagingService(getSupabaseClient()).listBatches(portfolioId)
-      .then((items) => {
-        if (!active) return
-        setBatches(items)
-        const params = new URLSearchParams(window.location.search)
-        const batchId = params.get('batch')
-        const requestedBatch = items.find((batch) => batch.id === batchId)
-        if (requestedBatch) void openBatch(requestedBatch, params.get('record') ?? undefined)
-      })
-      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Import batch history could not be loaded.') })
-    return () => { active = false }
-  }, [portfolioId])
-
-  async function openBatch(batch: StagingBatch, focusRecordId?: string) {
-    setBusy(true); setError(''); setNotice('')
-    try {
-      const rows = await createEmployeeImportStagingService(getSupabaseClient()).listRecords(batch.id)
-      const focusedRecord = rows.find((row) => row.id === focusRecordId) ?? rows[0]
-      setSelectedBatch(batch); setStagedRows(rows); setSelectedRecordId(focusedRecord?.id ?? '');
-      setSelectedApprovalIds([])
-      setPage(0); setSearchQuery(''); setStatusFilter('ALL'); setFilterCompanyId('ALL'); setFilterBranchId('ALL')
-      setSheetSummary(batch.sheet_summary ?? [])
-      setReconciliation(batch.reconciliation ?? {})
-      setExclusions(Array.isArray(batch.reconciliation?.excluded) ? batch.reconciliation.excluded as { sheet: string; row: number; reason: string }[] : [])
-      if (focusedRecord) { setDraft(focusedRecord.current_data); setDraftPayroll(focusedRecord.payroll_data); setPayrollJson(JSON.stringify(focusedRecord.payroll_data,null,2)); setDraftCompanyId(focusedRecord.company_id); setDraftBranchId(focusedRecord.branch_id); setReviewHistory(await createEmployeeImportStagingService(getSupabaseClient()).listHistory(focusedRecord.id) as typeof reviewHistory) }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Staged rows could not be loaded.') }
-    finally { setBusy(false) }
-  }
-
-  function selectRecord(record: StagingRecord) {
-    setSelectedRecordId(record.id); setDraft(record.current_data); setDraftPayroll(record.payroll_data); setPayrollJson(JSON.stringify(record.payroll_data,null,2)); setDraftCompanyId(record.company_id); setDraftBranchId(record.branch_id); setReviewReason(''); setConfirmDistinctMatch(false); setNotice('')
-    void createEmployeeImportStagingService(getSupabaseClient()).listHistory(record.id).then((items)=>setReviewHistory(items as typeof reviewHistory)).catch(()=>setReviewHistory([]))
-  }
 
   async function chooseFile(file?: File) {
     setError(''); setNotice(''); setRecords([]); setExclusions([]); setSheetSummary([]); setWorksheetMappings([]); setMappingOverrides({}); setSourceBuffer(null); setFileName('')
@@ -245,132 +205,13 @@ export function LiveEmployeeImportStaging() {
         reconciliation: { ...reconciliation, excluded: exclusions },
       })
       window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      const savedNotice = result.replayed ? `This exact workbook was already staged (batch ${result.batch_id}).` : `${result.total_records} employee ${result.total_records === 1 ? 'candidate has' : 'candidates have'} been saved to the secure HR review queue.`
-      setNotice(savedNotice)
+      const savedNotice = `${result.total_records} employee${result.total_records === 1 ? '' : 's'} submitted for final HR approval.`
       setRecords([]); setFileName('')
       const inputElement = document.querySelector<HTMLInputElement>('#employee-staging-file')
       if (inputElement) inputElement.value = ''
-      const refreshedBatches = await createEmployeeImportStagingService(getSupabaseClient()).listBatches(portfolioId)
-      setBatches(refreshedBatches)
-      const found = refreshedBatches.find((batch) => batch.id === result.batch_id)
-      if (found) { await openBatch(found); setNotice(savedNotice) }
-      else setNotice(`${savedNotice} Batch ${result.batch_id} is saved; refresh batch history if it is not immediately visible.`)
+      navigate('/employee-approvals', { state: { employeeImportNotice: result.replayed ? `This workbook was already submitted. ${savedNotice}` : savedNotice } })
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Batch could not be staged. No success was reported; verify the batch list before retrying.') }
     finally { setBusy(false) }
-  }
-
-  async function saveReview(decision: 'SAVE' | 'MARK_READY' | 'REJECT') {
-    if (!selectedRecord) return
-    try { JSON.parse(payrollJson) } catch { setError('Payroll source fields must remain valid JSON before saving.'); return }
-    if (decision === 'MARK_READY' && validationErrors.length) { setError(`Complete the required information first: ${validationErrors.join(', ')}.`); return }
-    if (decision === 'MARK_READY' && selectedRecord.duplicate_warnings.some((item) => ['EMPLOYEE_NUMBER','BATCH_DUPLICATE','BATCH_IDENTITY_DUPLICATE','BATCH_NAME_DUPLICATE'].includes(item.type ?? ''))) { setError('An employee number or within-batch duplicate remains unresolved and cannot be overridden.'); return }
-    if (decision === 'MARK_READY' && selectedRecord.duplicate_warnings.length && (!confirmDistinctMatch || !reviewReason.trim())) { setError('Review the potential match and record a reason confirming the records are distinct, or reject the row.'); return }
-    if (decision === 'REJECT' && !reviewReason.trim()) { setError('Enter a reason before rejecting this record.'); return }
-    setBusy(true); setError(''); setNotice('')
-    try {
-      await createEmployeeImportStagingService(getSupabaseClient()).review({
-        recordId: selectedRecord.id, companyId: draftCompanyId, branchId: draftBranchId,
-        currentData: draft, payrollData: draftPayroll, decision, reason: reviewReason,
-        duplicateResolution: confirmDistinctMatch ? 'CONFIRMED_DISTINCT' : undefined,
-      })
-      const refreshed = await createEmployeeImportStagingService(getSupabaseClient()).listRecords(selectedRecord.batch_id)
-      setStagedRows(refreshed)
-      const next = refreshed.find((row) => row.id === selectedRecord.id)
-      if (next) selectRecord(next)
-      setNotice(decision === 'MARK_READY' ? 'Record is ready for HR approval submission.' : decision === 'REJECT' ? 'Record was rejected and the reason was recorded.' : 'Corrections were saved to the review history.')
-      await refreshBatches()
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Review changes could not be saved.') }
-    finally { setBusy(false) }
-  }
-
-  async function submitRecord(record: StagingRecord) {
-    const confirmation = window.confirm(`Submit ${record.current_data.first_name} ${record.current_data.last_name} to the existing employee HR approval workflow? This does not approve the employee or activate compensation.`)
-    if (!confirmation) return
-    setBusy(true); setError(''); setNotice('')
-    try {
-      const result = await createEmployeeImportStagingService(getSupabaseClient()).submit(record.id, submitKey(record.id))
-      if (result.status !== 'SUBMITTED_FOR_APPROVAL') {
-        try { sessionStorage.removeItem(`gbhr-staged-submit:${record.id}`) } catch { /* Retry key is tab-scoped. */ }
-        throw new Error(`Submission returned ${result.import_job?.status ?? result.status}. Correct the record and revalidate before retrying.`)
-      }
-      setNotice('Employee draft was submitted to the existing HR approval workflow. A different authorized reviewer must complete approval.')
-      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      await openBatch(selectedBatch!)
-      await refreshBatches()
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Employee could not be submitted.') }
-    finally { setBusy(false) }
-  }
-
-  async function submitEligible() {
-    const eligible = stagedRows.filter((row) => row.review_status === 'READY_FOR_APPROVAL')
-    if (!eligible.length) return
-    if (!window.confirm(`Submit ${eligible.length} eligible employees to the existing HR approval queue? Incomplete, duplicate, rejected, and unauthorized rows are excluded. This will not approve employees.`)) return
-    setBusy(true); setError(''); setNotice('')
-    const outcomes: string[] = []
-    try {
-      const service = createEmployeeImportStagingService(getSupabaseClient())
-      for (const row of eligible) {
-        try {
-          const result = await service.submit(row.id, submitKey(row.id))
-          outcomes.push(`${row.source_sheet} row ${row.source_row}: ${result.status}`)
-          if (result.status !== 'SUBMITTED_FOR_APPROVAL') { try { sessionStorage.removeItem(`gbhr-staged-submit:${row.id}`) } catch { /* Tab-scoped retry key. */ } }
-        } catch (reason) { outcomes.push(`${row.source_sheet} row ${row.source_row}: ${reason instanceof Error ? reason.message : 'failed'}`) }
-      }
-      setNotice(`${eligible.length} eligible rows were attempted. ${outcomes.filter((item) => item.endsWith('SUBMITTED_FOR_APPROVAL')).length} submitted; ${outcomes.length - outcomes.filter((item) => item.endsWith('SUBMITTED_FOR_APPROVAL')).length} need follow-up.`)
-      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      await openBatch(selectedBatch!)
-      await refreshBatches()
-    } finally { setBusy(false) }
-  }
-
-  async function approveSubmittedRecord(record: StagingRecord) {
-    if (record.review_status !== 'SUBMITTED_FOR_APPROVAL' || !record.resulting_employee_id) return
-    if (!window.confirm(`Approve ${record.current_data.first_name} ${record.current_data.last_name} through the existing HR approval workflow?`)) return
-    setBusy(true); setError(''); setNotice('')
-    try {
-      await createEmployeeImportStagingService(getSupabaseClient()).approve(record.resulting_employee_id)
-      setNotice('Approval was recorded by the existing employee HR workflow.')
-      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      await openBatch(selectedBatch!)
-      await refreshBatches()
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The existing HR approval workflow rejected this action or permission.') }
-    finally { setBusy(false) }
-  }
-
-  async function approveSubmittedRows(eligible: StagingRecord[], actionLabel: string) {
-    if (!eligible.length) return
-    if (!window.confirm(`Approve ${actionLabel} (${eligible.length}) through the existing HR approval workflow? Each decision will use your current company and branch permissions; incomplete or unresolved records are excluded.`)) return
-    setBusy(true); setError(''); setNotice('')
-    const outcomes: { row: StagingRecord; error?: string }[] = []
-    try {
-      const service = createEmployeeImportStagingService(getSupabaseClient())
-      for (const row of eligible) {
-        try { await service.approve(row.resulting_employee_id!); outcomes.push({ row }) }
-        catch (reason) { outcomes.push({ row, error: reason instanceof Error ? reason.message : 'Approval failed.' }) }
-      }
-      const approved = outcomes.filter((outcome) => !outcome.error).length
-      setNotice(`${approved} of ${eligible.length} approvals recorded. ${eligible.length - approved} require follow-up; each result is listed below.`)
-      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      const failures = outcomes.filter((outcome) => outcome.error)
-      if (failures.length) setError(failures.map(({ row, error: failure }) => `${row.source_sheet} row ${row.source_row}: ${failure}`).join(' | '))
-      await openBatch(selectedBatch!)
-      await refreshBatches()
-    } finally { setBusy(false) }
-  }
-
-  async function approveSelected() {
-    const eligible = stagedRows.filter((row) => selectedApprovalIds.includes(row.id) && row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id))
-    await approveSubmittedRows(eligible, 'selected employees')
-  }
-
-  async function approveAllEligible() {
-    const eligible = stagedRows.filter((row) => row.review_status === 'SUBMITTED_FOR_APPROVAL' && Boolean(row.resulting_employee_id))
-    await approveSubmittedRows(eligible, 'all eligible submitted employees')
-  }
-
-  function toggleApprovalSelection(row: StagingRecord) {
-    if (row.review_status !== 'SUBMITTED_FOR_APPROVAL' || !row.resulting_employee_id) return
-    setSelectedApprovalIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])
   }
 
   function changeField(field: string, value: string) { setDraft((previous) => recalculateStagedHousingAllowance(previous, field, value)) }
@@ -399,7 +240,7 @@ export function LiveEmployeeImportStaging() {
       rows.push([reportSummary.worksheet??'Consolidated report','12','SUMMARY_COUNT_AND_BASIC_SUBTOTAL','',`${reportSummary.employee_count??'unreadable'} employees; ZMW ${reportSummary.basic_subtotal?.toFixed(2)??'unreadable'}`])
       for (const formula of reportSummary.broken_formulas??[]) rows.push([reportSummary.worksheet??'',formula.row,'FORMULA_ERROR','',`${formula.cell} ${formula.error}`])
     }
-    const csv = rows.map((row)=>row.map((cell)=>`"${String(cell??'').replaceAll('"','""')}"`).join(',')).join('\r\n')
+    const csv = rows.map((row)=>row.map((cell)=>`"${String(cell??'').replaceAll('"','""')}"`).join(',')).join('\n')
     const url=URL.createObjectURL(new Blob([`\ufeff${csv}`],{type:'text/csv;charset=utf-8'}));const anchor=document.createElement('a');anchor.href=url;anchor.download='employee-import-reconciliation.csv';anchor.click();URL.revokeObjectURL(url)
   }
   function reviewField(field: typeof liveImportFields[number]) {
@@ -415,53 +256,125 @@ export function LiveEmployeeImportStaging() {
     }
     return <label key={field.key}><span>{field.label}{field.required ? ' *' : ''}</span><input type={dateField ? 'date' : 'text'} inputMode={field.type === 'number' ? 'decimal' : undefined} readOnly={readOnly} value={value} onChange={(event) => changeField(field.key, event.target.value)} /></label>
   }
+
+  async function saveApprovalRecord(decision: 'SAVE' | 'REJECT') {
+    if (!selectedRecord) return
+    if (decision === 'REJECT' && reviewReason.trim().length < 3) { setError('Enter a rejection reason of at least 3 characters.'); return }
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await createEmployeeImportStagingService(getSupabaseClient()).review({
+        recordId: selectedRecord.id, companyId: draftCompanyId, branchId: draftBranchId,
+        currentData: draft, payrollData: draftPayroll, decision, reason: reviewReason.trim(),
+      })
+      if (decision === 'REJECT') {
+        setNotice('Employee rejected. The decision was recorded in the review history.')
+        window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
+        onChanged?.()
+        onClose?.()
+        return
+      }
+      const refreshed = await createEmployeeImportStagingService(getSupabaseClient()).getRecord(selectedRecord.id)
+      setStagedRows((current) => current.map((item) => item.id === refreshed.id ? refreshed : item))
+      setDraft(refreshed.current_data); setDraftPayroll(refreshed.payroll_data); setDraftCompanyId(refreshed.company_id); setDraftBranchId(refreshed.branch_id)
+      setNotice('Changes saved. The employee remains pending until an authorized approver approves the record.')
+      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
+      onChanged?.()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The staged employee changes could not be saved.') }
+    finally { setBusy(false) }
+  }
+
+  async function saveAndApproveStaged() {
+    if (!selectedRecord || !canApprove) return
+    if (validationErrors.length) { setError(`Complete these fields before approval: ${validationErrors.join('; ')}.`); return }
+    const blockers = selectedRecord.duplicate_warnings.filter((item) => !['IDENTITY_MATCH','NAME_MATCH'].includes(item.type ?? ''))
+    if (blockers.length) { setError(`Resolve duplicate conflicts before approval: ${blockers.map((item) => item.message).join('; ')}.`); return }
+    if (selectedRecord.duplicate_warnings.length && (!confirmDistinctMatch || reviewReason.trim().length < 3)) {
+      setError('Review the possible employee match, confirm that it is a different person, and record a reason before approval.')
+      return
+    }
+    const name = `${draft.first_name ?? ''} ${draft.last_name ?? ''}`.trim() || draft.employee_number || 'this employee'
+    if (!window.confirm(`Save corrections and approve ${name} through the existing HR workflow? The database will revalidate the record.`)) return
+    setBusy(true); setError(''); setNotice('')
+    const service = createEmployeeImportStagingService(getSupabaseClient())
+    try {
+      await service.review({
+        recordId: selectedRecord.id, companyId: draftCompanyId, branchId: draftBranchId,
+        currentData: draft, payrollData: draftPayroll, decision: 'MARK_READY', reason: reviewReason.trim(),
+        duplicateResolution: confirmDistinctMatch ? 'CONFIRMED_DISTINCT' : undefined,
+      })
+      const submitted = await service.submit(selectedRecord.id, submitKey(selectedRecord.id))
+      if (submitted.status !== 'SUBMITTED_FOR_APPROVAL' || !submitted.employee_id) {
+        throw new Error('Corrections were saved but the existing employee submission workflow did not create an approval record. Refresh the queue and review the batch result.')
+      }
+      try {
+        await service.approve(submitted.employee_id)
+      } catch {
+        window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
+        onChanged?.()
+        throw new Error('The employee draft was submitted, but your account could not complete final approval. It remains in the authorized Employee Approvals queue.')
+      }
+      setNotice('Employee approved through the existing HR workflow and added to the employee register.')
+      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
+      onChanged?.()
+      onClose?.()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The employee could not be approved.') }
+    finally { setBusy(false) }
+  }
+
+  if (approvalRecordId) {
+    const selectedCompany = portfolioCompanies.find((item) => item.id === draftCompanyId)
+    const activeBranches = selectedCompany?.branches.filter((item) => item.status.toLowerCase() === 'active') ?? []
+    const originalBranchValue = draft.branch_name || String(Object.entries(selectedRecord?.original_data ?? {}).find(([key]) => ['branch','workplace branch','work location'].includes(key.trim().toLowerCase()))?.[1] ?? '')
+    const inactiveBranch = matchingInactiveImportBranch(originalBranchValue, selectedCompany?.branches ?? [])
+    const fieldGroups = [
+      ['Personal information', ['employee_number','first_name','middle_name','last_name','date_of_birth','gender','nationality','identity_document_type','identity_document_number','residential_address','phone','email','email_unavailable_reason']],
+      ['Employment information', ['department','job_title','employment_type','contract_type','contract_start_date','contract_end_date','salary_frequency','retirement_age']],
+      ['Payment information', ['payment_method','bank_name','bank_account_name','bank_account_number','bank_branch_name','mobile_money_provider','mobile_money_number']],
+      ['Statutory information', ['tpin','napsa_number','nhima_number']],
+      ['Emergency contact', ['emergency_contact_name','emergency_contact_relationship','emergency_contact_phone']],
+    ] as const
+    const renderOriginalValue = (value: unknown) => value == null || value === '' ? 'â€”' : typeof value === 'object' ? 'Structured source value' : String(value)
+    return <div className="modal-backdrop employee-staging-approval-backdrop" role="presentation"><section className="panel employee-staging-approval-dialog" role="dialog" aria-modal="true" aria-labelledby="staged-approval-title">
+      <header><div><div className="section-eyebrow">FINAL HR REVIEW Â· {selectedRecord?.review_status.replaceAll('_',' ') ?? 'LOADING'}</div><h2 id="staged-approval-title">{selectedRecord ? `${draft.first_name ?? ''} ${draft.last_name ?? ''}`.trim() || draft.employee_number || 'Imported employee' : 'Employee details'}</h2><p>{selectedRecord ? `${selectedRecord.source_sheet} worksheet Â· Excel row ${selectedRecord.source_row}` : 'Loading the authorized staged recordâ€¦'}</p></div><button className="icon-button" aria-label="Close employee review" onClick={onClose}><X size={18}/></button></header>
+      {approvalDialogLoading ? <div className="employee-empty" role="status">Loading employee detailsâ€¦</div> : selectedRecord ? <>
+        {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="live-data-notice" role="status">{notice}</div>}
+        <div className="staging-fields"><label><span>Company *</span><select value={draftCompanyId ?? ''} onChange={(event)=>{const id=event.target.value||null;setDraftCompanyId(id);setDraftBranchId(null);setDraft((current)=>({...current,company_name:portfolioCompanies.find((item)=>item.id===id)?.name??''}))}}><option value="">Select company</option>{portfolioCompanies.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>Workplace branch *</span><select value={draftBranchId ?? ''} disabled={!draftCompanyId} onChange={(event)=>{const id=event.target.value||null;const branch=activeBranches.find((item)=>item.id===id);setDraftBranchId(id);setDraft((current)=>({...current,branch_name:branch?.name??''}))}}><option value="">Select an active workplace branch</option>{activeBranches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select><small>Workbook Branch: {originalBranchValue || 'Not provided'}</small></label></div>
+        {inactiveBranch && <p className="auth-shell-error" role="status">Workbook value â€œ{originalBranchValue}â€ matches â€œ{inactiveBranch.name}â€ in the company directory, but that branch is inactive. The application will not activate it. Select an active branch or ask an authorized administrator to activate the correct branch.</p>}
+        {!activeBranches.length && <p className="auth-shell-error" role="status">No active workplace branches are configured for this company. This employee can be saved, but final approval requires an authorized administrator to configure an active branch.</p>}
+        {departmentError && <p className="auth-shell-error" role="alert">{departmentError}</p>}
+        {fieldGroups.map(([title, keys])=><section className="employee-approval-field-group" key={title}><h3>{title}</h3><div className="staging-fields">{liveImportFields.filter((field)=>(keys as readonly string[]).includes(field.key) && field.key !== "company_name" && field.key !== "branch_name").map(reviewField)}</div></section>)}
+        <section className="employee-approval-field-group"><h3>Compensation information</h3><div className="staging-fields">{liveImportFields.filter((field)=>['basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances'].includes(field.key)).map(reviewField)}</div><p>Gross earnings preview: {grossPreview.total===null?'Incomplete or invalid':`ZMW ${Number(grossPreview.total).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}. This is not a payroll or statutory calculation.</p></section>
+        {draft.housing_allowance_review_required==='true'&&<div className="auth-shell-error" role="alert"><strong>Housing allowance needs review.</strong> Proposed 30% amount: ZMW {draft.housing_allowance_proposed||'unavailable'}.<div className="employee-form-actions"><button type="button" className="button-secondary" onClick={()=>resolveHousingAllowance('USE_CALCULATED')}>Use calculated 30%</button><button type="button" className="button-secondary" onClick={()=>resolveHousingAllowance('USE_UPLOADED')}>Keep reviewed amount</button></div></div>}
+        {validationErrors.length>0&&<div className="auth-shell-error" role="alert"><strong>Still needs correction:</strong><ul>{validationErrors.map((issue)=><li key={issue}>{issue}</li>)}</ul></div>}
+        {selectedRecord.duplicate_warnings.length>0&&<div className="auth-shell-error" role="alert"><strong>Potential duplicate:</strong> {selectedRecord.duplicate_warnings.map((item)=>item.message).join('; ')}</div>}
+        <details className="employee-approval-original"><summary>Original workbook values</summary><dl>{Object.entries(selectedRecord.original_data).map(([key,value])=><div key={key}><dt>{key}</dt><dd>{renderOriginalValue(value)}</dd></div>)}</dl></details>
+        <details><summary>Correction history ({reviewHistory.length})</summary>{reviewHistory.length?<ol>{reviewHistory.map((item)=><li key={item.id}><strong>{item.action.replaceAll('_',' ')}</strong> Â· {new Date(item.occurred_at).toLocaleString()} Â· {item.reason ?? item.changed_fields.join(', ')}</li>)}</ol>:<p>No correction history recorded.</p>}</details>
+        <label className="staging-reject-reason">Review note / rejection reason<input value={reviewReason} onChange={(event)=>setReviewReason(event.target.value)} placeholder="Required for rejection or duplicate resolution" /></label>
+        {selectedRecord.duplicate_warnings.some((item)=>['IDENTITY_MATCH','NAME_MATCH'].includes(item.type??''))&&<label className="staging-reject-reason"><span><input type="checkbox" checked={confirmDistinctMatch} onChange={(event)=>setConfirmDistinctMatch(event.target.checked)}/> I reviewed the possible match and confirm this is a different person.</span></label>}
+        <div className="employee-form-actions"><button type="button" className="button-secondary" disabled={busy} onClick={()=>void saveApprovalRecord('SAVE')}><Save size={14}/> Save Changes</button>{canApprove&&<button type="button" className="button-primary" disabled={busy||validationErrors.length>0} onClick={()=>void saveAndApproveStaged()}><Check size={14}/> Save and Approve</button>}<button type="button" className="button-secondary" disabled={busy||reviewReason.trim().length<3} onClick={()=>void saveApprovalRecord('REJECT')}>Reject</button><button type="button" className="button-secondary" disabled={busy} onClick={onClose}>Cancel</button></div>
+        <section className="employee-approval-original"><strong>Original payroll components remain staged separately</strong><dl>{Object.entries(draftPayroll).map(([key,value])=><div key={key}><dt>{key}</dt><dd>{renderOriginalValue(value)}</dd></div>)}</dl><p>No payroll run, payment or statutory filing is created by employee approval.</p></section>
+      </> : <div className="employee-empty" role="alert">{error || 'Employee could not be loaded.'}</div>}
+    </section></div>
+  }
+
   return <div className="employee-screen live-import-screen staging-screen">
-    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> SECURE HR REVIEW</div><h1>Import employees</h1><p>Preview, map and securely stage employee candidates. Missing details are held for HR review before approval.</p></div><Link className="button-secondary" to="/employees">Employee register</Link></section>
+    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> EMPLOYEE ONBOARDING</div><h1>Import employees</h1><p>Upload a workbook, review the preview, and submit employee candidates directly to the final HR approval queue.</p></div><Link className="button-secondary" to="/employees">Employee register</Link></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Workbooks are parsed in this browser. The staged records are sent only to the authenticated project under company and branch permissions. Originals are retained for comparison; no employee or payroll master record is created by upload.</div>
     {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="live-data-notice" role="status"><Check size={15}/>{notice}</div>}
 
-    <section className="panel live-import-upload"><button type="button" className="button-secondary" onClick={downloadEmployeeTemplate}><FileSpreadsheet size={16}/> Download Employee Template</button><label><Upload size={22}/><strong>{fileName || 'Choose an Excel workbook or CSV to stage'}</strong><span>.xlsx, .xls, or .csv · up to 20 MB · up to 5,000 employee rows</span><input id="employee-staging-file" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label></section>
+    <section className="panel live-import-upload"><button type="button" className="button-secondary" onClick={downloadEmployeeTemplate}><FileSpreadsheet size={16}/> Download Employee Template</button><label><Upload size={22}/><strong>{fileName || 'Choose an Excel workbook or CSV to stage'}</strong><span>.xlsx, .xls, or .csv Â· up to 20 MB Â· up to 5,000 employee rows</span><input id="employee-staging-file" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label></section>
 
     {records.length > 0 && <section className="panel live-import-preview"><header><div><div className="section-eyebrow">LOCAL WORKBOOK PREVIEW</div><h2>{records.length.toLocaleString()} employee candidates across {sheetSummary.length} worksheets</h2><p>Basic salary subtotal in detected rows: ZMW {totalSalary.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. These are workbook values, not recalculated statutory payroll.</p></div></header>
-      <details className="employee-import-mapping" open><summary>Review automatic field mapping ({worksheetMappings.length} worksheet{worksheetMappings.length===1?'':'s'})</summary><label>Worksheet<select aria-label="Worksheet mapping" value={selectedMappingSheet} onChange={(event)=>setSelectedMappingSheet(event.target.value)}>{worksheetMappings.map((sheet)=><option value={sheet.sheet} key={sheet.sheet}>{sheet.sheet} · row {sheet.headerRow} headings</option>)}</select></label>{(() => {const sheet=worksheetMappings.find((item)=>item.sheet===selectedMappingSheet);if(!sheet)return null;const templateKeys=new Set(['employee_number','first_name','middle_name','last_name','date_of_birth','gender','nationality','identity_document_number','residential_address','phone','email','email_unavailable_reason','company_name','branch_name','department','job_title','employment_type','contract_start_date','basic_pay','payment_method','bank_name','bank_account_number','mobile_money_provider','mobile_money_number','tpin','napsa_number','nhima_number','emergency_contact_name','emergency_contact_relationship','emergency_contact_phone','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay']);const fields=liveImportFields.filter((field)=>templateKeys.has(field.key)||['contract_type','salary_frequency','bank_account_name'].includes(field.key));return <><div className="staging-fields">{fields.map((field)=><label key={field.key}><span>{field.label}</span><select aria-label={`Map ${field.label}`} value={sheet.mapping[field.key]===null||sheet.mapping[field.key]===undefined?'':String(sheet.mapping[field.key])} onChange={(event)=>changeMapping(sheet.sheet,field.key,event.target.value)}><option value="">Not mapped</option>{sheet.headers.map((header,index)=><option value={index} key={`${index}:${header}`}>{excelColumnLabel(index)}: {header||`Column ${index+1}`}{sheet.headers.slice(0,index).includes(header)?` (${index+1})`:''}</option>)}</select></label>)}</div>{mappingConflicts.length>0&&<div className="auth-shell-error" role="alert"><strong>Resolve ambiguous column mappings before staging:</strong> {mappingConflicts.join('; ')}</div>}</>})()}</details>
+      <details className="employee-import-mapping" open><summary>Review automatic field mapping ({worksheetMappings.length} worksheet{worksheetMappings.length===1?'':'s'})</summary><label>Worksheet<select aria-label="Worksheet mapping" value={selectedMappingSheet} onChange={(event)=>setSelectedMappingSheet(event.target.value)}>{worksheetMappings.map((sheet)=><option value={sheet.sheet} key={sheet.sheet}>{sheet.sheet} Â· row {sheet.headerRow} headings</option>)}</select></label>{(() => {const sheet=worksheetMappings.find((item)=>item.sheet===selectedMappingSheet);if(!sheet)return null;const templateKeys=new Set(['employee_number','first_name','middle_name','last_name','date_of_birth','gender','nationality','identity_document_number','residential_address','phone','email','email_unavailable_reason','company_name','branch_name','department','job_title','employment_type','contract_start_date','basic_pay','payment_method','bank_name','bank_account_number','mobile_money_provider','mobile_money_number','tpin','napsa_number','nhima_number','emergency_contact_name','emergency_contact_relationship','emergency_contact_phone','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay']);const fields=liveImportFields.filter((field)=>templateKeys.has(field.key)||['contract_type','salary_frequency','bank_account_name'].includes(field.key));return <><div className="staging-fields">{fields.map((field)=><label key={field.key}><span>{field.label}</span><select aria-label={`Map ${field.label}`} value={sheet.mapping[field.key]===null||sheet.mapping[field.key]===undefined?'':String(sheet.mapping[field.key])} onChange={(event)=>changeMapping(sheet.sheet,field.key,event.target.value)}><option value="">Not mapped</option>{sheet.headers.map((header,index)=><option value={index} key={`${index}:${header}`}>{excelColumnLabel(index)}: {header||`Column ${index+1}`}{sheet.headers.slice(0,index).includes(header)?` (${index+1})`:''}</option>)}</select></label>)}</div>{mappingConflicts.length>0&&<div className="auth-shell-error" role="alert"><strong>Resolve ambiguous column mappings before staging:</strong> {mappingConflicts.join('; ')}</div>}</>})()}</details>
       <div className="live-import-summary"><strong>Rows examined: {sheetSummary.reduce((sum, sheet) => sum + sheet.extracted + sheet.excluded, 0).toLocaleString()}</strong><strong>Employee candidates: {records.length.toLocaleString()}</strong><span>No local required fields missing: {previewReadyForReview.toLocaleString()}</span><span>Needs HR information: {previewNeedsAttention.toLocaleString()}</span><span>Excluded rows: {exclusions.length.toLocaleString()}</span><button type="button" className="button-secondary" onClick={downloadReconciliation}>Export validation report</button></div>
       {reportSummary&&<div className="auth-shell-error" role="status"><strong>{reportSummary.worksheet} comparison:</strong> consolidated sheet reports {reportSummary.employee_count??'an unreadable count'} employees and ZMW {reportSummary.basic_subtotal?.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})??'an unreadable subtotal'}; source candidate count and basic salary subtotal are {Number(reconciliation.row_count??records.length)} and ZMW {Number(reconciliation.basic_salary_total??totalSalary).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. Difference: {reportSummary.employee_count==null?'count unavailable':Number(reconciliation.row_count??records.length)-reportSummary.employee_count} employee rows and {reportSummary.basic_subtotal==null?'subtotal unavailable':`ZMW ${(Number(reconciliation.basic_salary_total??totalSalary)-reportSummary.basic_subtotal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}. Review this variance before any payroll transaction.</div>}
       {reportSummary?.broken_formulas?.length? <div className="auth-shell-error" role="alert"><strong>Broken workbook formulas:</strong> {reportSummary.broken_formulas.map((formula)=>`${formula.cell} (row ${formula.row}): ${formula.error}`).join('; ')}. Payroll review remains separate from employee staging.</div>:null}
-      <div className="table-scroll import-candidate-table-wrap"><table className="employee-table import-candidate-table"><thead><tr><th>Source Row</th><th>Employee Number</th><th>Employee Name</th><th>Company</th><th>Branch</th><th>Department</th><th>Validation Status</th><th>Actions</th></tr></thead><tbody>{records.map((row,index) => {const company=companies.find((item)=>item.id===row.company_id);const rowIssues=validateStagedEmployee(row.current_data,row.company_id??'',row.branch_id??'');return <tr key={`${row.source_sheet}:${row.source_row}`}><td className="import-nowrap">{row.source_sheet} · {row.source_row}</td><td className="import-nowrap">{row.current_data.employee_number||'Not provided'}</td><td>{[row.current_data.first_name,row.current_data.middle_name,row.current_data.last_name].filter(Boolean).join(' ')||row.current_data.full_name||'Name needs review'}</td><td><select aria-label={`Company for ${row.source_sheet} row ${row.source_row}`} value={row.company_id ?? ''} onChange={(event)=>assignCompany(index,event.target.value)}><option value="">Select company</option>{portfolioCompanies.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></td><td><select aria-label={`Branch for ${row.source_sheet} row ${row.source_row}`} value={row.branch_id ?? ''} disabled={!company} onChange={(event)=>assignBranch(index,event.target.value)}><option value="">Assign during review</option>{company?.branches.filter((item)=>item.status==='Active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></td><td>{row.current_data.department||'Not provided'}</td><td><span className={`approval-status ${rowIssues.length?'status-needs-information':'status-ready'}`}>{rowIssues.length?'Needs information':'No local field issues'}</span></td><td><details><summary>{rowIssues.length?`${rowIssues.length} items`:'Details'}</summary>{rowIssues.length?<ul>{rowIssues.map((issue)=><li key={issue}>{issue}</li>)}</ul>:<p>Stage first. Duplicate and authorized company validation occurs at the secure database boundary.</p>}</details></td></tr>})}</tbody></table></div>
-      <div className="employee-form-actions import-stage-action"><button type="button" className="button-primary" disabled={busy || !portfolioId || mappingConflicts.length > 0} onClick={() => void stageWorkbook()}>{busy ? 'Staging…' : `Stage ${records.length.toLocaleString()} ${records.length === 1 ? 'Employee' : 'Employees'} for HR Review`}</button>{!portfolioId && <span role="status">Waiting for authorized portfolio context…</span>}{mappingConflicts.length > 0 && <span role="alert">Resolve the column mapping conflicts above before staging.</span>}</div>
+      <div className="table-scroll import-candidate-table-wrap"><table className="employee-table import-candidate-table"><thead><tr><th>Source Row</th><th>Employee Number</th><th>Employee Name</th><th>Company</th><th>Workplace Branch</th><th>Department</th><th>Validation Status</th><th>Actions</th></tr></thead><tbody>{records.map((row,index) => {const company=companies.find((item)=>item.id===row.company_id);const inactiveBranch=company?matchingInactiveImportBranch(row.current_data.branch_name,company.branches):null;const rowIssues=validateStagedEmployee(row.current_data,row.company_id??'',row.branch_id??'');return <tr key={`${row.source_sheet}:${row.source_row}`}><td className="import-nowrap">{row.source_sheet} Â· {row.source_row}</td><td className="import-nowrap">{row.current_data.employee_number||'Not provided'}</td><td>{[row.current_data.first_name,row.current_data.middle_name,row.current_data.last_name].filter(Boolean).join(' ')||row.current_data.full_name||'Name needs review'}</td><td><select aria-label={`Company for ${row.source_sheet} row ${row.source_row}`} value={row.company_id ?? ''} onChange={(event)=>assignCompany(index,event.target.value)}><option value="">Select company</option>{portfolioCompanies.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></td><td><select aria-label={`Workplace branch for ${row.source_sheet} row ${row.source_row}`} value={row.branch_id ?? ''} disabled={!company} onChange={(event)=>assignBranch(index,event.target.value)}><option value="">Select active branch during approval review</option>{company?.branches.filter((item)=>item.status.toLowerCase()==='active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>{inactiveBranch?<small role="status">Workbook value â€œ{row.current_data.branch_name}â€ matches inactive branch â€œ{inactiveBranch.name}â€; it cannot be used for approval.</small>:!row.branch_id&&row.current_data.branch_name?<small role="status">Branch not recognized. Select the correct workplace branch. Workbook value: â€œ{row.current_data.branch_name}â€.</small>:null}</td><td>{row.current_data.department||'Not provided'}</td><td><span className={`approval-status ${rowIssues.length?'status-needs-information':'status-ready'}`}>{rowIssues.length?'Needs information':'No local field issues'}</span></td><td><details><summary>{rowIssues.length?`${rowIssues.length} items`:'Details'}</summary>{rowIssues.length?<ul>{rowIssues.map((issue)=><li key={issue}>{issue}</li>)}</ul>:<p>Duplicate and authorized company validation is repeated at the secure database boundary.</p>}</details></td></tr>})}</tbody></table></div>
+      <div className="employee-form-actions import-stage-action"><button type="button" className="button-primary" disabled={busy || !portfolioId || mappingConflicts.length > 0 || records.length === 0} onClick={() => void stageWorkbook()}>{busy ? 'Submittingâ€¦' : `Submit ${records.length.toLocaleString()} ${records.length === 1 ? 'Employee' : 'Employees'}`}</button>{!portfolioId && <span role="status">Waiting for authorized portfolio contextâ€¦</span>}{mappingConflicts.length > 0 && <span role="alert">Resolve the column mapping conflicts above before submission.</span>}</div>
       {sheetSummary.map((sheet)=><span className="live-form-hint" key={sheet.sheet}>{sheet.sheet}: {sheet.extracted} staged candidates, {sheet.excluded} excluded rows</span>)}
       {exclusions.length>0&&<details open={excludedDetails} onToggle={(event)=>setExcludedDetails((event.target as HTMLDetailsElement).open)}><summary>Rows excluded from employee staging ({exclusions.length})</summary><ul>{exclusions.map((item,index)=><li key={`${item.sheet}:${item.row}:${index}`}>{item.sheet} row {item.row}: {item.reason}</li>)}</ul></details>}
     </section>}
 
-    <section className="panel live-import-history" aria-label="Import batches"><header><div><div className="section-eyebrow">IMPORT BATCHES</div><h2>Recent secure batches</h2></div><button className="button-secondary" disabled={busy||!portfolioId} onClick={()=>void refreshBatches()}><RefreshCw size={14}/> Refresh</button></header>
-      {!batches.length?<p>No staged batches are available in this authorized portfolio.</p>:batches.map((batch)=><button key={batch.id} className={`staging-batch-row ${selectedBatch?.id===batch.id?'active':''}`} onClick={()=>void openBatch(batch)}><span>{batch.uploaded_filename}</span><small>{new Date(batch.created_at).toLocaleString()}</small><strong>{batch.status.replaceAll('_',' ')}</strong><span>{batch.total_records} total · {batch.valid_records} valid · {batch.incomplete_records} need information · {batch.duplicate_warnings} duplicate warnings · {batch.approved_records} approved</span><small>{batch.reviewed_records} of {batch.total_records} reviewed; {batch.ready_records} ready for approval</small><progress aria-label={`${batch.uploaded_filename} review progress`} value={batch.reviewed_records} max={Math.max(1,batch.total_records)} /></button>)}
-    </section>
-
-    {selectedBatch&&<section className="panel live-import-preview" aria-label="HR staging queue"><header><div><div className="section-eyebrow">PENDING HR REVIEW</div><h2>{selectedBatch.uploaded_filename}</h2><p>{stagedRows.length} source rows · {selectedBatch.source_sha256.slice(0,12)}… source hash</p></div><div><button className="button-secondary" onClick={downloadReconciliation}>Download redacted reconciliation CSV</button><button className="button-secondary" disabled={busy||selectedApprovalIds.length===0} onClick={()=>void approveSelected()}>Approve selected ({selectedApprovalIds.length})</button><button className="button-secondary" disabled={busy||submittedCount===0} onClick={()=>void approveAllEligible()}>Approve all eligible ({submittedCount})</button><button className="button-primary" disabled={busy||readyCount===0} onClick={()=>void submitEligible()}>Submit all {readyCount} eligible for HR approval</button></div></header>
-      <div className="live-import-summary"><strong>{readyCount} ready to submit</strong><strong>{needsInfoCount} need information</strong><span>{duplicateCount} duplicate review · {submittedCount} submitted awaiting HR approval · {selectedBatch.approved_records} approved</span></div>
-      {reportSummary&&<div className="auth-shell-error" role="status"><strong>{reportSummary.worksheet} reconciliation:</strong> source row count {Number(reconciliation.row_count??stagedRows.length)} vs consolidated {reportSummary.employee_count??'unavailable'}; source basic salaries ZMW {Number(reconciliation.basic_salary_total??0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} vs consolidated ZMW {reportSummary.basic_subtotal?.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})??'unavailable'}. Any payroll transaction requires a separately resolved reconciliation.</div>}
-      {reportSummary?.broken_formulas?.length?<div className="auth-shell-error" role="alert">Broken workbook formulas: {reportSummary.broken_formulas.map((formula)=>`${formula.cell} (row ${formula.row}): ${formula.error}`).join('; ')}.</div>:null}
-      <div className="staging-filters"><label>Search records<input value={searchQuery} onChange={(event)=>{setSearchQuery(event.target.value);setPage(0)}} placeholder="Name, employee number, sheet or row" /></label><label>Status<select value={statusFilter} onChange={(event)=>{setStatusFilter(event.target.value);setPage(0)}}><option value="ALL">All statuses</option>{['PENDING_REVIEW','NEEDS_INFORMATION','DUPLICATE_REVIEW','READY_FOR_APPROVAL','SUBMITTED_FOR_APPROVAL','APPROVED','REJECTED','IMPORT_FAILED'].map((status)=><option value={status} key={status}>{status.replaceAll('_',' ')}</option>)}</select></label><label>Company<select value={filterCompanyId} onChange={(event)=>{setFilterCompanyId(event.target.value);setFilterBranchId('ALL');setPage(0)}}><option value="ALL">All companies</option>{portfolioCompanies.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>Branch<select value={filterBranchId} onChange={(event)=>{setFilterBranchId(event.target.value);setPage(0)}}><option value="ALL">All branches</option>{portfolioCompanies.filter((item)=>filterCompanyId==='ALL'||item.id===filterCompanyId).flatMap((item)=>item.branches.map((branch)=><option value={branch.id} key={branch.id}>{item.name} · {branch.name}</option>))}</select></label></div>
-      <div className="staging-review-layout"><div className="table-scroll"><table className="employee-table"><thead><tr><th>SELECT</th><th>RECORD</th><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>STATUS</th></tr></thead><tbody>{filteredRecords.slice(page*pageSize,(page+1)*pageSize).map((row)=><tr key={row.id} className={row.id===selectedRecordId?'selected':''} onClick={()=>selectRecord(row)}><td><input type="checkbox" aria-label={`Select ${row.current_data.first_name} ${row.current_data.last_name} for approval`} checked={selectedApprovalIds.includes(row.id)} disabled={busy||row.review_status!=='SUBMITTED_FOR_APPROVAL'||!row.resulting_employee_id} onClick={(event)=>event.stopPropagation()} onChange={()=>toggleApprovalSelection(row)} /></td><td>{row.source_sheet} · {row.source_row}</td><td>{row.current_data.first_name} {row.current_data.last_name}</td><td>{companies.find((item)=>item.id===row.company_id)?.name ?? 'Unassigned'} · {companies.find((item)=>item.id===row.company_id)?.branches.find((item)=>item.id===row.branch_id)?.name??'—'}</td><td>{row.review_status.replaceAll('_',' ')}</td></tr>)}</tbody></table><div className="staging-pagination"><span>Showing {filteredRecords.length?Math.min(page*pageSize+1,filteredRecords.length):0}–{Math.min((page+1)*pageSize,filteredRecords.length)} of {filteredRecords.length}</span><button className="button-secondary" disabled={page===0} onClick={()=>setPage((value)=>Math.max(0,value-1))}>Previous</button><span>Page {page+1} of {pageCount}</span><button className="button-secondary" disabled={page+1>=pageCount} onClick={()=>setPage((value)=>Math.min(pageCount-1,value+1))}>Next</button></div></div>
-      {selectedRecord&&<section className="staging-record-editor"><header><div><h3>{selectedRecord.source_sheet} row {selectedRecord.source_row}</h3><span>{selectedRecord.review_status.replaceAll('_',' ')}</span></div><button type="button" className="icon-button" aria-label="Clear selected review" onClick={()=>setSelectedRecordId('')}><X size={15}/></button></header>
-        {selectedRecord.resulting_employee_id&&<div className="auth-shell-error" role="status">This staged record is linked to an existing employee workflow. Use <Link to={`/employees/${selectedRecord.resulting_employee_id}/correct`}>the employee correction screen</Link>; this importer will not create a second employee.</div>}
-        <div className="staging-fields"><label><span>Company *</span><select disabled={Boolean(selectedRecord.resulting_employee_id)} value={draftCompanyId??''} onChange={(event)=>{setDraftCompanyId(event.target.value||null);setDraftBranchId(null)}}><option value="">Select company</option>{portfolioCompanies.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>Workplace branch (required before approval)</span><select value={draftBranchId??''} disabled={!draftCompanyId||Boolean(selectedRecord.resulting_employee_id)} onChange={(event)=>setDraftBranchId(event.target.value||null)}><option value="">Assign branch later</option>{portfolioCompanies.find((item)=>item.id===draftCompanyId)?.branches.filter((item)=>item.status==='Active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div>
-        {departmentLoading&&<p className="live-form-hint" role="status">Loading departments for the selected company…</p>}{departmentError&&<p className="auth-shell-error" role="alert">{departmentError}</p>}{!departmentLoading&&!departmentError&&draftCompanyId&&departments.length===0&&<p className="live-form-hint">No departments are visible for this company. Confirm that departments are configured and visible to your account using <Link to="/departments">Department management</Link>. The record can still be saved for review.</p>}{!departmentLoading&&!departmentError&&draftCompanyId&&departments.length>0&&!departments.some((item)=>item.status.toLowerCase()==='active')&&<p className="live-form-hint">This company has no active departments available for approval. The record can still be saved for review.</p>}
-        <div className="staging-origin"><strong>Workbook original values</strong><pre>{JSON.stringify(selectedRecord.original_data,null,2)}</pre></div>
-        <div className="staging-fields">{liveImportFields.map(reviewField)}</div>
-        {draft.housing_allowance_review_required==='true'&&<div className="auth-shell-error" role="alert"><strong>Housing allowance differs from the 30% default.</strong> Calculated amount: ZMW {draft.housing_allowance_proposed||'unavailable'}. Choose which value to retain.<div className="employee-form-actions"><button type="button" className="button-secondary" disabled={Boolean(selectedRecord.resulting_employee_id)} onClick={()=>resolveHousingAllowance('USE_CALCULATED')}>Use calculated 30%</button><button type="button" className="button-secondary" disabled={Boolean(selectedRecord.resulting_employee_id)} onClick={()=>resolveHousingAllowance('USE_UPLOADED')}>Keep reviewed amount</button></div></div>}
-        <section className="panel employee-compensation-preview"><h4>Compensation preview (not a payroll calculation)</h4><div className="staging-fields">{[['Basic Salary','basic_pay'],['Housing Allowance','housing_allowance'],['Lunch','meal_allowance'],['Transport','transport_allowance'],['Other Allowances','other_allowances'],['Medical Allowance (legacy workbook)','medical_allowance']].map(([label,key])=><div key={key}><strong>{label}</strong><span>{draft[key] ? `ZMW ${Number(draft[key]).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : 'Not provided'}</span></div>)}</div>{draft.gross_pay_review_required==='true'&&<p role="alert">The uploaded Gross Pay differs from the recalculated template preview. Review the original value before submitting.</p>}<p>Gross earnings preview (template components): {grossPreview.total===null?'Invalid amount':`ZMW ${Number(grossPreview.total).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}{grossPreview.incomplete.length>0?` · Unconfirmed: ${grossPreview.incomplete.map((key)=>liveImportFields.find((field)=>field.key===key)?.label??key).join(', ')}`:''}</p></section>
-        <details><summary>Payroll and payment fields retained for separate payroll review</summary><p>These values remain staged and are not sent to payroll operations by employee approval.</p><textarea readOnly={Boolean(selectedRecord.resulting_employee_id)} aria-label="Edit staged payroll fields" value={payrollJson} onChange={(event)=>{setPayrollJson(event.target.value);try{setDraftPayroll(JSON.parse(event.target.value) as Record<string,unknown>)}catch{}}} rows={8}/>{(() => {try{JSON.parse(payrollJson);return null}catch{return <small className="field-error">Enter valid JSON to save these retained source fields.</small>}})()}</details>
-        {validationErrors.length>0&&<div className="auth-shell-error"><strong>Needs information:</strong> {validationErrors.join('; ')}</div>}
-        {selectedRecord.duplicate_warnings.length>0&&<div className="auth-shell-error"><strong>Duplicate review:</strong> {selectedRecord.duplicate_warnings.map((warning)=>warning.message).join('; ')}</div>}
-        <details><summary>Review and correction history ({reviewHistory.length})</summary>{reviewHistory.length?<ol>{reviewHistory.map((item)=><li key={item.id}><strong>{item.action.replaceAll('_',' ')}</strong> · {new Date(item.occurred_at).toLocaleString()} · {item.actor_id}{item.reason?` · ${item.reason}`:''}{item.changed_fields?.length?` · changed: ${item.changed_fields.join(', ')}`:''}</li>)}</ol>:<p>No review actions recorded yet.</p>}</details>
-        <label className="staging-reject-reason">Review note / rejection reason<input value={reviewReason} onChange={(event)=>setReviewReason(event.target.value)} placeholder="Required when rejecting or resolving a potential match" /></label>
-        {selectedRecord.duplicate_warnings.some((item)=>['IDENTITY_MATCH','NAME_MATCH'].includes(item.type??''))&&<label className="staging-reject-reason"><span><input type="checkbox" checked={confirmDistinctMatch} onChange={(event)=>setConfirmDistinctMatch(event.target.checked)}/> I reviewed the possible existing employee match and confirm this is a different person.</span></label>}
-        <div className="employee-form-actions"><button className="button-secondary" disabled={busy||Boolean(selectedRecord.resulting_employee_id)} onClick={()=>void saveReview('SAVE')}><Save size={14}/> Save corrections</button><button className="button-secondary" disabled={busy||validationErrors.length>0||Boolean(selectedRecord.resulting_employee_id)} onClick={()=>void saveReview('MARK_READY')}><Check size={14}/> Mark ready</button>{selectedRecord.review_status==='READY_FOR_APPROVAL'&&<button className="button-primary" disabled={busy||Boolean(selectedRecord.resulting_employee_id)} onClick={()=>void submitRecord(selectedRecord)}>Submit to HR approval</button>}{selectedRecord.review_status==='SUBMITTED_FOR_APPROVAL'&&selectedRecord.resulting_employee_id&&<button className="button-primary" disabled={busy} onClick={()=>void approveSubmittedRecord(selectedRecord)}>Approve employee</button>}<button className="button-secondary" disabled={busy||Boolean(selectedRecord.resulting_employee_id)} onClick={()=>void saveReview('REJECT')}>Reject record</button></div>
-        <p className="live-form-hint">Submitting creates an employee draft through employee_import_atomic and queues it for review. It does not approve the employee or overwrite an existing employee or approved compensation.</p>
-      </section>}
-      </div>
-    </section>}
     <p className="live-form-hint"><FileSpreadsheet size={14}/> Payroll amounts remain in batch staging. Payroll runs, payments, statutory deductions and employee compensation are not written by this upload action.</p>
   </div>
 }

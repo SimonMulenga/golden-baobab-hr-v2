@@ -141,7 +141,7 @@ describe('LIVE employee screens', () => {
   it('requests the submitted review queue and invokes the trusted approval action', async () => {
     serviceMocks.list.mockResolvedValueOnce({ items: [employee], total: 1 }).mockResolvedValue({ items: [], total: 0 })
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(serviceMocks.reviewSubmission).toHaveBeenCalledWith('employee-synthetic-1', 'APPROVE', undefined))
     await waitFor(() => expect(serviceMocks.list).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, search: '', approvalStatus: 'SUBMITTED_FOR_HR_APPROVAL' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Demo Employee: approve action saved.')
@@ -163,7 +163,7 @@ describe('LIVE employee screens', () => {
   it('requires a rejection reason before the bulk rejection RPC can run', async () => {
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     await screen.findByText('Demo Employee')
-    fireEvent.click(screen.getByRole('button', { name: 'Reject All' }))
+    fireEvent.click(screen.getByRole('button', { name: /Reject All/ }))
     const confirm = screen.getByRole('button', { name: 'Confirm Reject' })
     expect(confirm).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Rejection reason'), { target: { value: 'Duplicate record' } })
@@ -174,7 +174,7 @@ describe('LIVE employee screens', () => {
   it('requires a reason for return and shows backend rejection without a success state', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue(new Error('permission denied'))
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Return/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }))
     fireEvent.submit(screen.getByRole('dialog'))
     expect(await screen.findByText('Enter a short review reason before returning or rejecting this record.')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Please verify contract dates' } })
@@ -186,7 +186,7 @@ describe('LIVE employee screens', () => {
   it('shows a specific authorization error returned by the trusted review RPC', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue({ code: '42501', message: 'internal detail is not displayed' })
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
     const notification = await screen.findByRole('alert')
     expect(notification).toHaveClass('employee-review-toast', 'is-error')
     expect(notification).toHaveTextContent('Your account does not have employee review permission for this company and branch.')
@@ -198,7 +198,7 @@ describe('LIVE employee screens', () => {
   it('lets the reviewer refresh the approval queue from the error notification', async () => {
     serviceMocks.reviewSubmission.mockRejectedValueOnce({ code: '40001' })
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
     const notification = await screen.findByRole('alert')
     expect(notification).toHaveTextContent('Another reviewer changed this submission.')
     fireEvent.click(within(notification).getByRole('button', { name: 'Refresh queue' }))
@@ -209,7 +209,7 @@ describe('LIVE employee screens', () => {
   it('explains a concurrent employee review and allows refreshing the queue', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue({ code: '40001' })
     renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Another reviewer changed this submission.')
   })
 

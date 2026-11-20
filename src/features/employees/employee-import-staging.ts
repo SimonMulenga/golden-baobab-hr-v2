@@ -24,6 +24,28 @@ const normalizeEnum = (value: string) => normalizeImportHeader(value).replaceAll
 const summaryRow = (values: unknown[]) => values.some((value) => /^(grand\s+total|sub\s*total|subtotal|total\s+employees|employee\s+count)$/i.test(String(value ?? '').trim()))
 const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay'])
 
+export type ImportBranch = { id: string; name: string; status: string; code?: string }
+
+/** Resolve only an exact normalized name or company-scoped branch code. Fuzzy matches are never assigned. */
+export function matchAuthorizedImportBranch(value: unknown, branches: ImportBranch[]): ImportBranch | null {
+  const normalized = normalizeImportHeader(value)
+  if (!normalized) return null
+  const active = branches.filter((branch) => branch.status.trim().toLowerCase() === 'active')
+  const comparable = (value: unknown) => normalizeImportHeader(value).replace(/\s+/g, '')
+  const normalizedComparable = comparable(value)
+  const matches = active.filter((branch) => comparable(branch.name) === normalizedComparable
+    || Boolean(branch.code && comparable(branch.code) === normalizedComparable))
+  return matches.length === 1 ? matches[0] : null
+}
+
+export function matchingInactiveImportBranch(value: unknown, branches: ImportBranch[]): ImportBranch | null {
+  const normalized = normalizeImportHeader(value)
+  if (!normalized) return null
+  const matches = branches.filter((branch) => branch.status.trim().toLowerCase() !== 'active'
+    && normalizeImportHeader(branch.name) === normalized)
+  return matches.length === 1 ? matches[0] : null
+}
+
 function cellValue(value: unknown, format?: unknown): unknown {
   if (value && typeof value === 'object' && 'v' in value) {
     const v = (value as { v: unknown }).v
@@ -180,8 +202,7 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
       const matchedCompany = normalizedLocation ? companies.find((item) => normalizeImportHeader(item.name) === normalizedLocation) : undefined
       const company = matchedCompany ?? (!normalizedLocation ? companies.find((item) => item.id === defaultCompanyId) : undefined)
       if (company) current.company_name = company.name
-      const branchName = normalizeImportHeader(current.branch_name)
-      const branch = company && branchName ? company.branches.find((item) => item.status.toLowerCase() === 'active' && normalizeImportHeader(item.name) === branchName) : undefined
+      const branch = company ? matchAuthorizedImportBranch(current.branch_name, company.branches) : null
       if (branch) current.branch_name = branch.name
       const salary = amountValue(current.basic_pay)
       const housingColumn = mapping.housing_allowance
