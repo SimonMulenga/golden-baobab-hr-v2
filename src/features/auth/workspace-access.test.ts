@@ -23,6 +23,7 @@ describe('role scoped navigation', () => {
     expect(roleCanOpenPath(routes, '/companies')).toBe(true)
     expect(roleCanOpenPath(routes, '/branches')).toBe(true)
     expect(roleCanOpenPath(routes, '/employees')).toBe(true)
+    expect(roleCanOpenPath(routes, '/employees/import')).toBe(true)
     expect(roleCanOpenPath(routes, '/attendance')).toBe(true)
     expect(roleCanOpenPath(routes, '/leave')).toBe(true)
     expect(roleCanOpenPath(routes, '/payroll')).toBe(true)
@@ -44,12 +45,23 @@ describe('role scoped navigation', () => {
   it('limits branch managers to branch operations and payroll preparation', () => {
     const routes = visibleWorkspaceRoutes(['BRANCH_MANAGER'])
     expect(roleCanOpenPath(routes, '/employees/new')).toBe(true)
+    expect(roleCanOpenPath(routes, '/employees/import')).toBe(false)
     expect(roleCanOpenPath(routes, '/attendance')).toBe(true)
     expect(roleCanOpenPath(routes, '/payroll')).toBe(true)
     expect(roleCanOpenPath(routes, '/employee-approvals')).toBe(false)
     expect(roleCanOpenPath(routes, '/companies')).toBe(false)
     expect(roleCanOpenPath(routes, '/users')).toBe(false)
     expect(roleCanOpenPath(routes, '/payroll-approvals')).toBe(false)
+  })
+
+  it('keeps employee import staging restricted to HR and administrator roles', () => {
+    for (const role of ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'COMPANY_ADMIN', 'OVERALL_HR_MANAGER'] as const) {
+      expect(roleCanOpenPath(visibleWorkspaceRoutes([role]), '/employees/import')).toBe(true)
+      expect(roleCanOpenPath(visibleWorkspaceRoutes([role]), '/employees/import/staging')).toBe(true)
+    }
+    for (const role of ['BRANCH_MANAGER', 'COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_PREPARER', 'PAYROLL_PROCESSOR'] as const) {
+      expect(roleCanOpenPath(visibleWorkspaceRoutes([role]), '/employees/import')).toBe(false)
+    }
   })
 
   it('shows the pending payroll queue only to payroll approvers and HR administrators', () => {

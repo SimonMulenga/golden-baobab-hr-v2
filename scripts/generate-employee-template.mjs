@@ -30,11 +30,17 @@ const preparedInputRows = 500
 worksheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: preparedInputRows + 1, column: fieldDefinition.length } }
 const basicSalaryColumn = fieldDefinition.findIndex(({ key }) => key === 'basic_pay') + 1
 const housingAllowanceColumn = fieldDefinition.findIndex(({ key }) => key === 'housing_allowance') + 1
+const grossPayColumn = fieldDefinition.findIndex(({ key }) => key === 'gross_pay') + 1
+worksheet.getColumn(housingAllowanceColumn).width = 34
+worksheet.getColumn(grossPayColumn).width = 39
 for (let row = 2; row <= preparedInputRows + 1; row++) {
   const salaryAddress = worksheet.getCell(row, basicSalaryColumn).address
   const housingCell = worksheet.getCell(row, housingAllowanceColumn)
   housingCell.value = { formula: `IF(${salaryAddress}="","",ROUND(${salaryAddress}*30%,2))`, result: null }
   housingCell.numFmt = currencyFormat
+  const grossPayCell = worksheet.getCell(row, grossPayColumn)
+  grossPayCell.value = { formula: `IF(${salaryAddress}="","",SUM(${worksheet.getCell(row, basicSalaryColumn).address}:${worksheet.getCell(row, grossPayColumn - 1).address}))`, result: null }
+  grossPayCell.numFmt = currencyFormat
 }
 
 await workbook.xlsx.writeFile(resolve(root, 'public/employee-template.xlsx'))

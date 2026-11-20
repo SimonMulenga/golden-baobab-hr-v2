@@ -1,6 +1,6 @@
 import * as XLSX from '@e965/xlsx'
 import { dateForImport, isValidImportDate, liveImportFields, mapEmployeeColumns, normalizeImportHeader, preserveIdentifierText, type EmployeeFieldMapping } from './live-import-model'
-import { calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
+import { calculateGrossEarningsPreview, calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
 
 export type StagedWorkbookRow = {
   source_sheet: string
@@ -22,7 +22,7 @@ export type WorkbookExtraction = {
 
 const normalizeEnum = (value: string) => normalizeImportHeader(value).replaceAll(' ', '_').toUpperCase()
 const summaryRow = (values: unknown[]) => values.some((value) => /^(grand\s+total|sub\s*total|subtotal|total\s+employees|employee\s+count)$/i.test(String(value ?? '').trim()))
-const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances'])
+const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay'])
 
 function cellValue(value: unknown, format?: string): unknown {
   if (value && typeof value === 'object' && 'v' in value) {
@@ -182,6 +182,24 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
         current.housing_allowance = ''
         current.housing_allowance_source = ''
       }
+      const importedGrossPay = amountValue(current.gross_pay)
+      const grossPreviewValues = {
+        basic_pay: current.basic_pay,
+        housing_allowance: current.housing_allowance,
+        meal_allowance: current.meal_allowance,
+        transport_allowance: current.transport_allowance,
+        other_allowances: current.other_allowances,
+      }
+      const calculatedGrossPay = calculateGrossEarningsPreview(grossPreviewValues, false)
+      if (calculatedGrossPay.total !== null) {
+        const calculatedCents = Math.round(Number(calculatedGrossPay.total) * 100)
+        current.gross_pay_proposed = calculatedGrossPay.total
+        current.gross_pay_review_required = ''
+        if (importedGrossPay !== null && Math.round(importedGrossPay * 100) !== calculatedCents) current.gross_pay_review_required = 'true'
+      } else {
+        current.gross_pay_proposed = ''
+        current.gross_pay_review_required = importedGrossPay === null && current.gross_pay.trim() ? 'true' : ''
+      }
       if (salary !== null) basicSalaryTotal += salary
       const payrollData = Object.fromEntries(headers.flatMap((header, column) => payrollHeader.test(header) ? [[originalKey(headers, column), original[originalKey(headers, column)]]] : []))
       records.push({
@@ -284,6 +302,13 @@ export function recalculateStagedHousingAllowance(data: Record<string, string>, 
   next.housing_allowance_review_required = mismatch ? 'true' : ''
   if (next.housing_allowance_source === 'DEFAULT_30') next.housing_allowance = formatCurrencyCents(cents)
   if (!mismatch) next.housing_allowance_resolution = ''
+  if (['basic_pay','housing_allowance','meal_allowance','transport_allowance','other_allowances','gross_pay'].includes(key)) {
+    const gross = calculateGrossEarningsPreview(next, false)
+    next.gross_pay_proposed = gross.total ?? ''
+    const importedGross = amountValue(next.gross_pay)
+    next.gross_pay_review_required = importedGross !== null && gross.total !== null
+      && Math.round(importedGross * 100) !== Math.round(Number(gross.total) * 100) ? 'true' : ''
+  }
   return next
 }
 

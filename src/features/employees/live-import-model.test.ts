@@ -73,16 +73,17 @@ describe('LIVE employee import mapping', () => {
     expect(employeeTemplateColumns.map((column) => column.heading)).toEqual([
       'Employee Number','First Name','Middle Name','Last Name','Date of Birth','Gender','Nationality','NRC / ID Number',
       'Residential Address','Phone Number','Email','Email Unavailable Reason','Company','Branch','Department','Job Title',
-      'Employment Type','Date Joined','Basic Salary','Payment Method','Bank Name','Bank Account Number','Mobile Money Provider',
-      'Mobile Money Number','TPIN','NAPSA Number','NHIMA Number','Emergency Contact Name','Emergency Contact Relationship',
-      'Emergency Contact Phone Number','Housing Allowance','Lunch','Transport','Medical Allowance','Other Allowances',
+      'Employment Type','Date Joined','Basic Salary','Housing allowance 30% of basic pay','Lunch Allwance','Transport Alwance',
+      'Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name','Bank Account Number',
+      'Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number','Emergency Contact Name',
+      'Emergency Contact Relationship','Emergency Contact Phone Number',
     ])
     expect(employeeTemplateColumns).toHaveLength(35)
   })
 
   it('maps workbook aliases without assigning one source column to multiple targets silently', () => {
-    const mapped = mapEmployeeColumns(['Employee No','Surname','Given Name','Monthly Salary','Housing 30%','Meal Allowance','Travel Allowance','Medical','Other Allowance','Work Location'])
-    expect(mapped.mapping).toMatchObject({ employee_number: 0, last_name: 1, first_name: 2, basic_pay: 3, housing_allowance: 4, meal_allowance: 5, transport_allowance: 6, medical_allowance: 7, other_allowances: 8, branch_name: 9 })
+    const mapped = mapEmployeeColumns(['Employee No','Surname','Given Name','Monthly Salary','Housing 30%','Lunch Allwance','Transport Alwance','Medical','Other allowances','Work Location','Groce Pay (Sum of all the earnings)'])
+    expect(mapped.mapping).toMatchObject({ employee_number: 0, last_name: 1, first_name: 2, basic_pay: 3, housing_allowance: 4, meal_allowance: 5, transport_allowance: 6, medical_allowance: 7, other_allowances: 8, branch_name: 9, gross_pay: 10 })
     const ambiguous = mapEmployeeColumns(['Basic Pay','Monthly Salary'])
     expect(ambiguous.mapping.basic_pay).toBeNull()
     expect(ambiguous.conflicts).toContain('Basic pay matches multiple columns')

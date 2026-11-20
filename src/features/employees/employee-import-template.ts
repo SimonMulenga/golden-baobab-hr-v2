@@ -18,9 +18,10 @@ export function formatCurrencyCents(cents: number | null): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`
 }
 
-export function calculateGrossEarningsPreview(values: Record<string, string>): { total: string | null; incomplete: string[] } {
-  const keys = ['basic_pay', 'housing_allowance', 'meal_allowance', 'transport_allowance', 'medical_allowance', 'other_allowances']
+export function calculateGrossEarningsPreview(values: Record<string, string>, includeMedical = true): { total: string | null; incomplete: string[] } {
+  const keys = ['basic_pay', 'housing_allowance', 'meal_allowance', 'transport_allowance', 'other_allowances', ...(includeMedical ? ['medical_allowance'] : [])]
   const incomplete = keys.filter((key) => !String(values[key] ?? '').trim())
+  if (!String(values.basic_pay ?? '').trim()) return { total: null, incomplete }
   let cents = 0
   for (const key of keys) {
     const raw = String(values[key] ?? '').trim().replace(/[\s,]/g, '').replace(/^K/i, '')
