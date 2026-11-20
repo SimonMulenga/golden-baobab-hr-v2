@@ -19,11 +19,23 @@ describe('LIVE employee import mapping', () => {
 
   it('normalizes explicit date values without guessing ambiguous timestamps', () => {
     expect(dateForImport('2026-10-28')).toBe('2026-10-28')
-    expect(dateForImport('3/2/2026')).toBe('2026-02-03')
+    expect(dateForImport('3/2/2026')).toBe('')
+    expect(dateForImport('28/02/2026')).toBe('2026-02-28')
+    expect(dateForImport('02/28/2026')).toBe('2026-02-28')
+    expect(dateForImport(46114)).toBe('2026-04-02')
+    expect(dateForImport(new Date('1990-04-02T00:00:00Z'))).toBe('1990-04-02')
     expect(dateForImport('28 October 2026')).toBe('')
     expect(dateForImport('2026-02-29')).toBe('')
     expect(dateForImport('31/04/2026')).toBe('')
     expect(dateForImport('29/02/2024')).toBe('2024-02-29')
+  })
+
+  it('maps the template date headings and common employment date aliases', () => {
+    expect(mapEmployeeColumns(['Date of Birth','Date Joined']).mapping).toMatchObject({ date_of_birth: 0, contract_start_date: 1 })
+    expect(mapEmployeeColumns(['DOB','Birth Date','Employment Start Date','Joining Date','Hire Date']).mapping).toMatchObject({ date_of_birth: null, contract_start_date: null })
+    expect(mapEmployeeColumns(['DOB','Employment Start Date']).mapping).toMatchObject({ date_of_birth: 0, contract_start_date: 1 })
+    expect(mapEmployeeColumns(['Birth Date','Joining Date']).mapping).toMatchObject({ date_of_birth: 0, contract_start_date: 1 })
+    expect(mapEmployeeColumns(['Hire Date']).mapping.contract_start_date).toBe(0)
   })
 
   it('maps all 31 original template headings without using its example employee row', () => {

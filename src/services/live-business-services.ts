@@ -355,6 +355,8 @@ export interface LiveBusinessServices {
     updateDraft(employeeId: string, input: Pick<EmployeeDraftInput, 'employee' | 'privateDetails' | 'compensation'>): Promise<string>;
     submitForHrApproval(employeeId: string): Promise<string>;
     reviewSubmission(employeeId: string, decision: EmployeeReviewDecision, reason?: string): Promise<string>;
+    reviewSubmissions(employeeIds: string[] | null, decision: 'APPROVE' | 'REJECT', reason?: string, companyId?: string): Promise<{ employee_id: string; success: boolean; status: string; message?: string }[]>;
+    approvalQueueSummary(companyId?: string): Promise<{ total_pending: number; ready_for_approval: number; needs_correction: number; approved: number; rejected: number; approval_eligible: number; rejection_eligible: number }>;
     changeCapabilities(employeeId: string): Promise<EmployeeChangeCapabilities>;
     requestApprovedChange(employeeId: string, employmentChanges: Record<string, unknown>, compensationChange: Record<string, unknown>, reason: string): Promise<string>;
     pendingChangeRequests(): Promise<EmployeeChangeRequestRecord[]>;
@@ -564,6 +566,14 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         return unwrap(await client.rpc('employee_review_submission', {
           p_employee_id: employeeId, p_decision: decision, p_reason: reason ?? null,
         }));
+      },
+      async reviewSubmissions(employeeIds, decision, reason, companyId) {
+        return unwrap(await client.rpc('employee_review_submissions', {
+          p_employee_ids: employeeIds, p_decision: decision, p_reason: reason ?? null, p_company_id: companyId ?? null,
+        })) as { employee_id: string; success: boolean; status: string; message?: string }[];
+      },
+      async approvalQueueSummary(companyId) {
+        return unwrap(await client.rpc('employee_approval_queue_summary', { p_company_id: companyId ?? null })) as { total_pending: number; ready_for_approval: number; needs_correction: number; approved: number; rejected: number; approval_eligible: number; rejection_eligible: number };
       },
       async changeCapabilities(employeeId) {
         return unwrap(await client.rpc('employee_change_capabilities', { p_employee_id: employeeId })) as EmployeeChangeCapabilities;

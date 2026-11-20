@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Check, ChevronLeft, ChevronRight, Download, History, RotateCcw, Search, ShieldCheck, Upload, UserRoundX, X } from 'lucide-react'
 import { formatWorkspaceDate, formatWorkspaceDateTime, useWorkspace } from '../companies/WorkspaceContext'
+import type { WorkspaceRole } from '../auth/workspace-access'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeChangeCapabilities, type EmployeeChangeRequestRecord, type EmployeeDirectoryRecord, type EmployeeReviewDecision, type EmploymentHistoryRecord } from '../../services/live-business-services'
 import { createLiveHrServices, type DepartmentRecord, type EmployeeDocumentRecord } from '../../services/live-hr-services'
 import { downloadEmployeeTemplate } from './employee-import-template'
+import { createEmployeeImportStagingService, type StagingRecord } from './employee-import-staging-service'
 import './live-employee-screens.css'
 import './live-employee-ui.css'
 
@@ -318,8 +320,8 @@ function employeeReviewErrorMessage(error: unknown): string {
   return 'The review could not be saved. Refresh the queue and try again, or contact an administrator if this continues.'
 }
 
-export function LiveEmployeeApprovals() {
-  const { companies, preferences } = useWorkspace()
+export function LiveEmployeeApprovals({ roles = [] }: { roles?: WorkspaceRole[] }) {
+  const { companies, preferences, activeCompanyId } = useWorkspace()
   const [records, setRecords] = useState<EmployeeDirectoryRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -330,6 +332,15 @@ export function LiveEmployeeApprovals() {
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [summary, setSummary] = useState({ total_pending: 0, ready_for_approval: 0, needs_correction: 0, approved: 0, rejected: 0, approval_eligible: 0, rejection_eligible: 0 })
+  const [stagedRecords, setStagedRecords] = useState<StagingRecord[]>([])
+  const [bulkAction, setBulkAction] = useState<'APPROVE' | 'REJECT' | null>(null)
+  const [bulkMode, setBulkMode] = useState<'ALL' | 'SELECTED'>('ALL')
+  const [bulkReason, setBulkReason] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResults, setBulkResults] = useState<{ employee_id: string; label: string; success: boolean; status: string; message?: string }[]>([])
+  const canApprove = roles.some((role) => ['PORTFOLIO_ADMIN','PORTFOLIO_COMPANY_ADMIN','OVERALL_HR_MANAGER','COMPANY_ADMIN'].includes(role))
   const requestGeneration = useRef(0)
 
   const load = useCallback(async () => {
@@ -339,14 +350,47 @@ export function LiveEmployeeApprovals() {
       if (generation !== requestGeneration.current) return
       setRecords(result.items)
       setTotal(result.total)
+      setSelectedIds((current) => current.filter((id) => result.items.some((item) => item.id === id)))
+      const companyId = activeCompanyId && activeCompanyId !== 'all' ? activeCompanyId : undefined
+      const summary = await createLiveBusinessServices(getSupabaseClient()).employees.approvalQueueSummary(companyId)
+      setSummary(summary)
+      const portfolioIds = [...new Set(companies.map((company) => company.portfolioId).filter((id): id is string => Boolean(id)))]
+      try { setStagedRecords(await createEmployeeImportStagingService(getSupabaseClient()).listPendingReviewRecords(portfolioIds, companyId)) }
+      catch { setStagedRecords([]) } // Import-review permission is separate from final employee approval.
     } catch {
       if (generation === requestGeneration.current) setError('Employee submissions could not be loaded. Check your access and try again.')
     } finally {
       if (generation === requestGeneration.current) setLoading(false)
     }
-  }, [page, search])
+  }, [page, search, activeCompanyId, companies])
 
   useEffect(() => { const timer = window.setTimeout(() => { void load() }, 0); return () => { window.clearTimeout(timer); requestGeneration.current += 1 } }, [load])
+  useEffect(() => {
+    window.addEventListener('gbhr-employee-approvals-changed', load)
+    return () => window.removeEventListener('gbhr-employee-approvals-changed', load)
+  }, [load])
+
+  const runBulk = async () => {
+    const ids = bulkMode === 'SELECTED' ? selectedIds : null
+    if (bulkMode === 'SELECTED' && selectedIds.length === 0) return
+    if (bulkAction === 'REJECT' && bulkReason.trim().length < 3) { setError('Enter a rejection reason of at least 3 characters.'); return }
+    setBulkBusy(true); setError(''); setNotice(''); setBulkResults([])
+    try {
+      const results = await createLiveBusinessServices(getSupabaseClient()).employees.reviewSubmissions(ids, bulkAction!, bulkReason.trim() || undefined, activeCompanyId !== 'all' ? activeCompanyId : undefined)
+      setBulkResults(results.map((item) => {
+        const employee = records.find((record) => record.id === item.employee_id)
+        return { ...item, label: employee ? `${employee.first_name} ${employee.last_name} (${employee.employee_number})` : item.employee_id }
+      }))
+      const succeeded = results.filter((item) => item.success).length
+      const failed = results.length - succeeded
+      const verb = bulkAction === 'APPROVE' ? 'approved' : 'rejected'
+      setNotice(`${succeeded} employee${succeeded === 1 ? '' : 's'} ${verb}${failed ? `; ${failed} remain pending or need correction` : ''}.`)
+      setSelectedIds([]); setBulkAction(null); setBulkReason('')
+      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
+      setLoading(true); await load()
+    } catch (bulkError) { setError(employeeReviewErrorMessage(bulkError)) }
+    finally { setBulkBusy(false) }
+  }
 
   const review = async (employee: EmployeeDirectoryRecord, decision: EmployeeReviewDecision, reviewReason?: string) => {
     setBusyId(employee.id)
@@ -360,6 +404,7 @@ export function LiveEmployeeApprovals() {
       setRecords((current) => current.filter((record) => record.id !== employee.id))
       setTotal((current) => Math.max(0, current - 1))
       setLoading(true)
+      window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
       await load()
     } catch (reviewError) {
       setError(employeeReviewErrorMessage(reviewError))
@@ -384,15 +429,20 @@ export function LiveEmployeeApprovals() {
       {error && <button type="button" className="button-secondary" onClick={() => { setError(''); setLoading(true); void load() }}>Refresh queue</button>}
       <button type="button" className="icon-button" aria-label="Dismiss notification" onClick={() => { setError(''); setNotice('') }}><X size={16}/></button>
     </div>}
+    {bulkResults.length>0&&<details className="panel employee-bulk-results"><summary>Bulk decision results ({bulkResults.filter((item)=>item.success).length} succeeded · {bulkResults.filter((item)=>!item.success).length} require follow-up)</summary><ul>{bulkResults.map((item)=><li key={item.employee_id}><strong>{item.label}</strong><span>{item.success?item.status.replaceAll('_',' '):`${item.status.replaceAll('_',' ')}${item.message?`: ${item.message}`:''}`}</span></li>)}</ul></details>}
+    <section className="employee-approval-summary" aria-label="Approval queue summary">{[['Total Pending',summary.total_pending],['Ready for Approval',summary.ready_for_approval],['Needs Correction',summary.needs_correction],['Approved',summary.approved],['Rejected',summary.rejected]].map(([label,value])=><article className="panel" key={label}><span>{label}</span><strong>{value}</strong></article>)}</section>
     <section className="panel employee-directory-panel">
-      <div className="employee-toolbar"><div><strong>{total} awaiting HR review</strong><small>Only employees in your accessible companies and branches are listed</small></div><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search pending employees"/></label></div>
-      {loading ? <div className="employee-empty" role="status">Loading submissions…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>POSITION</th><th>SUBMITTED</th><th>REVIEW</th></tr></thead><tbody>{records.map((employee) => {
+      <div className="employee-toolbar"><div><strong>{total} awaiting final HR approval</strong><small>Pending counts include import candidates awaiting review; approval actions use the current company scope</small></div><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search pending employees"/></label></div>
+      {canApprove && <div className="employee-bulk-actions"><button className="button-primary" disabled={bulkBusy || summary.approval_eligible===0} onClick={()=>{setBulkMode('ALL');setBulkAction('APPROVE');setBulkReason('')}}>Approve All</button><button className="button-secondary" disabled={bulkBusy || summary.rejection_eligible===0} onClick={()=>{setBulkMode('ALL');setBulkAction('REJECT');setBulkReason('')}}>Reject All</button><button className="button-secondary" disabled={bulkBusy || selectedIds.length===0} onClick={()=>{setBulkMode('SELECTED');setBulkAction('APPROVE');setBulkReason('')}}>Approve Selected ({selectedIds.length})</button><span>Scope: {activeCompanyId==='all'?'all companies where you have approval permission':companies.find((company)=>company.id===activeCompanyId)?.name??'selected company'}</span></div>}
+      {loading ? <div className="employee-empty" role="status">Loading submissions…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th><input type="checkbox" aria-label="Select all employees on this page" checked={records.length>0&&records.every((item)=>selectedIds.includes(item.id))} onChange={(event)=>setSelectedIds(event.target.checked?[...new Set([...selectedIds,...records.map((item)=>item.id)])]:selectedIds.filter((id)=>!records.some((item)=>item.id===id)))}/></th><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>POSITION</th><th>SUBMITTED</th><th>REVIEW</th></tr></thead><tbody>{records.map((employee) => {
         const company = companies.find((item) => item.id === employee.company_id)
         const branch = company?.branches.find((item) => item.id === employee.workplace_branch_id)
-        return <tr key={employee.id}><td><strong>{employee.first_name} {employee.last_name}</strong><small>{employee.employee_number}</small></td><td><strong>{company?.name ?? 'Company unavailable'}</strong><small>{branch?.name ?? 'Branch unavailable'}</small></td><td><strong>{employee.job_title}</strong><small>{employee.department}</small></td><td>{employee.submitted_at ? formatWorkspaceDate(employee.submitted_at, preferences) : '—'}</td><td><div className="approval-actions"><button className="button-primary" disabled={!!busyId} onClick={() => void review(employee, 'APPROVE')} aria-label={`Approve ${employee.first_name} ${employee.last_name}`}><Check size={14}/> Approve</button><button className="button-secondary" disabled={!!busyId} onClick={() => { setTarget({ employee, decision: 'RETURN' }); setReason(''); setError('') }}><RotateCcw size={14}/> Return</button><button className="button-secondary" disabled={!!busyId} onClick={() => { setTarget({ employee, decision: 'REJECT' }); setReason(''); setError('') }}><UserRoundX size={14}/> Reject</button></div></td></tr>
+        return <tr key={employee.id}><td><input type="checkbox" aria-label={`Select ${employee.first_name} ${employee.last_name}`} checked={selectedIds.includes(employee.id)} onChange={(event)=>setSelectedIds((current)=>event.target.checked?[...current,employee.id]:current.filter((id)=>id!==employee.id))}/></td><td><strong><Link to={`/employees/${employee.id}`}>{employee.first_name} {employee.last_name}</Link></strong><small>{employee.employee_number}</small></td><td><strong>{company?.name ?? 'Company unavailable'}</strong><small>{branch?.name ?? 'Branch unavailable'}</small></td><td><strong>{employee.job_title}</strong><small>{employee.department}</small></td><td>{employee.submitted_at ? formatWorkspaceDate(employee.submitted_at, preferences) : '—'}</td><td><div className="approval-actions"><button className="button-primary" disabled={!!busyId||!canApprove} onClick={() => void review(employee, 'APPROVE')} aria-label={`Approve ${employee.first_name} ${employee.last_name}`}><Check size={14}/> Approve</button><button className="button-secondary" disabled={!!busyId||!canApprove} onClick={() => { setTarget({ employee, decision: 'RETURN' }); setReason(''); setError('') }}><RotateCcw size={14}/> Return</button><button className="button-secondary" disabled={!!busyId||!canApprove} onClick={() => { setTarget({ employee, decision: 'REJECT' }); setReason(''); setError('') }}><UserRoundX size={14}/> Reject</button></div></td></tr>
       })}</tbody></table></div> : <div className="employee-empty"><Check size={21}/><strong>No submissions need review</strong><span>New submissions will appear here when an authorized user submits them.</span></div>}
       <footer className="employee-pagination"><span>Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><div><button className="button-secondary" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => { setLoading(true); setPage((value) => Math.max(1, value - 1)) }}><ChevronLeft size={15}/></button><button className="button-secondary" aria-label="Next page" disabled={page >= Math.max(1, Math.ceil(total / PAGE_SIZE)) || loading} onClick={() => { setLoading(true); setPage((value) => value + 1) }}><ChevronRight size={15}/></button></div></footer>
     </section>
+    <section className="panel employee-directory-panel"><div className="employee-toolbar"><div><strong>Imported employees in HR review ({stagedRecords.length})</strong><small>Incomplete records remain staged until an authorized reviewer completes them and submits them to final approval.</small></div><Link className="button-secondary" to="/employees/import/staging">Open import review</Link></div>{stagedRecords.length?<div className="table-scroll"><table className="employee-table"><thead><tr><th>SOURCE</th><th>EMPLOYEE</th><th>COMPANY</th><th>BRANCH</th><th>STATUS</th><th>REVIEW</th></tr></thead><tbody>{stagedRecords.map((record)=><tr key={record.id}><td>{record.source_sheet} · {record.source_row}</td><td><strong>{[record.current_data.first_name,record.current_data.middle_name,record.current_data.last_name].filter(Boolean).join(' ')||record.current_data.full_name||'Name needs review'}</strong><small>{record.current_data.employee_number||'Employee number missing'}</small></td><td>{companies.find((company)=>company.id===record.company_id)?.name??'Company unresolved'}</td><td>{companies.find((company)=>company.id===record.company_id)?.branches.find((branch)=>branch.id===record.branch_id)?.name??'Assign during review'}</td><td>{record.review_status.replaceAll('_',' ')}</td><td><Link to={`/employees/import/staging?batch=${encodeURIComponent(record.batch_id)}&record=${encodeURIComponent(record.id)}`}>Open batch review</Link></td></tr>)}</tbody></table></div>:<div className="employee-empty">No unsubmitted import candidates are visible in this authorized scope.</div>}</section>
+    {bulkAction && <div className="modal-backdrop" role="presentation"><form className="panel review-reason-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-review-title" onSubmit={(event)=>{event.preventDefault();void runBulk()}}><div className="section-eyebrow">BULK HR DECISION</div><h2 id="bulk-review-title">{bulkAction==='APPROVE'?'Confirm employee approval':'Reject pending employees'}</h2><p>{bulkMode==='ALL'?`${bulkAction==='APPROVE'?summary.approval_eligible:summary.rejection_eligible} pending employee submission(s) will be processed within ${activeCompanyId==='all'?'all companies where you have permission':companies.find((company)=>company.id===activeCompanyId)?.name??'the selected company'}.`:`This applies only to ${selectedIds.length} selected employee submission(s).`} The database rechecks authorization and validation for each record. Invalid or changed records remain pending.</p>{bulkAction==='REJECT'&&<label className="review-reason-label">Rejection reason<textarea value={bulkReason} onChange={(event)=>setBulkReason(event.target.value)} rows={3} required minLength={3}/></label>}<div className="employee-form-actions"><button type="button" className="button-secondary" disabled={bulkBusy} onClick={()=>setBulkAction(null)}>Cancel</button><button className="button-primary" disabled={bulkBusy||(bulkAction==='REJECT'&&bulkReason.trim().length<3)}>{bulkBusy?'Processing…':bulkAction==='APPROVE'?'Confirm Approve':'Confirm Reject'}</button></div></form></div>}
     {target && <div className="modal-backdrop" role="presentation"><form className="panel review-reason-dialog" role="dialog" aria-modal="true" aria-labelledby="review-dialog-title" onSubmit={(event) => void submitDecision(event)}><div className="section-eyebrow">HR REVIEW</div><h2 id="review-dialog-title">{target.decision === 'RETURN' ? 'Return for correction' : 'Reject submission'}</h2><p>{target.employee.first_name} {target.employee.last_name} · {target.employee.employee_number}</p><label className="review-reason-label">Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={4} autoFocus required minLength={3}/></label><div className="employee-form-actions"><button type="button" className="button-secondary" disabled={!!busyId} onClick={() => setTarget(null)}>Cancel</button><button className="button-primary" disabled={!!busyId}>{busyId ? 'Saving…' : 'Confirm review'}</button></div></form></div>}
     <EmployeeChangeReviewQueue />
   </div>

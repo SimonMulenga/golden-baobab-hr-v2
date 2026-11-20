@@ -24,11 +24,11 @@ const normalizeEnum = (value: string) => normalizeImportHeader(value).replaceAll
 const summaryRow = (values: unknown[]) => values.some((value) => /^(grand\s+total|sub\s*total|subtotal|total\s+employees|employee\s+count)$/i.test(String(value ?? '').trim()))
 const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay'])
 
-function cellValue(value: unknown, format?: string): unknown {
+function cellValue(value: unknown, format?: unknown): unknown {
   if (value && typeof value === 'object' && 'v' in value) {
     const v = (value as { v: unknown }).v
-    const w = (value as { w?: string }).w
-    if (typeof v === 'number' && format?.toLowerCase().includes('d')) return dateForImport(w ?? v)
+    const dateFormat = String(format ?? '').replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, '')
+    if (typeof v === 'number' && /[dmy]/i.test(dateFormat)) return dateForImport(v)
     return v
   }
   return value
@@ -40,11 +40,14 @@ function canonicalValue(key: string, value: unknown, formatted?: string): string
     const parsed = amountValue(value)
     if (parsed !== null) return String(parsed)
   }
+  if (['date_of_birth','contract_start_date','contract_end_date'].includes(key)) {
+    const normalized = dateForImport(value)
+    return normalized || String(value ?? '').trim()
+  }
   const text = key === 'employee_number' || key.includes('number') || key === 'phone' || key === 'tpin'
     ? preserveIdentifierText(value, formatted)
     : String(value ?? '').trim()
   if (!text) return ''
-  if (['date_of_birth','contract_start_date','contract_end_date'].includes(key)) return dateForImport(text)
   if (key === 'payment_method') {
     const norm = normalizeEnum(text)
     if (norm.includes('AIRTEL') || norm.includes('MTN') || norm.includes('ZAMTEL') || norm === 'MOBILE_MONEY') return 'MOBILE_MONEY'
@@ -116,9 +119,13 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
     const sheet = workbook.Sheets[sheetName]
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '' })
     if (!matrix.length) continue
-    const headerIndex = findEmployeeHeader(matrix)
+    const headerIndex = findEmployeeHeader(matrix, sheet)
     if (headerIndex < 0) continue
-    const headers = (matrix[headerIndex] ?? []).map((item, index) => String(item ?? '').trim() || `Column ${index + 1}`)
+    const headers = (matrix[headerIndex] ?? []).map((item, index) => {
+      const address = `${XLSX.utils.encode_col(index)}${headerIndex + 1}`
+      const actualCellValue = sheet[address] && typeof sheet[address] === 'object' && 'v' in sheet[address] ? (sheet[address] as XLSX.CellObject).v : item
+      return String(actualCellValue ?? '').trim() || `Column ${index + 1}`
+    })
     const autoMapping = mapEmployeeColumns(headers)
     const hasOverride = Object.hasOwn(mappingOverrides, sheetName)
     const mapping = mappingOverrides[sheetName] ?? autoMapping.mapping
@@ -141,13 +148,15 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
       }
       const original = Object.fromEntries(headers.map((header, column) => {
         const duplicateIndex = headers.slice(0, column).filter((prior) => prior === header).length
-        return [duplicateIndex ? `${header} (${duplicateIndex + 1})` : header, cellValue(row[column], sheet[`${XLSX.utils.encode_col(column)}${excelRow}`]?.z)]
+        const address = `${XLSX.utils.encode_col(column)}${excelRow}`
+        const cell = sheet[address]
+        return [duplicateIndex ? `${header} (${duplicateIndex + 1})` : header, cell ? cellValue(cell, (cell as XLSX.CellObject).z) : row[column]]
       }))
       const current = Object.fromEntries(liveImportFields.map((field) => {
         const column = mapping[field.key] ?? null
         const cell = column === null ? undefined : sheet[`${XLSX.utils.encode_col(column)}${excelRow}`]
-        const raw = column === null ? '' : row[column]
-        return [field.key, canonicalValue(field.key, cellValue(raw, cell?.z), cell?.w)]
+        const raw = column === null ? '' : cell ? cellValue(cell, (cell as XLSX.CellObject).z) : row[column]
+        return [field.key, canonicalValue(field.key, raw, (cell as XLSX.CellObject | undefined)?.w)]
       })) as Record<string, string>
       splitFullName(current)
       if (!current.mobile_money_provider && current.payment_method === 'MOBILE_MONEY') {
@@ -247,9 +256,13 @@ export function detectEmployeeUploadFormat(filename: string, buffer: ArrayBuffer
   throw new Error('The selected file extension does not match a supported Excel workbook or UTF-8 CSV file.')
 }
 
-function findEmployeeHeader(matrix: unknown[][]): number {
+function findEmployeeHeader(matrix: unknown[][], sheet?: XLSX.WorkSheet): number {
   for (let index = 0; index < Math.min(matrix.length, 30); index++) {
-    const rawHeaders = (matrix[index] ?? []).map((value) => String(value ?? '').trim())
+    const rawHeaders = (matrix[index] ?? []).map((value, column) => {
+      const address = `${XLSX.utils.encode_col(column)}${index + 1}`
+      const actualCellValue = sheet?.[address] && typeof sheet[address] === 'object' && 'v' in sheet[address] ? (sheet[address] as XLSX.CellObject).v : value
+      return String(actualCellValue ?? '').trim()
+    })
     const mapped = mapEmployeeColumns(rawHeaders).mapping
     const hasIdentitySignal = Boolean(mapped.employee_number !== null || mapped.first_name !== null || mapped.last_name !== null || mapped.full_name !== null || mapped.identity_document_number !== null || mapped.phone !== null || mapped.email !== null || mapped.tpin !== null || mapped.napsa_number !== null || mapped.nhima_number !== null || mapped.job_title !== null || mapped.basic_pay !== null)
     const payrollColumnCount = rawHeaders.filter((header) => payrollHeader.test(header)).length

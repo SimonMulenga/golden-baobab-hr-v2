@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
-const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), changeCapabilities: vi.fn(), requestApprovedChange: vi.fn(), pendingChangeRequests: vi.fn(), reviewChangeRequest: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
+const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), reviewSubmissions: vi.fn(), approvalQueueSummary: vi.fn(), changeCapabilities: vi.fn(), requestApprovedChange: vi.fn(), pendingChangeRequests: vi.fn(), reviewChangeRequest: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
 const workspaceMocks = vi.hoisted(() => ({ companies: [] as unknown[], activeCompanyId: 'company-synthetic', setActiveCompany: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({
@@ -13,6 +13,7 @@ vi.mock('../../services/live-hr-services', () => ({ createLiveHrServices: () => 
   departments: vi.fn().mockResolvedValue([{ id: 'department-1', name: 'Finance', status: 'ACTIVE' }]),
   jobRoles: vi.fn().mockResolvedValue([{ id: 'job-role-1', department_id: 'department-1', title: 'Analyst', status: 'ACTIVE' }]),
 } }) }))
+vi.mock('./employee-import-staging-service', () => ({ createEmployeeImportStagingService: () => ({ listPendingReviewRecords: vi.fn().mockResolvedValue([]) }) }))
 vi.mock('../companies/WorkspaceContext', () => ({
   useWorkspace: () => ({ companies: workspaceMocks.companies, activeCompanyId: workspaceMocks.activeCompanyId, setActiveCompany: workspaceMocks.setActiveCompany, preferences: {} }),
   useCompanySelection: () => ({ companyId: workspaceMocks.activeCompanyId, company: (workspaceMocks.companies as { id: string }[]).find((item) => item.id === workspaceMocks.activeCompanyId), setCompanyId: vi.fn() }),
@@ -55,6 +56,8 @@ describe('LIVE employee screens', () => {
     serviceMocks.employmentHistory.mockResolvedValue([])
     serviceMocks.setEmploymentStatus.mockResolvedValue(undefined)
     serviceMocks.reviewSubmission.mockResolvedValue('employee-synthetic-1')
+    serviceMocks.reviewSubmissions.mockResolvedValue([])
+    serviceMocks.approvalQueueSummary.mockResolvedValue({ total_pending: 1, ready_for_approval: 1, needs_correction: 0, approved: 0, rejected: 0, approval_eligible: 1, rejection_eligible: 1 })
     serviceMocks.changeCapabilities.mockResolvedValue({ can_request_employee: false, can_request_compensation: false, can_review: false, has_pending_request: false })
     serviceMocks.requestApprovedChange.mockResolvedValue('change-synthetic-1')
     serviceMocks.pendingChangeRequests.mockResolvedValue([])
@@ -137,7 +140,7 @@ describe('LIVE employee screens', () => {
 
   it('requests the submitted review queue and invokes the trusted approval action', async () => {
     serviceMocks.list.mockResolvedValueOnce({ items: [employee], total: 1 }).mockResolvedValue({ items: [], total: 0 })
-    renderRoute(<LiveEmployeeApprovals />)
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
     await waitFor(() => expect(serviceMocks.reviewSubmission).toHaveBeenCalledWith('employee-synthetic-1', 'APPROVE', undefined))
     await waitFor(() => expect(serviceMocks.list).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, search: '', approvalStatus: 'SUBMITTED_FOR_HR_APPROVAL' }))
@@ -145,9 +148,32 @@ describe('LIVE employee screens', () => {
     expect(screen.queryByText('Demo Employee')).not.toBeInTheDocument()
   })
 
+  it('confirms approve-selected and sends only the selected employee to the scoped bulk RPC', async () => {
+    serviceMocks.reviewSubmissions.mockResolvedValue([{ employee_id: employee.id, success: true, status: 'APPROVED' }])
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
+    await screen.findByText('Demo Employee')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Demo Employee' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve Selected (1)' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('only to 1 selected employee submission')
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Approve' }))
+    await waitFor(() => expect(serviceMocks.reviewSubmissions).toHaveBeenCalledWith([employee.id], 'APPROVE', undefined, 'company-synthetic'))
+    expect(await screen.findByRole('status')).toHaveTextContent('1 employee approved')
+  })
+
+  it('requires a rejection reason before the bulk rejection RPC can run', async () => {
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
+    await screen.findByText('Demo Employee')
+    fireEvent.click(screen.getByRole('button', { name: 'Reject All' }))
+    const confirm = screen.getByRole('button', { name: 'Confirm Reject' })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Rejection reason'), { target: { value: 'Duplicate record' } })
+    expect(confirm).toBeEnabled()
+    expect(serviceMocks.reviewSubmissions).not.toHaveBeenCalled()
+  })
+
   it('requires a reason for return and shows backend rejection without a success state', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue(new Error('permission denied'))
-    renderRoute(<LiveEmployeeApprovals />)
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     fireEvent.click(await screen.findByRole('button', { name: /Return/ }))
     fireEvent.submit(screen.getByRole('dialog'))
     expect(await screen.findByText('Enter a short review reason before returning or rejecting this record.')).toBeInTheDocument()
@@ -159,7 +185,7 @@ describe('LIVE employee screens', () => {
 
   it('shows a specific authorization error returned by the trusted review RPC', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue({ code: '42501', message: 'internal detail is not displayed' })
-    renderRoute(<LiveEmployeeApprovals />)
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
     const notification = await screen.findByRole('alert')
     expect(notification).toHaveClass('employee-review-toast', 'is-error')
@@ -171,7 +197,7 @@ describe('LIVE employee screens', () => {
 
   it('lets the reviewer refresh the approval queue from the error notification', async () => {
     serviceMocks.reviewSubmission.mockRejectedValueOnce({ code: '40001' })
-    renderRoute(<LiveEmployeeApprovals />)
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
     const notification = await screen.findByRole('alert')
     expect(notification).toHaveTextContent('Another reviewer changed this submission.')
@@ -182,7 +208,7 @@ describe('LIVE employee screens', () => {
 
   it('explains a concurrent employee review and allows refreshing the queue', async () => {
     serviceMocks.reviewSubmission.mockRejectedValue({ code: '40001' })
-    renderRoute(<LiveEmployeeApprovals />)
+    renderRoute(<LiveEmployeeApprovals roles={['OVERALL_HR_MANAGER']} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Approve Demo Employee' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Another reviewer changed this submission.')
   })

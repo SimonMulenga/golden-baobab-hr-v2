@@ -33,7 +33,7 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'department', label: 'Department', required: false, aliases: ['department', 'department name', 'team', 'division'] },
   { key: 'employment_type', label: 'Employment type', required: false, aliases: ['employment type', 'employee type', 'type of employment'] },
   { key: 'contract_type', label: 'Contract type', required: false, aliases: ['contract type', 'contract category', 'contract classification'] },
-  { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'date joined', 'contract start date'], type: 'date' },
+  { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'date joined', 'joining date', 'hire date', 'contract start date'], type: 'date' },
   { key: 'contract_end_date', label: 'Contract end date', required: false, aliases: ['contract end date', 'end date'], type: 'date' },
   { key: 'retirement_age', label: 'Retirement age', required: false, aliases: ['retirement age'], type: 'number' },
   { key: 'salary_frequency', label: 'Salary frequency', required: false, aliases: ['salary frequency', 'pay frequency', 'payroll frequency', 'payment frequency'] },
@@ -164,12 +164,22 @@ export function mapImportHeader(headers: string[]): Record<string, string> {
 }
 
 export function dateForImport(value: unknown): string {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return validIsoDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate())
+  // Spreadsheet date cells are local calendar dates. Excel readers construct
+  // these at local midnight, which can be the previous UTC date in UTC+ zones.
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return validIsoDate(value.getFullYear(), value.getMonth() + 1, value.getDate())
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 2958465) {
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000)
+    return validIsoDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate())
+  }
   const text = String(value ?? '').trim()
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso) return validIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))
-  const dmy = text.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/)
-  if (dmy) return validIsoDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]))
+  const parts = text.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4})$/)
+  if (parts) {
+    const first = Number(parts[1]), second = Number(parts[2]), year = Number(parts[3])
+    if (first <= 12 && second <= 12) return '' // Ambiguous locale order; HR must confirm.
+    return first > 12 ? validIsoDate(year, second, first) : validIsoDate(year, first, second)
+  }
   return ''
 }
 
