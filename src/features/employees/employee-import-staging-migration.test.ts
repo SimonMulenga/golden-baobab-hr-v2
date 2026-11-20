@@ -19,6 +19,8 @@ describe('secure employee import staging migration contract', () => {
   it('enforces RLS, denies direct client writes, and checks private-detail permission for staged data', () => {
     expect(migration).toMatch(/alter table public\.employee_import_staging_records enable row level security/i)
     expect(migration).toMatch(/employee\.private\.view/i)
+    expect(migration).toMatch(/employee_import_batch_read_authorized/i)
+    expect(migration).toMatch(/not app_private\.has_permission\('employee\.private\.view'/i)
     expect(migration).toMatch(/revoke all on public\.employee_import_batches, public\.employee_import_staging_records/i)
     expect(migration).toMatch(/grant select on public\.employee_import_batches, public\.employee_import_staging_records/i)
     expect(migration).toMatch(/grant execute on function public\.employee_import_stage_batch[\s\S]*?to authenticated/i)
@@ -33,6 +35,7 @@ describe('secure employee import staging migration contract', () => {
     expect(migration).toMatch(/app_private\.has_permission\('employee\.create'/i)
     expect(migration).toMatch(/app_private\.has_permission\('employee\.import'/i)
     expect(migration).toMatch(/app_private\.has_permission\('employee\.submit'/i)
+    expect(migration).toMatch(/app_private\.has_permission\('employee\.reject'/i)
   })
 
   it('keeps employee updates and compensation approval in the existing workflow', () => {

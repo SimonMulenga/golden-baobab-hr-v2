@@ -95,17 +95,27 @@ alter table public.employee_import_review_history enable row level security;
 revoke all on public.employee_import_batches, public.employee_import_staging_records,
   public.employee_import_review_history from public, anon, authenticated;
 
+create or replace function app_private.employee_import_batch_read_authorized(p_batch_id uuid, p_portfolio_id uuid)
+returns boolean language sql stable security definer
+set search_path = pg_catalog set row_security = off
+as $$
+  select app_private.has_permission('employee.import',p_portfolio_id,null,null)
+      and app_private.has_permission('employee.private.view',p_portfolio_id,null,null)
+    or (
+      exists (select 1 from public.employee_import_staging_records r where r.batch_id=p_batch_id and r.portfolio_id=p_portfolio_id)
+      and not exists (
+        select 1 from public.employee_import_staging_records r where r.batch_id=p_batch_id and r.portfolio_id=p_portfolio_id
+          and (r.company_id is null
+            or not app_private.has_permission('employee.import',r.portfolio_id,r.company_id,r.branch_id)
+            or not app_private.has_permission('employee.private.view',r.portfolio_id,r.company_id,r.branch_id))
+      )
+    );
+$$;
+revoke all on function app_private.employee_import_batch_read_authorized(uuid,uuid) from public, anon;
+grant execute on function app_private.employee_import_batch_read_authorized(uuid,uuid) to authenticated;
+
 create policy employee_import_batches_read_scoped on public.employee_import_batches
-  for select to authenticated using (
-    app_private.has_permission('employee.import', portfolio_id, null, null)
-    or exists (
-      select 1 from public.employee_import_staging_records r
-      where r.batch_id = employee_import_batches.id
-        and r.company_id is not null
-        and app_private.has_permission('employee.import', r.portfolio_id, r.company_id, r.branch_id)
-        and app_private.has_permission('employee.private.view', r.portfolio_id, r.company_id, r.branch_id)
-    )
-  );
+  for select to authenticated using (app_private.employee_import_batch_read_authorized(id,portfolio_id));
 create policy employee_import_staging_read_scoped on public.employee_import_staging_records
   for select to authenticated using (
     (company_id is null
@@ -226,6 +236,7 @@ begin
         v_issue := v_issue || jsonb_build_array(jsonb_build_object('field','contract_end_date','message','Contract end date cannot precede the start date.'));
       end if;
     exception when others then null;
+    end;
   end if;
   return v_issue;
 end;
@@ -424,8 +435,16 @@ begin
   if p_decision='REJECT' and nullif(btrim(p_reason),'') is null then
     raise exception using errcode='22023', message='A reason is required to reject an import record.';
   end if;
-  if v_record.company_id is not null and not app_private.has_permission('employee.import',v_record.portfolio_id,v_record.company_id,v_record.branch_id) then
+  if v_record.company_id is not null and (not app_private.has_permission('employee.import',v_record.portfolio_id,v_record.company_id,v_record.branch_id)
+      or not app_private.has_permission('employee.private.view',v_record.portfolio_id,v_record.company_id,v_record.branch_id)) then
     raise exception using errcode='42501', message='The current record is outside your authorized scope.';
+  end if;
+  if v_record.company_id is null and (not app_private.has_permission('employee.import',v_record.portfolio_id,null,null)
+      or not app_private.has_permission('employee.private.view',v_record.portfolio_id,null,null)) then
+    raise exception using errcode='42501', message='Portfolio-level import and private-data permissions are required for this record.';
+  end if;
+  if p_decision='REJECT' and not app_private.has_permission('employee.reject',v_record.portfolio_id,p_company_id,p_branch_id) then
+    raise exception using errcode='42501', message='Employee rejection permission is required for this company and branch.';
   end if;
   v_before := v_record.current_data;
   if p_company_id is not null and not app_private.has_permission('employee.create',v_record.portfolio_id,p_company_id,p_branch_id) then
@@ -532,6 +551,7 @@ begin
     raise exception using errcode='55000', message='This staged row is already linked to an employee and cannot create a second employee.';
   end if;
   if not app_private.has_permission('employee.import',v_record.portfolio_id,v_record.company_id,v_record.branch_id)
+    or not app_private.has_permission('employee.private.view',v_record.portfolio_id,v_record.company_id,v_record.branch_id)
     or not app_private.has_permission('employee.create',v_record.portfolio_id,v_record.company_id,v_record.branch_id)
     or not app_private.has_permission('employee.submit',v_record.portfolio_id,v_record.company_id,v_record.branch_id) then
     raise exception using errcode='42501', message='Employee import, create, and submit permissions are required for this branch.';
