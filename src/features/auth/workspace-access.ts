@@ -13,14 +13,14 @@ export function visibleWorkspaceRoutes(roles: WorkspaceRole[]): Set<string> {
 
   if (administrator) {
     [
-      '/companies', '/branches', '/employees', '/employee-approvals', '/departments', '/job-roles',
+      '/companies', '/branches', '/employees', '/employees/import', '/employee-approvals', '/departments', '/job-roles',
       '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory',
       '/reports', '/users', '/audit', '/settings', '/notifications', '/payroll-approvals',
     ].forEach((path) => routes.add(path))
   }
   if (portfolioAdministrator) routes.add('/companies/new')
   if (roles.includes('OVERALL_HR_MANAGER')) {
-    ['/employees', '/employee-approvals', '/departments', '/job-roles', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/audit', '/notifications', '/payroll-approvals'].forEach((path) => routes.add(path))
+    ['/employees', '/employees/import', '/employee-approvals', '/departments', '/job-roles', '/attendance', '/leave', '/payroll', '/payslips', '/reconciliation', '/deductions', '/statutory', '/reports', '/audit', '/notifications', '/payroll-approvals'].forEach((path) => routes.add(path))
   }
   if (roles.includes('BRANCH_MANAGER')) ['/employees', '/attendance', '/leave', '/payroll', '/deductions', '/payslips', '/reports'].forEach((path) => routes.add(path))
   if (roles.some((role) => ['COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_REVIEWER', 'COMPANY_PAYROLL_PREPARER', 'PAYROLL_PROCESSOR'].includes(role))) {
@@ -31,6 +31,7 @@ export function visibleWorkspaceRoutes(roles: WorkspaceRole[]): Set<string> {
 }
 
 export function roleCanOpenPath(routes: Set<string>, path: string): boolean {
+  if (path.startsWith('/employees/import') && !routes.has('/employees/import')) return false
   if ((path === '/companies/new' || path.startsWith('/companies/new/')) && !routes.has('/companies/new')) return false
   return [...routes].some((allowed) => path === allowed || (allowed !== '/' && path.startsWith(`${allowed}/`)))
 }

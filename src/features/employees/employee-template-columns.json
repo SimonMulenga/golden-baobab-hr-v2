@@ -18,6 +18,11 @@
   { "heading": "Employment Type", "key": "employment_type", "format": "text" },
   { "heading": "Date Joined", "key": "contract_start_date", "format": "date" },
   { "heading": "Basic Salary", "key": "basic_pay", "format": "currency" },
+  { "heading": "Housing allowance 30% of basic pay", "key": "housing_allowance", "format": "currency" },
+  { "heading": "Lunch Allwance", "key": "meal_allowance", "format": "currency" },
+  { "heading": "Transport Alwance", "key": "transport_allowance", "format": "currency" },
+  { "heading": "Other allowances", "key": "other_allowances", "format": "currency" },
+  { "heading": "Groce Pay (Sum of all the earnings)", "key": "gross_pay", "format": "currency" },
   { "heading": "Payment Method", "key": "payment_method", "format": "text" },
   { "heading": "Bank Name", "key": "bank_name", "format": "text" },
   { "heading": "Bank Account Number", "key": "bank_account_number", "format": "text" },
@@ -28,10 +33,5 @@
   { "heading": "NHIMA Number", "key": "nhima_number", "format": "text" },
   { "heading": "Emergency Contact Name", "key": "emergency_contact_name", "format": "text" },
   { "heading": "Emergency Contact Relationship", "key": "emergency_contact_relationship", "format": "text" },
-  { "heading": "Emergency Contact Phone Number", "key": "emergency_contact_phone", "format": "text" },
-  { "heading": "Housing Allowance", "key": "housing_allowance", "format": "currency" },
-  { "heading": "Lunch", "key": "meal_allowance", "format": "currency" },
-  { "heading": "Transport", "key": "transport_allowance", "format": "currency" },
-  { "heading": "Medical Allowance", "key": "medical_allowance", "format": "currency" },
-  { "heading": "Other Allowances", "key": "other_allowances", "format": "currency" }
+  { "heading": "Emergency Contact Phone Number", "key": "emergency_contact_phone", "format": "text" }
 ]

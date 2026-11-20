@@ -38,10 +38,11 @@ const AuthPrototype = lazy(() => import('./features/auth/AuthPrototype').then((m
 import './index.css'
 import './client-ui.css'
 import './enterprise-ui.css'
+import './design-system.css'
 
 const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },
-  { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
+  { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employee Import', path: '/employees/import', icon: FileText }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
   { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Pending payroll approval', path: '/payroll-approvals', icon: ClipboardCheck }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
   { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
@@ -51,7 +52,10 @@ function AppShell() {
   const [dark, setDark] = useState(() => localStorage.getItem('golden-baobab-hr-theme') === 'dark')
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const mobileMenuButton = useRef<HTMLButtonElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
   const mobileWasOpen = useRef(false)
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesOwnerId, setCompaniesOwnerId] = useState<string | null>(null)
@@ -64,12 +68,14 @@ function AppShell() {
   const [pendingPayrollApprovals, setPendingPayrollApprovals] = useState(0)
   const [authActionError, setAuthActionError] = useState('')
   const location = useLocation()
-  const currentName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name ?? 'Dashboard'
+  const routeName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name
+  const currentName = routeName ?? (location.pathname.startsWith('/employees/import') ? 'Employee Import' : location.pathname.startsWith('/employees/') ? 'Employee Profile' : location.pathname.startsWith('/companies/') ? 'Company Details' : location.pathname === '/auth/login' ? 'Sign in' : 'Page not found')
   const currentCompany = companies.find((company) => company.id === activeCompanyId)
   const workspaceName = activeCompanyId === 'all' ? 'All companies' : currentCompany?.name ?? 'Company workspace'
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
   const canOpenPayrollApprovals = allowedRoutes.has('/payroll-approvals')
   const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes])
+  const searchItems = useMemo(() => visibleNav.flatMap((section) => section.items).filter((item) => item.name.toLowerCase().includes(searchQuery.trim().toLowerCase())), [visibleNav, searchQuery])
   const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
   const maySelectCompany = !branchOnly && companies.length > 1
   const profileName = typeof auth.user?.user_metadata?.full_name === 'string' ? auth.user.user_metadata.full_name : auth.user?.email ?? 'Signed-in account'
@@ -112,6 +118,15 @@ function AppShell() {
     return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('gbhr-payroll-approvals-changed', loadCount) }
   }, [authUserId, canOpenPayrollApprovals, location.pathname])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) }
+      if (event.key === 'Escape') setSearchOpen(false)
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [])
+  useEffect(() => { if (searchOpen) searchInput.current?.focus() }, [searchOpen])
   useEffect(() => {
     if (!mobileOpen) {
       if (mobileWasOpen.current) mobileMenuButton.current?.focus()
@@ -193,17 +208,21 @@ function AppShell() {
   if (authGate === 'recovery') return <Navigate to="/auth/reset" replace />
   if (authGate === 'login') return <Navigate to="/auth/login" replace />
   const routeAllowed = roleCanOpenPath(allowedRoutes, location.pathname)
-  if (isLiveMode && !roleContext.loading && !companiesLoading && location.pathname !== '/' && !routeAllowed) return <Navigate to="/" replace />
+  const knownRoute = nav.flatMap((section) => section.items).some((item) => item.path === location.pathname)
+    || /^\/(employees|companies)\/[^/]+(?:\/(edit|correct))?$/.test(location.pathname)
+    || location.pathname.startsWith('/employees/import/')
+  if (isLiveMode && knownRoute && !roleContext.loading && !companiesLoading && location.pathname !== '/' && !routeAllowed) return <Navigate to="/" replace />
   if (location.pathname.startsWith('/auth/')) return <Suspense fallback={<div className="route-loading">Opening sign-in…</div>}><Routes><Route path="/auth/:screen" element={<AuthPrototype/>}/></Routes></Suspense>
   return <WorkspaceContext.Provider value={data}><div className={`app-shell ${collapsed ? 'is-collapsed' : ''}`}>    {mobileOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside id="workspace-navigation" className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span>GB</span></div><span className="brand-word">Golden Baobab <span>HR</span></span><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="workspace-selector"><div className="workspace-avatar">{isLiveMode ? initials(workspaceName) : 'MH'}</div><div className="workspace-copy"><strong>{workspaceName}</strong><span>{roleContext.roles.includes('PORTFOLIO_COMPANY_ADMIN') ? 'Portfolio Administrator' : roleContext.roles.includes('PORTFOLIO_ADMIN') ? 'Platform Super Administrator' : branchOnly ? (companies[0]?.branches.length === 1 ? companies[0].branches[0].name : 'Assigned branches') : roleContext.roles.includes('OVERALL_HR_MANAGER') ? 'Overall HR Manager' : 'Company workspace'}</span></div>{maySelectCompany && <ChevronDown size={15} />}</div>
-      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
+      <nav className="side-nav">{visibleNav.map((section) => <div className="nav-section" key={section.label}><div className="nav-label">{section.label}</div>{section.items.map(({ name, path, icon: Icon }) => <NavLink key={path} to={path} end={path === '/' || path === '/employees'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? name : undefined} onClick={() => setMobileOpen(false)}><Icon size={17} strokeWidth={1.8} /><span>{name}</span>{name === 'Notifications' && unreadNotifications > 0 && <span className="nav-count">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}{name === 'Pending payroll approval' && pendingPayrollApprovals > 0 && <span className="nav-count" aria-label={`${pendingPayrollApprovals} pending payroll approvals`}>{pendingPayrollApprovals > 99 ? '99+' : pendingPayrollApprovals}</span>}</NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom">{!isLiveMode && <div className="help-card"><div className="help-icon"><CircleHelp size={16} /></div><div><strong>Need a hand?</strong><span>Visit our help centre</span></div><ChevronRight size={15} /></div>}<div className="profile-row"><div className="profile-avatar">{isLiveMode ? initials(profileName) : 'CM'}</div><div className="profile-copy"><strong>{profileName}</strong><span>{isLiveMode ? 'Signed-in account' : 'Workspace admin'}</span></div>{!isLiveMode && <MoreHorizontal size={18} />}</div></div>
       <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} aria-label="Collapse sidebar"><ChevronLeft size={15} /></button>
     </aside>
-    <div className="main-column"><header className="topbar"><div className="top-left"><button ref={mobileMenuButton} className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="workspace-navigation" aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions">{maySelectCompany ? <label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label> : companies.length === 1 && <div className="company-switch company-context" aria-label="Assigned company"><Building2 size={15}/><span>{companies[0].name}</span></div>}<button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search"><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link>{isLiveMode && <button className="auth-signout" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } }}>Sign out</button>}<div className="top-avatar" title={isLiveMode ? auth.user?.email ?? '' : 'Chola Mwansa'}>{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</div></div></header>
+    <div className="main-column"><header className="topbar"><div className="top-left"><button ref={mobileMenuButton} className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="workspace-navigation" aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions">{maySelectCompany ? <label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label> : companies.length === 1 && <div className="company-switch company-context" aria-label="Assigned company"><Building2 size={15}/><span>{companies[0].name}</span></div>}<button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search pages" aria-haspopup="dialog" aria-expanded={searchOpen} onClick={() => { setSearchQuery(""); setSearchOpen(true) }}><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link>{isLiveMode && <button className="auth-signout" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } }}>Sign out</button>}<div className="top-avatar" title={isLiveMode ? auth.user?.email ?? '' : 'Chola Mwansa'}>{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</div></div></header>
+      {searchOpen && <div className="quick-search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false) }}><section className="quick-search" role="dialog" aria-modal="true" aria-label="Search workspace pages"><label htmlFor="workspace-page-search"><Search size={17}/><input ref={searchInput} id="workspace-page-search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Find an authorized page…" /></label><div role="listbox" aria-label="Available pages">{searchItems.length ? searchItems.map(({ name, path, icon: Icon }) => <Link role="option" aria-selected="false" key={path} to={path} onClick={() => setSearchOpen(false)}><Icon size={16}/><span>{name}</span><ChevronRight size={14}/></Link>) : <p>No accessible pages match that search.</p>}</div><footer><span>Only pages available to your account are shown.</span><button className="button-secondary" onClick={() => setSearchOpen(false)}>Close</button></footer></section></div>}
       {authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}
       <main className="page-content"><Suspense fallback={<div className="route-loading"><span className="route-loading-mark">GB</span><span>Opening workspace…</span></div>}><Routes>
           <Route path="/" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
@@ -234,7 +253,7 @@ function AppShell() {
           <Route path="/audit" element={<LiveAuditLogs />} />
           <Route path="/notifications" element={<LiveNotifications />} />
           <Route path="/settings" element={<LiveSettings />} />
-          <Route path="*" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} />} />
+          <Route path="*" element={<main className="not-found" role="status"><span>404</span><h1>Page not found</h1><p>This workspace route does not exist or is no longer available.</p><Link className="button-primary" to="/">Return to overview</Link></main>} />
         </Routes></Suspense></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span>People and payroll workspace</span></footer>
     </div>

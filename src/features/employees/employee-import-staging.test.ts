@@ -104,8 +104,10 @@ describe('employee workbook staging', () => {
     expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 })
     expect(sheet.getColumn(1).width).toBeGreaterThan(0)
     expect(sheet.getCell('A2').value).toBeNull()
-    expect(sheet.getCell('AE2').value).toMatchObject({ formula: 'IF(S2="","",ROUND(S2*30%,2))' })
-    expect(sheet.getCell('AE501').value).toMatchObject({ formula: 'IF(S501="","",ROUND(S501*30%,2))' })
+    expect(sheet.getCell('T2').value).toMatchObject({ formula: 'IF(S2="","",ROUND(S2*30%,2))' })
+    expect(sheet.getCell('T501').value).toMatchObject({ formula: 'IF(S501="","",ROUND(S501*30%,2))' })
+    expect(sheet.getCell('X2').value).toMatchObject({ formula: 'IF(S2="","",SUM(S2:W2))' })
+    expect(sheet.getCell('X501').value).toMatchObject({ formula: 'IF(S501="","",SUM(S501:W501))' })
     const parsedBlank = extractEmployeeWorkbook(buffer, companies)
     expect(parsedBlank.records).toEqual([])
   })
@@ -118,7 +120,7 @@ describe('employee workbook staging', () => {
     const indexes = Object.fromEntries(employeeTemplateColumns.map((column, index) => [column.key, index]))
     const values: Record<string, string | number> = {
       employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office',
-      basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, medical_allowance: 120, other_allowances: 80,
+      basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, other_allowances: 80, gross_pay: 10980,
       phone: '0970000007', tpin: '0000001234', contract_start_date: '2026-11-01',
     }
     for (const [key, value] of Object.entries(values)) {
@@ -132,12 +134,13 @@ describe('employee workbook staging', () => {
     expect(employee.current_data).toMatchObject({
       employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', basic_pay: '8000',
       housing_allowance: '2400.00', housing_allowance_source: 'DEFAULT_30', meal_allowance: '450',
-      transport_allowance: '250', medical_allowance: '120', other_allowances: '80', phone: '0970000007', tpin: '0000001234',
+      transport_allowance: '250', other_allowances: '80', phone: '0970000007', tpin: '0000001234', gross_pay_proposed: '11180.00', gross_pay_review_required: 'true',
     })
     expect(employee.company_id).toBe('company-1')
     expect(employee.branch_id).toBe('north-1')
-    expect(employee.original_data['Housing Allowance']).toBe('')
-    expect(employee.payroll_data).toMatchObject({ 'Lunch': 450, 'Transport': 250, 'Medical Allowance': 120, 'Other Allowances': 80 })
+    expect(employee.original_data['Housing allowance 30% of basic pay']).toBe('')
+    expect(employee.payroll_data).toMatchObject({ 'Groce Pay (Sum of all the earnings)': 10980 })
+    expect(employee.current_data.gross_pay).toBe('10980')
     })
   })
 
@@ -166,8 +169,11 @@ describe('employee workbook staging', () => {
     expect(calculateHousingAllowanceCents('5000')).toBe(150000)
     expect(calculateHousingAllowanceCents('8000')).toBe(240000)
     expect(calculateHousingAllowanceCents('10000')).toBe(300000)
-    const reviewed = recalculateStagedHousingAllowance({ basic_pay: '8000', housing_allowance: '2400', housing_allowance_source: 'IMPORTED', housing_allowance_resolution: 'USE_UPLOADED' }, 'basic_pay', '10000')
+    const reviewed = recalculateStagedHousingAllowance({ basic_pay: '8000', housing_allowance: '2400', housing_allowance_source: 'IMPORTED', housing_allowance_resolution: 'USE_UPLOADED', meal_allowance: '0', transport_allowance: '100', other_allowances: '50', gross_pay: '10950' }, 'basic_pay', '10000')
     expect(reviewed).toMatchObject({ housing_allowance_proposed: '3000.00', housing_allowance_resolution: '', housing_allowance_review_required: 'true' })
+    expect(reviewed).toMatchObject({ gross_pay_proposed: '12550.00', gross_pay_review_required: 'true' })
+    const calculatedHousing = recalculateStagedHousingAllowance({ ...reviewed, housing_allowance_resolution: 'USE_CALCULATED', housing_allowance: '3000.00' }, 'housing_allowance', '3000.00')
+    expect(calculatedHousing.gross_pay_proposed).toBe('13150.00')
   })
 
   it('keeps blank allowances unconfirmed in the compensation preview and totals explicit values in cents', () => {

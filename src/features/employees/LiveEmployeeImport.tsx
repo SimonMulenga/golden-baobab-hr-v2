@@ -7,6 +7,7 @@ import { createLiveBusinessServices, type EmployeeImportBatchInput, type Employe
 import { createLiveHrServices, type DepartmentRecord } from '../../services/live-hr-services'
 import { useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { dateForImport, findImportHeaderRow, hasTemplateExampleInstruction, importAttemptKey, isAllowedTemplateBank, isValidTemplateMobileNumber, liveImportFields, mapImportHeader, preserveIdentifierText, rotateImportAttemptKey, templateFieldsWithUnsupportedData, type LiveImportField } from './live-import-model'
+import { downloadEmployeeTemplate } from './employee-import-template'
 import './live-employee-import.css'
 
 type SheetRow = Record<string, unknown>
@@ -279,7 +280,7 @@ export function LiveEmployeeImport() {
   const invalidCount = rows.length - validCount
 
   return <div className="employee-screen live-import-screen">
-    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> BULK ONBOARDING</div><h1>Import employees</h1><p>Map spreadsheet columns, review validation results, then submit employees for HR approval.</p><Link to="/employees/import/staging">Stage incomplete workbook rows for HR review</Link></div><Link className="button-secondary" to="/employees">Return to employees</Link></section>
+    <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> BULK ONBOARDING</div><h1>Import employees</h1><p>Map spreadsheet columns, review validation results, then submit employees for HR approval.</p><Link to="/employees/import/staging">Stage incomplete workbook rows for HR review</Link></div><div className="welcome-actions"><button className="button-secondary" type="button" onClick={downloadEmployeeTemplate}><FileSpreadsheet size={15}/> Download Employee Template</button><Link className="button-secondary" to="/employees">Return to employees</Link></div></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Files are read on this device; no data is sent until you confirm. This preview includes private employee and pay details, so keep your screen private. Confirming submits the employees for HR approval.</div>
     {templateHasExampleRow && <div className="auth-shell-error" role="note"><strong>Template example row:</strong> the workbook instructions say to replace its example row. Remove that row before continuing.<label className="live-import-example-check"><input type="checkbox" checked={exampleRowRemoved} onChange={(event) => setExampleRowRemoved(event.target.checked)} /> I removed the template example row from this file.</label></div>}
     {error && <div className="auth-shell-error" role="alert">{error}</div>}
