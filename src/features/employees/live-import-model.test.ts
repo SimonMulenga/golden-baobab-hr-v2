@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedTemplateBanks, dateForImport, employeeTemplateColumns, findImportHeaderRow, hasTemplateExampleInstruction, importAttemptKey, isAllowedTemplateBank, isValidTemplateMobileNumber, liveImportFields, mapEmployeeColumns, mapImportHeader, originalEmployeeTemplateHeaders, preserveIdentifierText, rotateImportAttemptKey, templateFieldsWithUnsupportedData } from './live-import-model'
+import { allowedTemplateBanks, dateForImport, employeeTemplateColumns, findImportHeaderRow, hasTemplateExampleInstruction, importAttemptKey, isAllowedTemplateBank, isValidTemplateMobileNumber, liveImportFields, mapEmployeeColumns, mapImportHeader, normalizeTemplateBank, originalEmployeeTemplateHeaders, preserveIdentifierText, rotateImportAttemptKey, templateFieldsWithUnsupportedData } from './live-import-model'
 
 describe('LIVE employee import mapping', () => {
   it('finds a flexible header row after report title rows and maps known aliases', () => {
@@ -33,7 +33,7 @@ describe('LIVE employee import mapping', () => {
       employee_number: 'Employee No *', first_name: 'First Name *', last_name: 'Surname *', basic_pay: 'Basic Salary *',
       middle_name: 'Other Names', identity_document_number: 'NRC', employment_status: 'Status', annual_leave_days: 'Annual Leave Days',
       loan_or_other_deduction: 'Loan or Other Deduction', deduction_label: 'Deduction Label', sort_code: 'Sort Code',
-      mobile_money_provider: 'Wallet Name', bank_branch_name: 'Branch',
+      mobile_money_provider: 'Wallet Name', bank_branch_name: '',
     })
     expect(liveImportFields.filter((field) => field.required).map((field) => field.key)).toEqual(['employee_number', 'first_name', 'last_name', 'basic_pay'])
   })
@@ -53,6 +53,8 @@ describe('LIVE employee import mapping', () => {
   it('validates only the bank and mobile-money values listed in the workbook instructions', () => {
     expect(allowedTemplateBanks).toHaveLength(15)
     expect(isAllowedTemplateBank('Zambia National Commercial Bank (Zanaco)')).toBe(true)
+    expect(normalizeTemplateBank('ABSA')).toBe('Absa Bank Zambia')
+    expect(normalizeTemplateBank('Absa Bank, Zambia')).toBe('Absa Bank Zambia')
     expect(isAllowedTemplateBank('Unknown Bank')).toBe(false)
     expect(isValidTemplateMobileNumber('0971234567', 'Airtel Money')).toBe(true)
     expect(isValidTemplateMobileNumber('0961234567', 'MTN MoMo')).toBe(true)
@@ -73,12 +75,12 @@ describe('LIVE employee import mapping', () => {
     expect(employeeTemplateColumns.map((column) => column.heading)).toEqual([
       'Employee Number','First Name','Middle Name','Last Name','Date of Birth','Gender','Nationality','NRC / ID Number',
       'Residential Address','Phone Number','Email','Email Unavailable Reason','Company','Branch','Department','Job Title',
-      'Employment Type','Date Joined','Basic Salary','Housing allowance 30% of basic pay','Lunch Allwance','Transport Alwance',
-      'Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name','Bank Account Number',
-      'Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number','Emergency Contact Name',
+      'Employment Type','Contract Type','Date Joined','Salary Frequency','Basic Salary','Housing allowance 30% of basic pay',
+      'Lunch Allwance','Transport Alwance','Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name',
+      'Bank Account Name','Bank Account Number','Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number','Emergency Contact Name',
       'Emergency Contact Relationship','Emergency Contact Phone Number',
     ])
-    expect(employeeTemplateColumns).toHaveLength(35)
+    expect(employeeTemplateColumns).toHaveLength(38)
   })
 
   it('maps workbook aliases without assigning one source column to multiple targets silently', () => {

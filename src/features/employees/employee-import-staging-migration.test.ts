@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import migration from '../../../supabase/migrations/20261120005500_secure_employee_import_staging.sql?raw'
 import pendingBranchMigration from '../../../supabase/migrations/20261120005600_allow_pending_import_branch_assignment.sql?raw'
 import allowanceMigration from '../../../supabase/migrations/20261120005700_employee_import_allowance_components.sql?raw'
+import departmentValidationMigration from '../../../supabase/migrations/20261120005800_validate_staged_departments.sql?raw'
 
 describe('secure employee import staging migration contract', () => {
   it('is additive and retains the existing portfolio/company/branch and employee approval model', () => {
@@ -65,5 +66,16 @@ describe('secure employee import staging migration contract', () => {
     expect(allowanceMigration).toMatch(/grant execute on function public\.employee_import_submit_staged[\s\S]*?to authenticated/i)
     expect(allowanceMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
     expect(allowanceMigration).not.toMatch(/insert into public\.(payroll_runs|payroll_items|payroll_input_items)/i)
+  })
+
+  it('validates active department membership server-side without preventing incomplete staging', () => {
+    expect(departmentValidationMigration).toMatch(/create or replace function app_private\.employee_import_department_guard/i)
+    expect(departmentValidationMigration).toMatch(/security definer[\s\S]*?set search_path = pg_catalog[\s\S]*?set row_security = off/i)
+    expect(departmentValidationMigration).toMatch(/d\.company_id = new\.company_id[\s\S]*?d\.status = 'ACTIVE'[\s\S]*?lower\(btrim\(d\.name\)\) = lower\(v_department\)/i)
+    expect(departmentValidationMigration).toMatch(/new\.review_status = 'READY_FOR_APPROVAL'[\s\S]*?raise exception/i)
+    expect(departmentValidationMigration).toMatch(/new\.review_status := 'NEEDS_INFORMATION'/i)
+    expect(departmentValidationMigration).toMatch(/create trigger employee_import_department_guard/i)
+    expect(departmentValidationMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
+    expect(departmentValidationMigration).not.toMatch(/insert into public\.(employees|employee_compensation|payroll_runs|payroll_items)/i)
   })
 })

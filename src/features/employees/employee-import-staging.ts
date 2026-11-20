@@ -1,5 +1,5 @@
 import * as XLSX from '@e965/xlsx'
-import { dateForImport, isValidImportDate, liveImportFields, mapEmployeeColumns, normalizeImportHeader, preserveIdentifierText, type EmployeeFieldMapping } from './live-import-model'
+import { dateForImport, isValidImportDate, liveImportFields, mapEmployeeColumns, normalizeImportHeader, normalizeTemplateBank, preserveIdentifierText, type EmployeeFieldMapping } from './live-import-model'
 import { calculateGrossEarningsPreview, calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
 
 export type StagedWorkbookRow = {
@@ -59,11 +59,24 @@ function canonicalValue(key: string, value: unknown, formatted?: string): string
   if (key === 'employment_type') {
     const norm = normalizeEnum(text)
     if (norm === 'FIXED_TERM_CONTRACT') return 'FIXED_TERM'
-    if (norm === 'DAILY') return 'DAILY_RATED'
+    if (norm === 'DAILY' || norm === 'DAILY_RATED') return 'DAILY_RATED'
+    if (norm === 'PART_TIME') return 'PART_TIME'
     return norm
   }
   if (['salary_frequency'].includes(key)) return normalizeEnum(text)
-  if (key === 'gender') return normalizeEnum(text)
+  if (key === 'gender') {
+    const norm = normalizeEnum(text)
+    if (norm === 'M') return 'MALE'
+    if (norm === 'F') return 'FEMALE'
+    return norm
+  }
+  if (key === 'bank_name') return normalizeTemplateBank(text) ?? text
+  if (key === 'mobile_money_provider') {
+    const norm = normalizeEnum(text)
+    if (norm.includes('AIRTEL')) return 'AIRTEL'
+    if (norm.includes('MTN')) return 'MTN'
+    if (norm.includes('ZAMTEL')) return 'ZAMTEL'
+  }
   return text
 }
 
@@ -74,7 +87,7 @@ function amountValue(value: unknown): number | null {
 
 const payrollHeader = /allowance|lunch|meal|transport|medical|overtime|o\/t|earning|income|loan|advance|deduction|napsa|nhima|paye|levy|net pay|gross pay|bonus|commission|gratuity|arrears|reimburse|benefit|cash|bank|mobile|salary/i
 
-export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; branches: { id: string; name: string; status: string }[] }[], mappingOverrides: Record<string, EmployeeFieldMapping> = {}): WorkbookExtraction {
+export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; branches: { id: string; name: string; status: string }[] }[], mappingOverrides: Record<string, EmployeeFieldMapping> = {}, defaultCompanyId?: string): WorkbookExtraction {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellNF: true, dense: false })
   const records: StagedWorkbookRow[] = []
   const exclusions: WorkbookExtraction['exclusions'] = []
@@ -99,7 +112,7 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
       consolidatedReport = { worksheet: sheetName, employee_count: Number(numberOfEmployees) || null, basic_subtotal: amountValue(basicSubtotal), count_cell: 'D12', subtotal_cell: 'E12', broken_formulas: brokenFormulas }
       continue
     }
-    if (/^(instructions|readme|summary)$/i.test(sheetName.trim())) continue
+    if (/^(instructions|readme|summary|valid\s+values)$/i.test(sheetName.trim())) continue
     const sheet = workbook.Sheets[sheetName]
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '' })
     if (!matrix.length) continue
@@ -155,7 +168,8 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
       }
       const location = current.company_name
       const normalizedLocation = normalizeImportHeader(location)
-      const company = companies.find((item) => normalizeImportHeader(item.name) === normalizedLocation)
+      const matchedCompany = normalizedLocation ? companies.find((item) => normalizeImportHeader(item.name) === normalizedLocation) : undefined
+      const company = matchedCompany ?? (!normalizedLocation ? companies.find((item) => item.id === defaultCompanyId) : undefined)
       if (company) current.company_name = company.name
       const branchName = normalizeImportHeader(current.branch_name)
       const branch = company && branchName ? company.branches.find((item) => item.status.toLowerCase() === 'active' && normalizeImportHeader(item.name) === branchName) : undefined
@@ -281,6 +295,7 @@ export function validateStagedEmployee(data: Record<string, string>, companyId: 
   if (data.salary_frequency && !['MONTHLY','FORTNIGHTLY','WEEKLY','DAILY'].includes(data.salary_frequency)) errors.push('Salary frequency is not supported')
   if (data.payment_method && !['BANK_TRANSFER','MOBILE_MONEY','CASH'].includes(data.payment_method)) errors.push('Payment method is not supported')
   if (data.payment_method === 'BANK_TRANSFER' && (!data.bank_name || !data.bank_account_name || !data.bank_account_number)) errors.push('Bank details are required for bank transfer')
+  if (data.payment_method === 'BANK_TRANSFER' && data.bank_name && !normalizeTemplateBank(data.bank_name)) errors.push('Select a supported bank from the HR bank directory')
   if (data.payment_method === 'MOBILE_MONEY' && (!data.mobile_money_provider || !data.mobile_money_number)) errors.push('Mobile wallet details are required for mobile money')
   if (data.retirement_age?.trim() && (!/^\d{1,3}$/.test(data.retirement_age) || Number(data.retirement_age) < 18 || Number(data.retirement_age) > 100)) errors.push('Retirement age must be a whole number from 18 to 100')
   if (data.overtime_eligible?.trim() && !['true','false','yes','no','1','0','eligible','not eligible'].includes(data.overtime_eligible.trim().toLowerCase())) errors.push('Overtime eligibility must be yes or no')
