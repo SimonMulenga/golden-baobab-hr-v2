@@ -1,5 +1,5 @@
 import { act, render, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { UserNotificationRecord } from '../../services/live-operations-services'
 import { useRealtimeNotifications } from './useRealtimeNotifications'
@@ -26,6 +26,8 @@ const channel = {
 const client = { channel: vi.fn(() => channel), removeChannel: mocks.removeChannel } as unknown as SupabaseClient
 
 describe('real-time notification delivery', () => {
+  afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
+
   it('subscribes to the signed-in recipient and deduplicates repeated event delivery', async () => {
     mocks.list.mockResolvedValue({ items: [], total: 0, unreadTotal: 0 })
     const onNotification = vi.fn()
@@ -36,5 +38,16 @@ describe('real-time notification delivery', () => {
     expect(onNotification).toHaveBeenCalledTimes(1)
     expect(onNotification.mock.calls[0][0]).toMatchObject({ title: 'Payroll workflow updated', message: 'A status changed. Open Notifications to review the update.' })
     expect(JSON.stringify(onNotification.mock.calls[0][0])).not.toContain('Confidential salary detail')
+  })
+
+  it('keeps the bounded inbox refresh active while Realtime reports subscribed', async () => {
+    vi.useFakeTimers()
+    mocks.list.mockResolvedValue({ items: [], total: 0, unreadTotal: 0 })
+    render(<Harness onNotification={vi.fn()} />)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(mocks.status).toBeTypeOf('function')
+    expect(mocks.list).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(mocks.list).toHaveBeenCalledTimes(2)
   })
 })

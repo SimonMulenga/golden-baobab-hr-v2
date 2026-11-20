@@ -12,7 +12,6 @@ export function useRealtimeNotifications(client: SupabaseClient | null, userId: 
     let alive = true
     let hydrated = false
     let newestAt = ''
-    let realtimeConnected = false
     let fallbackTimer: number | undefined
     const seen = new Set<string>()
     const earlyEvents: UserNotificationRecord[] = []
@@ -48,11 +47,9 @@ export function useRealtimeNotifications(client: SupabaseClient | null, userId: 
     }
 
     const updateFallback = () => {
-      if (!alive || realtimeConnected) {
-        if (fallbackTimer !== undefined) window.clearInterval(fallbackTimer)
-        fallbackTimer = undefined
-        return
-      }
+      if (!alive) return
+      // Keep a bounded safety refresh even when the Realtime channel reports
+      // SUBSCRIBED: PostgreSQL Changes only emits for tables in the publication.
       if (fallbackTimer === undefined) fallbackTimer = window.setInterval(() => { if (document.visibilityState === 'visible') void refreshRecent() }, 30_000)
     }
 
@@ -65,7 +62,6 @@ export function useRealtimeNotifications(client: SupabaseClient | null, userId: 
         else deliver(item)
       })
       .subscribe((status) => {
-        realtimeConnected = status === 'SUBSCRIBED'
         updateFallback()
         if (status === 'SUBSCRIBED') {
           window.dispatchEvent(new Event('gbhr-notifications-changed'))
@@ -78,7 +74,7 @@ export function useRealtimeNotifications(client: SupabaseClient | null, userId: 
     const refreshOnReturn = () => {
       if (document.visibilityState === 'visible') {
         window.dispatchEvent(new Event('gbhr-notifications-changed'))
-        if (!realtimeConnected) void refreshRecent()
+        void refreshRecent()
       }
     }
     document.addEventListener('visibilitychange', refreshOnReturn)
