@@ -4,12 +4,14 @@ import { dataMode } from '../data-mode'
 export function validateSupabaseConfiguration(
   configuredUrl: string | undefined,
   configuredKey: string | undefined,
+  configuredProjectRef: string | undefined,
 ): { url: string; publishableKey: string } {
   const url = configuredUrl?.trim()
   const publishableKey = configuredKey?.trim()
-  if (!url || !publishableKey) {
+  const projectRef = configuredProjectRef?.trim()
+  if (!url || !publishableKey || !projectRef) {
     throw new Error(
-      'LIVE data mode requires VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY. Add them to your local environment before starting the app.',
+      'LIVE data mode requires VITE_SUPABASE_URL, VITE_SUPABASE_PROJECT_REF and VITE_SUPABASE_PUBLISHABLE_KEY. Add the verified project settings to your local environment before starting the app.',
     )
   }
 
@@ -46,6 +48,10 @@ export function validateSupabaseConfiguration(
     throw new Error('VITE_SUPABASE_PUBLISHABLE_KEY must be a Supabase publishable key or a legacy anon JWT.')
   }
 
+  if (!/^[a-z0-9]{20}$/.test(projectRef) || parsedUrl.hostname !== `${projectRef}.supabase.co`) {
+    throw new Error('VITE_SUPABASE_URL must match VITE_SUPABASE_PROJECT_REF for the authorized Golden Baobab HR project.')
+  }
+
   return { url: parsedUrl.toString().replace(/\/$/, ''), publishableKey }
 }
 
@@ -53,6 +59,7 @@ function requireLiveConfiguration(): { url: string; publishableKey: string } {
   return validateSupabaseConfiguration(
     import.meta.env.VITE_SUPABASE_URL,
     import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+    import.meta.env.VITE_SUPABASE_PROJECT_REF,
   )
 }
 
