@@ -189,6 +189,7 @@ button:disabled { cursor: not-allowed; }
   .welcome-row { align-items: flex-start; flex-wrap: wrap; margin-bottom: 20px; }
   .welcome-row h1, .page-heading h1, .employee-screen h1, .peopleops-screen h1, .payroll-screen h1, .company-screen h1 { font-size: 25px; }
   .welcome-actions { width: 100%; flex-wrap: wrap; }
+  .app-shell main .button-secondary { display: inline-flex; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .metric-card { min-height: 118px; padding: 14px; }
   .metric-value { font-size: 25px; }
