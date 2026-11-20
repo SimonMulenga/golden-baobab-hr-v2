@@ -19,6 +19,7 @@ const LiveEmployeeApprovals = lazy(() => import('./features/employees/LiveEmploy
 const LiveEmployeeForm = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeForm })))
 const LiveEmployeeProfile = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeProfile })))
 const LiveEmployeeImport = lazy(() => import('./features/employees/LiveEmployeeImport').then((module) => ({ default: module.LiveEmployeeImport })))
+const LiveEmployeeImportStaging = lazy(() => import('./features/employees/LiveEmployeeImportStaging').then((module) => ({ default: module.LiveEmployeeImportStaging })))
 const LiveAttendance = lazy(() => import('./features/people-ops/LiveAttendance').then((module) => ({ default: module.LiveAttendance })))
 const LiveLeave = lazy(() => import('./features/people-ops/LiveLeave').then((module) => ({ default: module.LiveLeave })))
 const LivePayrollInputs = lazy(() => import('./features/payroll/LivePayrollInputs').then((module) => ({ default: module.LivePayrollInputs })))
@@ -215,6 +216,7 @@ function AppShell() {
           <Route path="/employee-approvals" element={<LiveEmployeeApprovals />} />
           <Route path="/employees/new" element={<LiveEmployeeForm />} />
           <Route path="/employees/import" element={<LiveEmployeeImport />} />
+          <Route path="/employees/import/staging" element={<LiveEmployeeImportStaging />} />
           <Route path="/employees/:employeeId/correct" element={<LiveEmployeeForm />} />
           <Route path="/employees/:employeeId" element={<LiveEmployeeProfile />} />
           <Route path="/attendance" element={<LiveAttendance />} />

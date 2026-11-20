@@ -30,3 +30,9 @@ dist-ssr
 output/playwright/
 supabase/.temp/
 
+# Payroll workbooks can contain personal, statutory, and salary data.
+*.xlsx
+*.xls
+*.xlsm
+OCTOBER_PAYROLL_*.csv
+
