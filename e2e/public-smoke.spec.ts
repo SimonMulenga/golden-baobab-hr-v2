@@ -15,7 +15,7 @@ test('production entry routes a signed-out visitor to secure sign-in', async ({ 
 })
 
 const protectedPaths = [
-  '/companies', '/branches', '/employees', '/employees/import', '/employees/import/staging', '/employee-approvals', '/attendance', '/leave',
+  '/companies', '/branches', '/employees', '/employees/lifecycle', '/employees/import', '/employees/import/staging', '/employee-approvals', '/attendance', '/leave',
   '/departments', '/job-roles', '/payroll', '/payroll-approvals', '/payslips', '/reconciliation',
   '/deductions', '/statutory', '/reports', '/users', '/audit', '/notifications', '/settings',
 ]

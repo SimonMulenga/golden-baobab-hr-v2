@@ -19,7 +19,11 @@ export type EmployeeDirectoryRecord = {
   retirement_age: number;
   retirement_status: 'NOT_RETIRED' | 'RETIRED';
   approval_status: 'DRAFT' | 'SUBMITTED_FOR_HR_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RETURNED_FOR_CORRECTION';
-  employment_status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+  employment_status: 'ACTIVE' | 'SUSPENDED' | 'SEPARATED' | 'TERMINATED';
+  lifecycle_status?: 'ACTIVE' | 'SUSPENDED' | 'SEPARATED' | 'TERMINATED';
+  contract_expired?: boolean;
+  can_manage_lifecycle?: boolean;
+  can_approve_lifecycle?: boolean;
   submitted_at: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -319,6 +323,33 @@ export type EmployeeHistoryRecord = {
 export type EmploymentHistoryRecord = {
   id: number; previous_status: EmployeeDirectoryRecord['employment_status'];
   new_status: EmployeeDirectoryRecord['employment_status']; reason: string; occurred_at: string; actor_id: string;
+  effective_date?: string; action?: string; pay_classification?: 'PAID' | 'UNPAID' | null;
+  expected_return_date?: string | null; last_working_day?: string | null; notice_details?: string | null;
+  settlement_notes?: string | null; hr_notes?: string | null;
+};
+export type EmployeeLifecycleAction = 'SUSPENSION' | 'SUSPENSION_LIFTED' | 'SEPARATION' | 'TERMINATION' | 'REACTIVATION' | 'CONTRACT_RENEWAL';
+export type EmployeeLifecycleRequestRecord = {
+  id: string; employee_id: string; company_id: string; branch_id: string; action: EmployeeLifecycleAction;
+  separation_type?: 'RESIGNATION' | 'RETIREMENT' | 'MUTUAL_SEPARATION' | 'REDUNDANCY' | 'CONTRACT_COMPLETION' | 'OTHER' | null;
+  effective_date: string; previous_status: EmployeeDirectoryRecord['employment_status'];
+  resulting_status: EmployeeDirectoryRecord['employment_status']; reason: string;
+  pay_classification: 'PAID' | 'UNPAID' | null; expected_return_date: string | null; last_working_day: string | null;
+  notice_details: string | null; settlement_notes: string | null; hr_notes: string | null;
+  final_settlement_status: 'REVIEW_REQUIRED' | 'IN_PROGRESS' | 'APPROVED' | 'PAID' | null;
+  contract_type: string | null; contract_start_date: string | null; contract_end_date: string | null;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'; requested_by: string; reviewed_by: string | null;
+  created_at: string; reviewed_at: string | null; review_reason: string | null;
+};
+export type EmployeeLifecycleCapabilities = {
+  can_request: boolean; can_approve: boolean; can_reject: boolean;
+  status: EmployeeDirectoryRecord['employment_status']; contract_expired: boolean; contract_end_date: string | null; current_user_id: string;
+};
+export type EmployeeLifecycleMovementRecord = {
+  request_id: string; employee_id: string; employee_number: string; employee_name: string;
+  company_id: string; branch_id: string; department: string; action: EmployeeLifecycleAction;
+  effective_date: string; status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'; requested_by: string;
+  reviewed_by: string | null; created_at: string; reviewed_at: string | null; reason: string;
+  final_settlement_status: EmployeeLifecycleRequestRecord['final_settlement_status']; total_count: number;
 };
 export type CompanyAdminRecord = { user_id: string; email: string; display_name: string | null; role: 'COMPANY_ADMIN'; created_at: string; revoked_at: string | null };
 export type CompanyPayrollApproverRecord = Omit<CompanyAdminRecord, 'role'> & { role: 'COMPANY_PAYROLL_APPROVER' };
@@ -344,12 +375,17 @@ export type DeductionRequestInput = {
 
 export interface LiveBusinessServices {
   employees: {
-    list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter; departmentId?: string }): Promise<PageResult<EmployeeDirectoryRecord>>;
+    list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter; departmentId?: string; companyId?: string; lifecycleStatus?: string }): Promise<PageResult<EmployeeDirectoryRecord>>;
     byIds(ids: string[]): Promise<EmployeeDirectoryRecord[]>;
     byId(employeeId: string): Promise<EmployeeDirectoryRecord>;
     history(employeeId: string): Promise<EmployeeHistoryRecord[]>;
     employmentHistory(employeeId: string): Promise<EmploymentHistoryRecord[]>;
-    setEmploymentStatus(employeeId: string, status: EmployeeDirectoryRecord['employment_status'], reason: string): Promise<void>;
+    lifecycleCapabilities(employeeId: string): Promise<EmployeeLifecycleCapabilities>;
+    lifecycleRequests(employeeId: string): Promise<EmployeeLifecycleRequestRecord[]>;
+    createLifecycleRequest(employeeId: string, request: Record<string, string>): Promise<string>;
+    reviewLifecycleRequest(requestId: string, decision: 'APPROVE' | 'REJECT', reason?: string): Promise<void>;
+    lifecycleSummary(companyId?: string, branchId?: string): Promise<Record<string, number>>;
+    lifecycleMovements(request?: { page?: number; pageSize?: number; companyId?: string; branchId?: string; departmentId?: string; dateFrom?: string; dateTo?: string }): Promise<PageResult<EmployeeLifecycleMovementRecord>>;
     createDraft(input: EmployeeDraftInput): Promise<string>;
     correctionDetails(employeeId: string): Promise<EmployeeCorrectionDetails>;
     updateDraft(employeeId: string, input: Pick<EmployeeDraftInput, 'employee' | 'privateDetails' | 'compensation'>): Promise<string>;
@@ -489,18 +525,24 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
       async list(request = {}) {
         const page = Math.max(0, (request.page ?? 1) - 1);
         const pageSize = Math.min(100, Math.max(1, request.pageSize ?? 25));
-        let query = client.from('employees')
-          .select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at', { count: 'exact' })
-        if (request.companyId) query = query.eq('company_id', request.companyId);
-        if (request.branchId) query = query.eq('workplace_branch_id', request.branchId);
-        if (request.approvalStatus) query = query.eq('approval_status', request.approvalStatus);
-        if (request.departmentId) query = query.eq('department_id', request.departmentId);
-        if (request.search?.trim()) query = query.ilike('last_name', `%${request.search.trim()}%`);
-        query = query.order('last_name', { ascending: true })
-          .range(page * pageSize, page * pageSize + pageSize - 1);
-        const result = await query;
+        if (request.approvalStatus && request.approvalStatus !== 'APPROVED') {
+          let query = client.from('employees').select('id,portfolio_id,company_id,workplace_branch_id,employee_number,first_name,middle_name,last_name,job_title,department,employment_type,contract_type,contract_start_date,contract_end_date,retirement_age,retirement_status,approval_status,employment_status,submitted_at,reviewed_at,created_at', { count: 'exact' }).eq('approval_status', request.approvalStatus);
+          if (request.companyId) query = query.eq('company_id', request.companyId);
+          if (request.branchId) query = query.eq('workplace_branch_id', request.branchId);
+          if (request.departmentId) query = query.eq('department_id', request.departmentId);
+          if (request.search?.trim()) query = query.ilike('last_name', `%${request.search.trim()}%`);
+          const legacy = await query.order('last_name', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1);
+          if (legacy.error) throw legacy.error;
+          return { items: (legacy.data ?? []) as EmployeeDirectoryRecord[], total: legacy.count ?? 0 };
+        }
+        const result = await client.rpc('employee_lifecycle_roster', {
+          p_page: page + 1, p_page_size: pageSize, p_search: request.search?.trim() || null,
+          p_company_id: request.companyId ?? null, p_branch_id: request.branchId ?? null,
+          p_department_id: request.departmentId ?? null, p_status: request.lifecycleStatus ?? null,
+        });
         if (result.error) throw result.error;
-        return { items: (result.data ?? []) as EmployeeDirectoryRecord[], total: result.count ?? 0 };
+        const rows = (result.data ?? []) as (EmployeeDirectoryRecord & { lifecycle_status: EmployeeDirectoryRecord['employment_status']; contract_expired: boolean; can_manage_lifecycle: boolean; can_approve_lifecycle: boolean; total_count: number })[];
+        return { items: rows.map(({ lifecycle_status, contract_expired, can_manage_lifecycle, can_approve_lifecycle, ...row }) => ({ ...row, lifecycle_status, contract_expired, can_manage_lifecycle, can_approve_lifecycle })), total: Number(rows[0]?.total_count ?? 0) };
       },
       async byIds(ids) {
         if (ids.length === 0) return [];
@@ -529,14 +571,44 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
       },
       async employmentHistory(employeeId) {
         const result = await client.from('employee_employment_history')
-          .select('id,previous_status,new_status,reason,occurred_at,actor_id').eq('employee_id', employeeId)
+          .select('id,previous_status,new_status,reason,occurred_at,actor_id,effective_date,action,pay_classification,expected_return_date,last_working_day,notice_details,settlement_notes,hr_notes').eq('employee_id', employeeId)
           .order('occurred_at', { ascending: false }).range(0, 49);
         if (result.error) throw result.error;
         return (result.data ?? []) as EmploymentHistoryRecord[];
       },
-      async setEmploymentStatus(employeeId, status, reason) {
-        const result = await client.rpc('employee_set_employment_status', { p_employee_id: employeeId, p_status: status, p_reason: reason });
+      async lifecycleCapabilities(employeeId) {
+        const result = await client.rpc('employee_lifecycle_capabilities', { p_employee_id: employeeId });
         if (result.error) throw result.error;
+        return result.data as EmployeeLifecycleCapabilities;
+      },
+      async lifecycleRequests(employeeId) {
+        const result = await client.from('employee_lifecycle_requests').select('id,employee_id,company_id,branch_id,action,separation_type,effective_date,previous_status,resulting_status,reason,pay_classification,expected_return_date,last_working_day,notice_details,settlement_notes,hr_notes,final_settlement_status,contract_type,contract_start_date,contract_end_date,status,requested_by,reviewed_by,created_at,reviewed_at,review_reason').eq('employee_id',employeeId).order('created_at',{ascending:false}).limit(50);
+        if (result.error) throw result.error;
+        return (result.data ?? []) as EmployeeLifecycleRequestRecord[];
+      },
+      async createLifecycleRequest(employeeId, request) {
+        const result = await client.rpc('employee_lifecycle_request_create',{p_employee_id:employeeId,p_request:request});
+        if (result.error) throw result.error;
+        return result.data as string;
+      },
+      async reviewLifecycleRequest(requestId, decision, reason) {
+        const result = await client.rpc('employee_lifecycle_request_review',{p_request_id:requestId,p_decision:decision,p_reason:reason ?? null});
+        if (result.error) throw result.error;
+      },
+      async lifecycleSummary(companyId, branchId) {
+        const result = await client.rpc('employee_lifecycle_summary',{p_company_id:companyId ?? null,p_branch_id:branchId ?? null});
+        if (result.error) throw result.error;
+        return (result.data ?? {}) as Record<string, number>;
+      },
+      async lifecycleMovements(request = {}) {
+        const result = await client.rpc('employee_lifecycle_movement_report', {
+          p_page: Math.max(1, request.page ?? 1), p_page_size: Math.min(100, Math.max(1, request.pageSize ?? 50)),
+          p_company_id: request.companyId ?? null, p_branch_id: request.branchId ?? null,
+          p_department_id: request.departmentId ?? null, p_date_from: request.dateFrom ?? null, p_date_to: request.dateTo ?? null,
+        });
+        if (result.error) throw result.error;
+        const rows = (result.data ?? []) as EmployeeLifecycleMovementRecord[];
+        return { items: rows, total: Number(rows[0]?.total_count ?? 0) };
       },
       async createDraft(input) {
         return unwrap(await client.rpc('employee_create_draft', {

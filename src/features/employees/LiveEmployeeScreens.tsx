@@ -1,28 +1,81 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Check, ChevronLeft, ChevronRight, Download, History, Search, ShieldCheck, Upload, UserRoundX, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Check, ChevronLeft, ChevronRight, Download, History, Search, ShieldCheck, Upload, X } from 'lucide-react'
 import { formatWorkspaceDate, formatWorkspaceDateTime, useWorkspace } from '../companies/WorkspaceContext'
 import type { WorkspaceRole } from '../auth/workspace-access'
 import { getSupabaseClient } from '../../lib/supabase/client'
-import { createLiveBusinessServices, type EmployeeChangeCapabilities, type EmployeeChangeRequestRecord, type EmployeeDirectoryRecord, type EmployeeReviewDecision, type EmploymentHistoryRecord } from '../../services/live-business-services'
+import { createLiveBusinessServices, type EmployeeChangeCapabilities, type EmployeeChangeRequestRecord, type EmployeeDirectoryRecord, type EmployeeLifecycleAction, type EmployeeLifecycleCapabilities, type EmployeeLifecycleRequestRecord, type EmployeeReviewDecision, type EmploymentHistoryRecord } from '../../services/live-business-services'
 import { createLiveHrServices, type DepartmentRecord, type EmployeeDocumentRecord } from '../../services/live-hr-services'
 import { downloadEmployeeTemplate } from './employee-import-template'
 import { createEmployeeImportStagingService, type StagingRecord } from './employee-import-staging-service'
 import { validateStagedEmployee } from './employee-import-staging'
 import { LiveEmployeeImportStaging } from './LiveEmployeeImportStaging'
+import { RowActionsMenu } from '../../components/RowActionsMenu'
 import './live-employee-screens.css'
 import './live-employee-ui.css'
 import '../../module-modernization.css'
 
 const PAGE_SIZE = 25
 
+export function LiveEmployeeLifecycleReport() {
+  const { companies, activeCompanyId } = useWorkspace()
+  const [summary, setSummary] = useState<Record<string, number> | null>(null)
+  const [status, setStatus] = useState('')
+  const [branchId, setBranchId] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [records, setRecords] = useState<EmployeeDirectoryRecord[]>([])
+  const [movements, setMovements] = useState<Awaited<ReturnType<ReturnType<typeof createLiveBusinessServices>['employees']['lifecycleMovements']>>['items']>([])
+  const [departmentOptions, setDepartmentOptions] = useState<{ id: string; label: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const companyId = activeCompanyId === 'all' ? undefined : activeCompanyId
+  const scopedCompanies = useMemo(() => companyId ? companies.filter((item) => item.id === companyId) : companies, [companyId, companies])
+  const branchOptions = scopedCompanies.flatMap((company) => company.branches.filter((branch) => branch.status === 'Active').map((branch) => ({ id: branch.id, label: `${company.name} · ${branch.name}` })))
+  useEffect(() => {
+    let active = true
+    const catalog = createLiveHrServices(getSupabaseClient()).catalog
+    void Promise.all(scopedCompanies.map(async (company) => {
+      try { return (await catalog.departments(company.id)).filter((item) => item.status === 'ACTIVE').map((item) => ({ id: item.id, label: `${company.name} · ${item.name}` })) }
+      catch { return [] }
+    })).then((options) => { if (active) setDepartmentOptions(options.flat()) })
+    return () => { active = false }
+  }, [scopedCompanies])
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const service = createLiveBusinessServices(getSupabaseClient()).employees
+      const [nextSummary, nextRows, nextMovements] = await Promise.all([
+        service.lifecycleSummary(companyId, branchId || undefined),
+        service.list({ page: 1, pageSize: 100, ...(companyId ? { companyId } : {}), ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(status ? { lifecycleStatus: status } : {}) }),
+        service.lifecycleMovements({ page: 1, pageSize: 100, ...(companyId ? { companyId } : {}), ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(dateFrom ? { dateFrom } : {}), ...(dateTo ? { dateTo } : {}) }),
+      ])
+      setSummary(nextSummary); setRecords(nextRows.items); setMovements(nextMovements.items)
+    } catch { setError('Lifecycle data could not be loaded for your authorized scope.') }
+    finally { setLoading(false) }
+  }, [companyId, branchId, departmentId, dateFrom, dateTo, status])
+  useEffect(() => { void load() }, [load])
+  const cards = [['Active', 'active'], ['Suspended', 'suspended'], ['Separated', 'separated'], ['Terminated', 'terminated'], ['Expired contracts', 'contract_expired'], ['Expiring in 60 days', 'upcoming_expiry'], ['Settlements to review', 'final_settlement_review']]
+  return <div className="employee-screen"><section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> PEOPLE OPERATIONS</div><h1>Employment lifecycle</h1><p>Current employment status, contract dates and movement records in your authorized scope.</p></div><Link className="button-secondary" to="/employees">Employee directory</Link></section>
+    {error && <div className="auth-shell-error" role="alert">{error}<button className="button-secondary" onClick={() => void load()}>Retry</button></div>}
+    <section className="metrics-grid lifecycle-metrics" aria-label="Lifecycle summary">{cards.map(([label, key]) => <article className="metric-card" key={key}><div className="metric-label">{label}</div><div className="metric-value">{loading ? '—' : summary?.[key] ?? 0}</div></article>)}</section>
+    <section className="panel employee-directory-panel"><div className="employee-toolbar lifecycle-report-filters"><div><strong>Employee lifecycle records</strong><small>Expired contracts are flagged for review and are not treated as termination.</small></div><label className="employee-department-filter"><span>Employment status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All employees</option><option value="ACTIVE">Active</option><option value="SUSPENDED">Suspended</option><option value="SEPARATED">Separated</option><option value="TERMINATED">Terminated</option><option value="CONTRACT_EXPIRED">Contract expired</option></select></label><label className="employee-department-filter"><span>Branch</span><select value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All authorized branches</option>{branchOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><label className="employee-department-filter"><span>Department</span><select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}><option value="">All departments</option>{departmentOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label></div>
+      {loading ? <div className="employee-empty" role="status">Loading lifecycle records…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>Employee</th><th>Company</th><th>Contract</th><th>Lifecycle status</th><th>Details</th></tr></thead><tbody>{records.map((record) => { const company = companies.find((item) => item.id === record.company_id); const label = record.contract_expired ? 'CONTRACT EXPIRED' : (record.lifecycle_status ?? record.employment_status).replaceAll('_', ' '); return <tr key={record.id}><td><strong>{record.first_name} {record.last_name}</strong><small>{record.employee_number}</small></td><td>{company?.name ?? 'Authorized company'}</td><td>{record.contract_start_date} – {record.contract_end_date ?? 'Open-ended'}</td><td><span className={`approval-status status-${label.toLowerCase().replaceAll(' ', '-')}`}>{label}</span></td><td><Link className="button-secondary" to={`/employees/${record.id}`}>View history</Link></td></tr> })}</tbody></table></div> : <div className="employee-empty">No employees match this lifecycle filter.</div>}
+    </section>
+    <section className="panel employee-directory-panel lifecycle-movement-panel"><div className="employee-toolbar"><div><strong>Employee movement history</strong><small>Effective-dated requests and review outcomes; no private employee or compensation data.</small></div><label className="employee-date-filter"><span>From</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><label className="employee-date-filter"><span>To</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label><button className="button-secondary" onClick={() => void load()}>Apply dates</button></div>{loading ? <div className="employee-empty" role="status">Loading movement history…</div> : movements.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>Effective</th><th>Employee</th><th>Company / Branch</th><th>Department</th><th>Action</th><th>Review status</th><th>Reason</th></tr></thead><tbody>{movements.map((movement) => { const company = companies.find((item) => item.id === movement.company_id); const branch = company?.branches.find((item) => item.id === movement.branch_id); return <tr key={movement.request_id}><td>{movement.effective_date}</td><td><strong>{movement.employee_name}</strong><small>{movement.employee_number}</small></td><td>{company?.name ?? 'Authorized company'}<small>{branch?.name ?? 'Authorized branch'}</small></td><td>{movement.department}</td><td>{movement.action.replaceAll('_', ' ')}</td><td><span className={`approval-status status-${movement.status.toLowerCase()}`}>{movement.status.replaceAll('_', ' ')}</span></td><td>{movement.reason}</td></tr> })}</tbody></table></div> : <div className="employee-empty">No lifecycle movements match this date and organization scope.</div>}</section>
+  </div>
+}
+
 export function LiveEmployeeDirectory() {
   const { companies } = useWorkspace()
+  const navigate = useNavigate()
   const [records, setRecords] = useState<EmployeeDirectoryRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [departmentId, setDepartmentId] = useState('')
+  const [lifecycleStatus, setLifecycleStatus] = useState('')
   const [departmentOptions, setDepartmentOptions] = useState<{ id: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -41,7 +94,7 @@ export function LiveEmployeeDirectory() {
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current
     try {
-      const result = await createLiveBusinessServices(getSupabaseClient()).employees.list({ page, pageSize: PAGE_SIZE, search, ...(departmentId ? { departmentId } : {}) })
+      const result = await createLiveBusinessServices(getSupabaseClient()).employees.list({ page, pageSize: PAGE_SIZE, search, ...(departmentId ? { departmentId } : {}), ...(lifecycleStatus ? { lifecycleStatus } : {}) })
       if (generation !== requestGeneration.current) return
       setRecords(result.items)
       setTotal(result.total)
@@ -50,20 +103,44 @@ export function LiveEmployeeDirectory() {
     } finally {
       if (generation === requestGeneration.current) setLoading(false)
     }
-  }, [page, search, departmentId])
+  }, [page, search, departmentId, lifecycleStatus])
 
   useEffect(() => { const timer = window.setTimeout(() => { void load() }, 0); return () => { window.clearTimeout(timer); requestGeneration.current += 1 } }, [load])
 
   return <div className="employee-screen">
     <section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> PEOPLE DIRECTORY</div><h1>Employees</h1><p>Employee records available to your account.</p></div><div className="live-employee-actions"><button className="button-secondary" type="button" onClick={downloadEmployeeTemplate}><Download size={15}/> Employee Template</button><Link className="button-secondary" to="/employee-approvals">Review submissions</Link><Link className="button-secondary" to="/employees/import"><Upload size={15}/> Bulk Upload Employees</Link><Link className="button-primary" to="/employees/new">Add employee</Link></div></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Personal identity, contact, banking, and compensation details are not included in this directory view.</div>
+    <div className="live-employee-actions"><Link className="button-secondary" to="/employees/lifecycle">Employment lifecycle report</Link></div>
     <section className="panel employee-directory-panel">
-      <div className="employee-toolbar"><div><strong>{total} employees</strong><small>Current employee records in your authorized scope</small></div><label className="employee-department-filter"><span>Department</span><select aria-label="Filter employees by department" value={departmentId} onChange={(event) => { setLoading(true); setError(''); setDepartmentId(event.target.value); setPage(1) }}><option value="">All departments</option>{departmentOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search employees"/></label></div>
+      <div className="employee-toolbar"><div><strong>{total} employees</strong><small>Current employee records in your authorized scope</small></div><label className="employee-department-filter"><span>Department</span><select aria-label="Filter employees by department" value={departmentId} onChange={(event) => { setLoading(true); setError(''); setDepartmentId(event.target.value); setPage(1) }}><option value="">All departments</option>{departmentOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label><label className="employee-department-filter"><span>Employment status</span><select aria-label="Filter employees by lifecycle status" value={lifecycleStatus} onChange={(event) => { setLoading(true); setError(''); setLifecycleStatus(event.target.value); setPage(1) }}><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="SUSPENDED">Suspended</option><option value="SEPARATED">Separated</option><option value="TERMINATED">Terminated</option><option value="CONTRACT_EXPIRED">Contract expired</option></select></label><label className="employee-search"><Search size={15}/><input value={search} onChange={(event) => { setLoading(true); setError(''); setSearch(event.target.value); setPage(1) }} placeholder="Search last name..." aria-label="Search employees"/></label></div>
       {error && <div className="auth-shell-error" role="alert">{error} <button className="button-secondary" onClick={() => { setLoading(true); setError(''); void load() }}>Retry</button></div>}
-      {loading ? <div className="employee-empty" role="status">Loading employee records…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>ROLE</th><th>CONTRACT</th><th>STATUS</th></tr></thead><tbody>{records.map((record) => {
+      {loading ? <div className="employee-empty" role="status">Loading employee records…</div> : records.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>EMPLOYEE</th><th>COMPANY / BRANCH</th><th>ROLE</th><th>CONTRACT</th><th>STATUS</th><th>Actions</th></tr></thead><tbody>{records.map((record) => {
         const company = companies.find((item) => item.id === record.company_id)
         const branch = company?.branches.find((item) => item.id === record.workplace_branch_id)
-        return <tr key={record.id}><td><Link className="employee-profile-link" to={`/employees/${record.id}`}><strong>{record.first_name} {record.middle_name ? `${record.middle_name} ` : ''}{record.last_name}</strong><small>{record.employee_number}</small></Link></td><td><strong>{company?.name ?? 'Company unavailable'}</strong><small>{branch?.name ?? 'Branch unavailable'}</small></td><td><strong>{record.job_title}</strong><small>{record.department}</small></td><td><strong>{record.employment_type}</strong><small>{record.contract_type}</small></td><td><span className={`approval-status status-${record.approval_status.toLowerCase().replaceAll('_', '-')}`}>{record.approval_status.replaceAll('_', ' ')}</span>{['DRAFT', 'RETURNED_FOR_CORRECTION'].includes(record.approval_status) && <Link className="employee-correction-link" to={`/employees/${record.id}/correct`}>{record.approval_status === 'DRAFT' ? 'Edit draft' : 'Correct and resubmit'}</Link>}</td></tr>
+        const status = record.contract_expired ? 'CONTRACT EXPIRED' : (record.lifecycle_status ?? record.employment_status).replaceAll('_', ' ')
+        const lifecycle = record.lifecycle_status ?? record.employment_status
+        const actions = [
+          { label: 'View Employee', onSelect: () => navigate(`/employees/${record.id}`) },
+          { label: 'Edit Employee', onSelect: () => navigate(`/employees/${record.id}`) },
+          { label: 'View Employment History', onSelect: () => navigate(`/employees/${record.id}#employment-history`) },
+          ...(record.can_manage_lifecycle && lifecycle === 'ACTIVE' ? [
+            { label: 'Suspend Employee', onSelect: () => navigate(`/employees/${record.id}?lifecycle=SUSPENSION`) },
+            { label: 'Separate Employee', onSelect: () => navigate(`/employees/${record.id}?lifecycle=SEPARATION`) },
+            { label: 'Terminate Employment', onSelect: () => navigate(`/employees/${record.id}?lifecycle=TERMINATION`) },
+          ] : []),
+          ...(record.can_manage_lifecycle && lifecycle === 'SUSPENDED' ? [
+            { label: 'Lift Suspension', onSelect: () => navigate(`/employees/${record.id}?lifecycle=SUSPENSION_LIFTED`) },
+            { label: 'Separate Employee', onSelect: () => navigate(`/employees/${record.id}?lifecycle=SEPARATION`) },
+            { label: 'Terminate Employment', onSelect: () => navigate(`/employees/${record.id}?lifecycle=TERMINATION`) },
+          ] : []),
+          ...(record.can_manage_lifecycle && ['SEPARATED', 'TERMINATED'].includes(lifecycle) ? [
+            { label: 'Reactivate Employee', onSelect: () => navigate(`/employees/${record.id}?lifecycle=REACTIVATION`) },
+          ] : []),
+          ...(record.can_manage_lifecycle && record.contract_expired ? [
+            { label: 'Review Contract Expiry', onSelect: () => navigate(`/employees/${record.id}?lifecycle=CONTRACT_RENEWAL`) },
+          ] : []),
+        ]
+        return <tr key={record.id}><td><Link className="employee-profile-link" to={`/employees/${record.id}`}><strong>{record.first_name} {record.middle_name ? `${record.middle_name} ` : ''}{record.last_name}</strong><small>{record.employee_number}</small></Link></td><td><strong>{company?.name ?? 'Company unavailable'}</strong><small>{branch?.name ?? 'Branch unavailable'}</small></td><td><strong>{record.job_title}</strong><small>{record.department}</small></td><td><strong>{record.employment_type}</strong><small>{record.contract_type}</small></td><td><span className={`approval-status status-${status.toLowerCase().replaceAll(' ', '-')}`}>{status}</span>{['DRAFT', 'RETURNED_FOR_CORRECTION'].includes(record.approval_status) && <Link className="employee-correction-link" to={`/employees/${record.id}/correct`}>{record.approval_status === 'DRAFT' ? 'Edit draft' : 'Correct and resubmit'}</Link>}</td><td><RowActionsMenu label={`${record.employee_number} employee actions`} actions={actions}/></td></tr>
       })}</tbody></table></div> : <div className="employee-empty"><strong>No employee records found</strong><span>Records appear here after a permitted onboarding workflow stores them.</span></div>}
       <footer className="employee-pagination"><span>Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><div><button className="button-secondary" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => { setLoading(true); setPage((value) => Math.max(1, value - 1)) }}><ChevronLeft size={15}/></button><button className="button-secondary" aria-label="Next page" disabled={page >= Math.max(1, Math.ceil(total / PAGE_SIZE)) || loading} onClick={() => { setLoading(true); setPage((value) => value + 1) }}><ChevronRight size={15}/></button></div></footer>
     </section>
@@ -72,13 +149,10 @@ export function LiveEmployeeDirectory() {
 
 export function LiveEmployeeProfile() {
   const { employeeId = '' } = useParams<{ employeeId: string }>()
+  const [searchParams] = useSearchParams()
   const { companies, preferences } = useWorkspace()
   const [loadedProfile, setLoadedProfile] = useState<{ id: string; employee: EmployeeDirectoryRecord; history: Awaited<ReturnType<ReturnType<typeof createLiveBusinessServices>['employees']['history']>>; employmentHistory: EmploymentHistoryRecord[] } | null>(null)
   const [loadFailure, setLoadFailure] = useState<{ id: string; message: string } | null>(null)
-  const [statusReason, setStatusReason] = useState('')
-  const [statusError, setStatusError] = useState('')
-  const [statusNotice, setStatusNotice] = useState('')
-  const [statusBusy, setStatusBusy] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -97,28 +171,114 @@ export function LiveEmployeeProfile() {
 
   const company = companies.find((item) => item.id === employee.company_id)
   const branch = company?.branches.find((item) => item.id === employee.workplace_branch_id)
-  const changeEmploymentStatus = async (status: EmployeeDirectoryRecord['employment_status']) => {
-    setStatusError(''); setStatusNotice('')
-    if (!statusReason.trim()) { setStatusError('Enter a reason for this employment status change.'); return }
-    setStatusBusy(true)
-    try {
-      const service = createLiveBusinessServices(getSupabaseClient()).employees
-      await service.setEmploymentStatus(employee.id, status, statusReason.trim())
-      const [updated, updatedHistory] = await Promise.all([service.byId(employee.id), service.employmentHistory(employee.id)])
-      setLoadedProfile((current) => current?.id === employeeId ? { ...current, employee: updated, employmentHistory: updatedHistory } : current)
-      setStatusReason(''); setStatusNotice('Employment status and audit history were updated.');
-    } catch { setStatusError('Status was not changed. Verify your role, reason, and current employee state, then retry.') }
-    finally { setStatusBusy(false) }
-  }
   return <div className="employee-screen"><section className="welcome-row employee-welcome"><div><div className="eyebrow"><span className="eyebrow-line"/> AUTHORIZED EMPLOYEE RECORD</div><h1>{employee.first_name} {employee.middle_name ? `${employee.middle_name} ` : ''}{employee.last_name}</h1><p>{employee.employee_number} · {employee.job_title} · {employee.department}</p></div><div className="live-employee-actions"><Link className="button-secondary" to="/employees">Directory</Link>{['DRAFT', 'RETURNED_FOR_CORRECTION'].includes(employee.approval_status) && <Link className="button-primary" to={`/employees/${employee.id}/correct`}>{employee.approval_status === 'DRAFT' ? 'Edit draft' : 'Correct and resubmit'}</Link>}</div></section>
     <div className="live-data-notice"><ShieldCheck size={15}/> Private identifiers, banking details and compensation are available only in their designated secure workflows.</div>
     <section className="employee-profile-grid"><article className="panel employee-profile-card"><div className="section-eyebrow">EMPLOYMENT</div><dl><div><dt>Company</dt><dd>{company?.name ?? 'Company unavailable'}</dd></div><div><dt>Workplace branch</dt><dd>{branch?.name ?? 'Branch unavailable'}</dd></div><div><dt>Employee number</dt><dd>{employee.employee_number}</dd></div><div><dt>Position</dt><dd>{employee.job_title}</dd></div><div><dt>Department</dt><dd>{employee.department}</dd></div><div><dt>Employment type</dt><dd>{employee.employment_type.replaceAll('_', ' ')}</dd></div><div><dt>Contract type</dt><dd>{employee.contract_type}</dd></div><div><dt>Start date</dt><dd>{formatWorkspaceDate(employee.contract_start_date, preferences)}</dd></div><div><dt>Contract end</dt><dd>{employee.contract_end_date ? formatWorkspaceDate(employee.contract_end_date, preferences) : 'Not specified'}</dd></div><div><dt>Approval workflow</dt><dd><span className={`approval-status status-${employee.approval_status.toLowerCase().replaceAll('_', '-')}`}>{employee.approval_status.replaceAll('_', ' ')}</span></dd></div><div><dt>Employment status</dt><dd><span className={`approval-status status-${employee.employment_status.toLowerCase()}`}>{employee.employment_status}</span></dd></div><div><dt>Retirement age setting</dt><dd>{employee.retirement_age} years · {employee.retirement_status.replaceAll('_', ' ')}</dd></div><div><dt>Record created</dt><dd>{formatWorkspaceDateTime(employee.created_at, preferences)}</dd></div></dl>
-      {employee.approval_status === 'APPROVED' && employee.employment_status !== 'TERMINATED' && <div className="employee-status-editor"><h3>Employment status</h3><p>Changes require an authorized role and are recorded for audit. Termination cannot be reversed through this screen.</p><label>Reason<input value={statusReason} onChange={(event) => setStatusReason(event.target.value)} maxLength={500} placeholder="Document the reason for this change" /></label><div className="live-employee-actions">{employee.employment_status !== 'ACTIVE' && <button className="button-secondary" disabled={statusBusy} onClick={() => void changeEmploymentStatus('ACTIVE')}>Reactivate</button>}{employee.employment_status !== 'SUSPENDED' && <button className="button-secondary" disabled={statusBusy} onClick={() => void changeEmploymentStatus('SUSPENDED')}>Suspend</button>}<button className="button-secondary" disabled={statusBusy} onClick={() => { if (window.confirm('Terminate this employee? This action is permanent in the current workflow.')) void changeEmploymentStatus('TERMINATED') }}><UserRoundX size={14}/> Terminate</button></div>{statusError && <div className="auth-shell-error" role="alert">{statusError}</div>}{statusNotice && <div className="import-success" role="status">{statusNotice}</div>}</div>}
-      {employmentHistory.length > 0 && <div className="employee-history-card"><header><div className="section-eyebrow">EMPLOYMENT STATUS HISTORY</div></header><ol>{employmentHistory.map((event) => <li key={event.id}><span className="employee-history-dot"/><div><strong>{event.previous_status} → {event.new_status}</strong><small>{formatWorkspaceDateTime(event.occurred_at, preferences)} · {event.actor_id.slice(0, 8)}…</small><p>{event.reason}</p></div></li>)}</ol></div>}
+      {employmentHistory.length > 0 && <div id="employment-history" className="employee-history-card"><header><div className="section-eyebrow">EMPLOYMENT STATUS HISTORY</div></header><ol>{employmentHistory.map((event) => <li key={event.id}><span className="employee-history-dot"/><div><strong>{event.action?.replaceAll('_', ' ') ?? `${event.previous_status} → ${event.new_status}`}</strong><small>{formatWorkspaceDate(event.effective_date ?? event.occurred_at, preferences)} · recorded {formatWorkspaceDateTime(event.occurred_at, preferences)}</small><p>{event.reason}</p></div></li>)}</ol></div>}
       </article><article className="panel employee-history-card"><header><div className="section-eyebrow">REVIEW AND CHANGE HISTORY</div><History size={18}/></header>{history.length ? <ol>{history.map((event) => <li key={event.id}><span className="employee-history-dot"/><div><strong>{event.action.replaceAll('_', ' ')}</strong><small>{formatWorkspaceDateTime(event.occurred_at, preferences)} · {event.actor_id.slice(0, 8)}…</small>{event.reason && <p>{event.reason}</p>}</div></li>)}</ol> : <div className="employee-empty">No history events are visible yet.</div>}</article></section>
     <EmployeeDocuments employee={employee}/>
+    {employee.approval_status === 'APPROVED' && <EmployeeLifecyclePanel employee={employee} initialAction={searchParams.get('lifecycle')} />}
     {employee.approval_status === 'APPROVED' && <ApprovedChangeRequestPanel employee={employee} />}
   </div>
+}
+
+function EmployeeLifecyclePanel({ employee, initialAction }: { employee: EmployeeDirectoryRecord; initialAction: string | null }) {
+  const service = useMemo(() => createLiveBusinessServices(getSupabaseClient()).employees, [])
+  const [capabilities, setCapabilities] = useState<EmployeeLifecycleCapabilities | null>(null)
+  const [requests, setRequests] = useState<EmployeeLifecycleRequestRecord[]>([])
+  const lifecycleActions: EmployeeLifecycleAction[] = ['SUSPENSION', 'SUSPENSION_LIFTED', 'SEPARATION', 'TERMINATION', 'REACTIVATION', 'CONTRACT_RENEWAL']
+  const [action, setAction] = useState<EmployeeLifecycleAction>(() => lifecycleActions.includes(initialAction as EmployeeLifecycleAction) ? initialAction as EmployeeLifecycleAction : 'SUSPENSION')
+  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10))
+  const [reason, setReason] = useState('')
+  const [separationType, setSeparationType] = useState('RESIGNATION')
+  const [payClassification, setPayClassification] = useState<'PAID' | 'UNPAID'>('UNPAID')
+  const [expectedReturnDate, setExpectedReturnDate] = useState('')
+  const [lastWorkingDay, setLastWorkingDay] = useState('')
+  const [noticeDetails, setNoticeDetails] = useState('')
+  const [settlementNotes, setSettlementNotes] = useState('')
+  const [hrNotes, setHrNotes] = useState('')
+  const [contractType, setContractType] = useState(employee.contract_type)
+  const [contractStartDate, setContractStartDate] = useState('')
+  const [contractEndDate, setContractEndDate] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const refresh = useCallback(async () => {
+    const [nextCapabilities, nextRequests] = await Promise.all([
+      service.lifecycleCapabilities(employee.id), service.lifecycleRequests(employee.id),
+    ])
+    setCapabilities(nextCapabilities)
+    setRequests(nextRequests)
+  }, [employee.id, service])
+
+  useEffect(() => { void refresh().catch(() => setError('Lifecycle details are unavailable for your current access.')) }, [refresh])
+
+  const availableActions = useMemo<EmployeeLifecycleAction[]>(() => capabilities?.status === 'ACTIVE'
+    ? ['SUSPENSION', 'SEPARATION', 'TERMINATION', 'CONTRACT_RENEWAL']
+    : capabilities?.status === 'SUSPENDED'
+      ? ['SUSPENSION_LIFTED', 'SEPARATION', 'TERMINATION', 'CONTRACT_RENEWAL']
+      : ['REACTIVATION', 'CONTRACT_RENEWAL'], [capabilities?.status])
+  useEffect(() => {
+    if (capabilities && !availableActions.includes(action)) setAction(availableActions[0])
+  }, [action, availableActions, capabilities])
+  const labels: Record<EmployeeLifecycleAction, string> = {
+    SUSPENSION: 'Suspend employee', SUSPENSION_LIFTED: 'Lift suspension', SEPARATION: 'Separate employee',
+    TERMINATION: 'Terminate employment', REACTIVATION: 'Reactivate employee', CONTRACT_RENEWAL: 'Renew or extend contract',
+  }
+  const actionNeedsContract = action === 'CONTRACT_RENEWAL' || (action === 'REACTIVATION' && capabilities?.contract_expired)
+
+  const submitRequest = async (event: FormEvent) => {
+    event.preventDefault(); setError(''); setNotice('')
+    if (!reason.trim()) { setError('Enter the reason for this lifecycle request.'); return }
+    setBusy(true)
+    try {
+      await service.createLifecycleRequest(employee.id, {
+        action, effective_date: effectiveDate, reason: reason.trim(),
+        ...(action === 'SEPARATION' ? { separation_type: separationType } : {}),
+        ...(action === 'SUSPENSION' ? { pay_classification: payClassification, expected_return_date: expectedReturnDate } : {}),
+        ...(['SEPARATION', 'TERMINATION'].includes(action) ? { last_working_day: lastWorkingDay, notice_details: noticeDetails } : {}),
+        ...(actionNeedsContract ? { contract_type: contractType, contract_start_date: contractStartDate, contract_end_date: contractEndDate } : {}),
+        settlement_notes: settlementNotes, hr_notes: hrNotes,
+      })
+      setReason(''); setNotice('Lifecycle request submitted for separate authorized review.')
+      await refresh()
+    } catch { setError('The request was not saved. Check your permission, dates, reason and any pending lifecycle request, then retry.') }
+    finally { setBusy(false) }
+  }
+
+  const review = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
+    const reviewReason = decision === 'REJECT' ? window.prompt('Enter the reason for rejecting this request:') : undefined
+    if (decision === 'REJECT' && !reviewReason?.trim()) return
+    if (decision === 'APPROVE' && !window.confirm('Approve this effective-dated employee lifecycle request? Payroll drafts that overlap may require recalculation.')) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await service.reviewLifecycleRequest(requestId, decision, reviewReason?.trim())
+      setNotice(decision === 'APPROVE' ? 'Lifecycle request approved and recorded.' : 'Lifecycle request rejected and retained in history.')
+      await refresh()
+    } catch { setError('The lifecycle decision was not recorded. Verify your approval permission and request status.') }
+    finally { setBusy(false) }
+  }
+
+  return <section className="panel employee-status-editor" aria-labelledby="employee-lifecycle-heading">
+    <div className="section-eyebrow">EMPLOYMENT LIFECYCLE</div><h2 id="employee-lifecycle-heading">Status, contracts and history</h2>
+    <p>Effective status: <strong>{capabilities?.status?.replaceAll('_', ' ') ?? 'Loading'}</strong>. Requests are effective-dated and require a different authorized reviewer. Expired contracts are flagged for review; they do not terminate employment automatically.</p>
+    {capabilities?.contract_expired && <div className="auth-shell-error" role="status">Contract expired on {capabilities.contract_end_date}. Review or record an authorized renewal before future payroll eligibility.</div>}
+    {capabilities ? capabilities.can_request ? <form className="employee-form-grid employee-lifecycle-form" onSubmit={(event) => void submitRequest(event)}>
+      <label>Lifecycle action<select value={action} onChange={(event) => setAction(event.target.value as EmployeeLifecycleAction)}>{availableActions.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></label>
+      <label>Effective date<input required type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></label>
+      {action === 'SUSPENSION' && <><label>Suspension pay classification<select value={payClassification} onChange={(event) => setPayClassification(event.target.value as 'PAID' | 'UNPAID')}><option value="UNPAID">Unpaid</option><option value="PAID">Paid</option></select></label><label>Expected return date (optional)<input type="date" value={expectedReturnDate} onChange={(event) => setExpectedReturnDate(event.target.value)} /></label><p className="form-hint">Paid suspension payroll remains blocked until an approved company pay policy is configured.</p></>}
+      {action === 'SEPARATION' && <label>Separation type<select value={separationType} onChange={(event) => setSeparationType(event.target.value)}><option value="RESIGNATION">Resignation</option><option value="RETIREMENT">Retirement</option><option value="MUTUAL_SEPARATION">Mutual separation</option><option value="REDUNDANCY">Redundancy</option><option value="CONTRACT_COMPLETION">Contract completion</option><option value="OTHER">Other</option></select></label>}
+      {['SEPARATION', 'TERMINATION'].includes(action) && <><label>Last working day<input required type="date" value={lastWorkingDay} onChange={(event) => setLastWorkingDay(event.target.value)} /></label><label>Notice period details<textarea value={noticeDetails} onChange={(event) => setNoticeDetails(event.target.value)} rows={2} maxLength={1000} /></label></>}
+      {actionNeedsContract && <><label>Contract type<input required value={contractType} onChange={(event) => setContractType(event.target.value)} maxLength={100} /></label><label>Contract start date<input required type="date" value={contractStartDate} onChange={(event) => setContractStartDate(event.target.value)} /></label><label>Contract end date (optional)<input type="date" value={contractEndDate} onChange={(event) => setContractEndDate(event.target.value)} /></label></>}
+      <label className="full-width">Reason<textarea required value={reason} onChange={(event) => setReason(event.target.value)} rows={3} minLength={3} maxLength={2000} /></label>
+      <label className="full-width">Final settlement notes (review only; no amount is calculated here)<textarea value={settlementNotes} onChange={(event) => setSettlementNotes(event.target.value)} rows={2} maxLength={2000} /></label>
+      <label className="full-width">Additional HR notes<textarea value={hrNotes} onChange={(event) => setHrNotes(event.target.value)} rows={2} maxLength={2000} /></label>
+      <div className="live-employee-actions full-width"><button className="button-primary" type="submit" disabled={busy || !capabilities}>Submit for approval</button></div>
+    </form> : <p>You may view lifecycle history. A user with employee status management permission is required to submit changes.</p> : <p role="status">Checking lifecycle permissions…</p>}
+    {error && <div className="auth-shell-error" role="alert">{error}</div>}{notice && <div className="import-success" role="status">{notice}</div>}
+    <h3>Lifecycle requests</h3>{requests.length ? <div className="table-scroll"><table className="employee-table"><thead><tr><th>Action</th><th>Effective date</th><th>Status</th><th>Requested</th><th>Review</th></tr></thead><tbody>{requests.map((request) => { const mayReview = request.status === 'PENDING_APPROVAL' && request.requested_by !== capabilities?.current_user_id; return <tr key={request.id}><td>{labels[request.action]}{request.separation_type && <small>{request.separation_type.replaceAll('_', ' ')}</small>}<small>{request.reason}</small></td><td>{request.effective_date}{request.last_working_day && <small>Last day {request.last_working_day}</small>}</td><td><span className={`approval-status status-${request.status.toLowerCase()}`}>{request.status.replaceAll('_', ' ')}</span>{request.final_settlement_status && <small>Settlement: {request.final_settlement_status.replaceAll('_', ' ')}</small>}</td><td>{request.created_at.slice(0, 10)}</td><td>{mayReview && capabilities?.can_approve && <button className="button-secondary" disabled={busy} onClick={() => void review(request.id, 'APPROVE')}>Approve</button>}{mayReview && capabilities?.can_reject && <button className="button-secondary" disabled={busy} onClick={() => void review(request.id, 'REJECT')}>Reject</button>}{request.review_reason && <small>{request.review_reason}</small>}</td></tr> })}</tbody></table></div> : <div className="employee-empty">No lifecycle requests recorded.</div>}
+  </section>
 }
 
 function ApprovedChangeRequestPanel({ employee }: { employee: EmployeeDirectoryRecord }) {

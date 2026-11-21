@@ -23,6 +23,7 @@ const LiveEmployeeDirectory = lazy(() => import('./features/employees/LiveEmploy
 const LiveEmployeeApprovals = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeApprovals })))
 const LiveEmployeeForm = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeForm })))
 const LiveEmployeeProfile = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeProfile })))
+const LiveEmployeeLifecycleReport = lazy(() => import('./features/employees/LiveEmployeeScreens').then((module) => ({ default: module.LiveEmployeeLifecycleReport })))
 const LiveEmployeeImport = lazy(() => import('./features/employees/LiveEmployeeImport').then((module) => ({ default: module.LiveEmployeeImport })))
 const LiveAttendance = lazy(() => import('./features/people-ops/LiveAttendance').then((module) => ({ default: module.LiveAttendance })))
 const LiveLeave = lazy(() => import('./features/people-ops/LiveLeave').then((module) => ({ default: module.LiveLeave })))
@@ -47,7 +48,7 @@ import './premium-system.css'
 
 const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },
-  { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employee Import', path: '/employees/import', icon: FileText }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Job roles', path: '/job-roles', icon: BriefcaseBusiness }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
+  { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employment Lifecycle', path: '/employees/lifecycle', icon: Activity }, { name: 'Employee Import', path: '/employees/import', icon: FileText }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Job roles', path: '/job-roles', icon: BriefcaseBusiness }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
   { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Pending payroll approval', path: '/payroll-approvals', icon: ClipboardCheck }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
   { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
@@ -88,7 +89,7 @@ function AppShell() {
     return () => navigator.serviceWorker.removeEventListener('message', handleWorkerMessage)
   }, [navigate])
   const routeName = nav.flatMap((section) => section.items).find((item) => item.path === location.pathname)?.name
-  const currentName = routeName ?? (location.pathname === '/companies/new' ? 'Add company' : location.pathname.endsWith('/edit') ? 'Edit company' : location.pathname.startsWith('/companies/') ? 'Company details' : location.pathname === '/employees/new' ? 'Add employee' : location.pathname.endsWith('/correct') ? 'Review employee' : location.pathname.startsWith('/employees/import') ? 'Employee import' : location.pathname.startsWith('/employees/') ? 'Employee profile' : location.pathname === '/auth/login' ? 'Sign in' : location.pathname === '/job-roles' ? 'Job roles' : 'Page not found')
+  const currentName = routeName ?? (location.pathname === '/companies/new' ? 'Add company' : location.pathname.endsWith('/edit') ? 'Edit company' : location.pathname.startsWith('/companies/') ? 'Company details' : location.pathname === '/employees/new' ? 'Add employee' : location.pathname.endsWith('/correct') ? 'Review employee' : location.pathname === '/employees/lifecycle' ? 'Employment Lifecycle' : location.pathname.startsWith('/employees/import') ? 'Employee import' : location.pathname.startsWith('/employees/') ? 'Employee profile' : location.pathname === '/auth/login' ? 'Sign in' : location.pathname === '/job-roles' ? 'Job roles' : 'Page not found')
   const currentCompany = companies.find((company) => company.id === activeCompanyId)
   const workspaceName = activeCompanyId === 'all' ? 'All companies' : currentCompany?.name ?? 'Company workspace'
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
@@ -267,6 +268,7 @@ function AppShell() {
           <Route path="/companies/:companyId" element={<CompanyProfile />} />
           <Route path="/branches" element={<BranchManagement />} />
           <Route path="/employees" element={<LiveEmployeeDirectory />} />
+          <Route path="/employees/lifecycle" element={<LiveEmployeeLifecycleReport />} />
           <Route path="/employee-approvals" element={<LiveEmployeeApprovals roles={roleContext.roles} />} />
           <Route path="/employees/new" element={<LiveEmployeeForm />} />
           <Route path="/employees/import" element={<LiveEmployeeImport />} />
