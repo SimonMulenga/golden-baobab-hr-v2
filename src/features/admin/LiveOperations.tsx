@@ -5,6 +5,7 @@ import { useCompanySelection, useWorkspace, type WorkspacePreferences } from '..
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveOperationsServices, type UserNotificationRecord, type WorkspaceSettingsRecord } from '../../services/live-operations-services'
 import { getNotificationPreference, notificationsInAppText, playNotificationChime, setNotificationPreference } from '../notifications/notification-preferences'
+import { currentPushSubscription, disablePush, enablePush, pushAvailability, sendPushTest } from '../notifications/web-push'
 import './live-operations.css'
 import '../../module-modernization.css'
 
@@ -24,6 +25,9 @@ export function LiveNotifications({ userId }: { userId?: string }) {
   const [soundEnabled, setSoundEnabled] = useState(() => userId ? getNotificationPreference(userId, 'sound') : false)
   const [systemEnabled, setSystemEnabled] = useState(() => userId ? getNotificationPreference(userId, 'system') : false)
   const [permission, setPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushAvailabilityState] = useState(() => pushAvailability())
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -33,6 +37,37 @@ export function LiveNotifications({ userId }: { userId?: string }) {
     finally { setLoading(false) }
   }, [page, unreadOnly])
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    let mounted = true
+    if (userId && pushAvailabilityState.supported) void currentPushSubscription().then((subscription) => { if (mounted) setPushEnabled(Boolean(subscription)) }).catch(() => undefined)
+    return () => { mounted = false }
+  }, [userId, pushAvailabilityState.supported])
+  const changePush = async () => {
+    if (!userId || pushBusy) return
+    setPushBusy(true); setError(''); setNotice('')
+    try {
+      if (pushEnabled) {
+        await disablePush(getSupabaseClient())
+        setPushEnabled(false)
+        setNotice('Background notifications are disabled for this device.')
+      } else {
+        await enablePush(getSupabaseClient())
+        setPermission(Notification.permission)
+        setPushEnabled(true)
+        setNotice('Background notifications are enabled for this device.')
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Background notifications could not be updated.') }
+    finally { setPushBusy(false) }
+  }
+  const testPush = async () => {
+    if (!pushEnabled || pushBusy) return
+    setPushBusy(true); setError(''); setNotice('')
+    try {
+      const sent = await sendPushTest(getSupabaseClient())
+      setNotice(sent > 0 ? 'A test notification was sent to this device.' : 'No active push subscription was found for this account.')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'The test notification could not be sent.') }
+    finally { setPushBusy(false) }
+  }
   const setRead = async (item: UserNotificationRecord, read: boolean) => {
     setBusyId(item.id); setError(''); setNotice('')
     try { await createLiveOperationsServices(getSupabaseClient()).notifications.setRead(item.id, read); await load(); setNotice(read ? 'Notification marked as read.' : 'Notification marked unread.') }
@@ -48,6 +83,8 @@ export function LiveNotifications({ userId }: { userId?: string }) {
       <div className="pwa-setting-row"><div className="pwa-setting-copy"><strong>Notification sound</strong><span>A short, quiet chime plays for new in-app workflow updates.</span></div><button className="button-secondary" type="button" aria-pressed={soundEnabled} onClick={() => { const enabled = !soundEnabled; setSoundEnabled(enabled); setNotificationPreference(userId, 'sound', enabled); if (enabled) void playNotificationChime() }}>{soundEnabled ? 'Sound on' : 'Sound off'}</button></div>
       <div className="pwa-setting-row"><div className="pwa-setting-copy"><strong>Desktop and device notifications</strong><span>System alerts use generic text and never include employee or payroll details.</span></div><button className="button-secondary" type="button" aria-pressed={systemEnabled && permission === 'granted'} disabled={permission === 'denied'} onClick={async () => { if (permission === 'granted') { const enabled = !systemEnabled; setSystemEnabled(enabled); setNotificationPreference(userId, 'system', enabled); return } if (!('Notification' in window)) return; const result = await Notification.requestPermission(); setPermission(result); const enabled = result === 'granted'; setSystemEnabled(enabled); setNotificationPreference(userId, 'system', enabled) }}>{permission === 'granted' ? (systemEnabled ? 'Device alerts on' : 'Device alerts off') : permission === 'denied' ? 'Blocked in browser' : 'Enable device alerts'}</button></div>
       {permission === 'denied' && <span className="pwa-permission-note">Notifications are blocked in this browser. Change the site permission in browser settings, then return here.</span>}
+      <div className="pwa-setting-row"><div className="pwa-setting-copy"><strong>Background notifications</strong><span>{pushAvailabilityState.supported ? 'Receive generic workflow alerts when this app is minimized or closed.' : pushAvailabilityState.reason}</span></div><div className="live-notification-actions"><button className="button-secondary" type="button" disabled={!pushAvailabilityState.supported || permission === 'denied' || pushBusy} aria-pressed={pushEnabled} onClick={() => void changePush()}>{pushBusy ? 'Working…' : pushEnabled ? 'Disable on this device' : 'Enable background notifications'}</button><button className="button-secondary" type="button" disabled={!pushEnabled || pushBusy} onClick={() => void testPush()}>Test notification</button></div></div>
+      {permission === 'denied' && pushAvailabilityState.supported && <span className="pwa-permission-note">Background notifications are blocked by browser settings. Allow notifications for this site, then return here.</span>}
     </section>}
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-notice" role="status">{notice}</p>}
     <div className="live-notification-tabs"><button className={!unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(false) }}>All</button><button className={unreadOnly ? 'active' : ''} onClick={() => { setPage(1); setUnreadOnly(true) }}>Unread ({unreadTotal})</button></div>

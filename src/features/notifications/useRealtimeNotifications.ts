@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLiveOperationsServices, type UserNotificationRecord } from '../../services/live-operations-services'
 import { getNotificationPreference, notificationsInAppText, playNotificationChime, showSafeSystemNotification } from './notification-preferences'
+import { hasPushSubscription } from './web-push'
 
 export function useRealtimeNotifications(client: SupabaseClient | null, userId: string | undefined, onNotification: (notification: UserNotificationRecord) => void) {
   const onNotificationRef = useRef(onNotification)
@@ -25,7 +26,9 @@ export function useRealtimeNotifications(client: SupabaseClient | null, userId: 
       onNotificationRef.current({ ...item, ...safeText })
       window.dispatchEvent(new Event('gbhr-notifications-changed'))
       if (getNotificationPreference(userId, 'sound')) void playNotificationChime()
-      if (getNotificationPreference(userId, 'system') && document.visibilityState !== 'visible') void showSafeSystemNotification()
+      if (getNotificationPreference(userId, 'system') && document.visibilityState !== 'visible') {
+        void hasPushSubscription().then((pushActive) => { if (!pushActive) return showSafeSystemNotification() })
+      }
     }
 
     const refreshRecent = async () => {
