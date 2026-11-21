@@ -21,4 +21,11 @@ describe('PWA safety contract', () => {
     expect(worker).not.toMatch(/addEventListener\(['"]fetch['"]|caches\.(?:open|match|put)/)
     expect(worker).toContain('GBHR_APPLY_UPDATE')
   })
+
+  it('shows only a generic push notification and opens the protected inbox route', () => {
+    expect(worker).toContain("addEventListener('push'")
+    expect(worker).toContain("body: 'You have a new HR workflow update. Sign in to review it.'")
+    expect(worker).toContain("data: { path: '/notifications' }")
+    expect(worker).not.toMatch(/employee_number|salary|bank_account|nrc/i)
+  })
 })

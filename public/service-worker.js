@@ -15,6 +15,17 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'GBHR_APPLY_UPDATE') self.skipWaiting()
 })
 
+self.addEventListener('push', (event) => {
+  // Push payloads intentionally contain no employee, payroll, or source IDs.
+  event.waitUntil(self.registration.showNotification('Golden Baobab HR', {
+    body: 'You have a new HR workflow update. Sign in to review it.',
+    icon: '/pwa-icon-192.png',
+    badge: '/pwa-icon-192.png',
+    tag: 'gbhr-workflow-update',
+    data: { path: '/notifications' },
+  }))
+})
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   event.waitUntil((async () => {
