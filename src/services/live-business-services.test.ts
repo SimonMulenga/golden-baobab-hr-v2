@@ -139,30 +139,36 @@ describe('live Supabase business service adapter', () => {
   })
 
   it('filters employee pages by a selected company department within RLS-visible rows', async () => {
-    const range = vi.fn(async () => ({ data: [], count: 0, error: null }))
-    const filter = vi.fn()
-    const builder: any = { eq: filter, ilike: vi.fn(() => builder), order: vi.fn(() => builder), range }
-    const query = { select: vi.fn(() => builder) }
-    filter.mockImplementation(() => builder)
-    const from = vi.fn(() => query)
-    const services = createLiveBusinessServices({ from } as unknown as SupabaseClient)
+    const rpc = vi.fn(async () => ({ data: [], error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
     await services.employees.list({ page: 1, pageSize: 25, search: '', departmentId: 'department-qa' })
-    expect(from).toHaveBeenCalledWith('employees')
-    expect(filter).toHaveBeenCalledWith('department_id', 'department-qa')
-    expect(range).toHaveBeenCalledWith(0, 24)
+    expect(rpc).toHaveBeenCalledWith('employee_lifecycle_roster', {
+      p_page: 1, p_page_size: 25, p_search: null, p_company_id: null, p_branch_id: null,
+      p_department_id: 'department-qa', p_status: null,
+    })
   })
 
-  it('routes company administrator changes and employee status transitions through scoped RPCs', async () => {
+  it('routes company administrator changes and lifecycle requests through scoped RPCs', async () => {
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));
     const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient);
     await services.companyAdmins.assign('portfolio-1', 'company-1', 'user-2');
     await services.companyAdmins.revoke('portfolio-1', 'company-1', 'user-2', 'Synthetic review');
     await services.companyAdmins.list('portfolio-1', 'company-1');
-    await services.employees.setEmploymentStatus('employee-1', 'SUSPENDED', 'Synthetic review');
+    await services.employees.createLifecycleRequest('employee-1', { action: 'SUSPENSION', effective_date: '2026-11-21', reason: 'Synthetic review', pay_classification: 'UNPAID' });
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
-      'assign_company_admin', 'revoke_company_admin', 'company_admin_members', 'employee_set_employment_status',
+      'assign_company_admin', 'revoke_company_admin', 'company_admin_members', 'employee_lifecycle_request_create',
     ]);
   });
+
+  it('requests the tenant-filtered lifecycle movement report with a bounded page and date scope', async () => {
+    const rpc = vi.fn(async () => ({ data: [{ request_id: 'request-synthetic', total_count: 1 }], error: null }))
+    const services = createLiveBusinessServices({ rpc } as unknown as SupabaseClient)
+    await expect(services.employees.lifecycleMovements({ companyId: 'company-qa', branchId: 'branch-qa', dateFrom: '2026-01-01', dateTo: '2026-12-31' })).resolves.toMatchObject({ total: 1 })
+    expect(rpc).toHaveBeenCalledWith('employee_lifecycle_movement_report', {
+      p_page: 1, p_page_size: 50, p_company_id: 'company-qa', p_branch_id: 'branch-qa',
+      p_department_id: null, p_date_from: '2026-01-01', p_date_to: '2026-12-31',
+    })
+  })
 
   it('routes payroll approver administration through company-scoped RPCs', async () => {
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null }));

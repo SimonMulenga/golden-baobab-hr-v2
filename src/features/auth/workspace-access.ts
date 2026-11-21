@@ -27,11 +27,15 @@ export function visibleWorkspaceRoutes(roles: WorkspaceRole[]): Set<string> {
     ['/employees', '/payroll', '/payslips', '/reports'].forEach((path) => routes.add(path))
   }
   if (roles.some((role) => ['COMPANY_PAYROLL_APPROVER', 'COMPANY_PAYROLL_REVIEWER'].includes(role))) routes.add('/payroll-approvals')
+  if (roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))) {
+    routes.add('/employees/lifecycle')
+  }
   return routes
 }
 
 export function roleCanOpenPath(routes: Set<string>, path: string): boolean {
   if (path.startsWith('/employees/import') && !routes.has('/employees/import')) return false
+  if (path === '/employees/lifecycle' && !routes.has('/employees/lifecycle')) return false
   if ((path === '/companies/new' || path.startsWith('/companies/new/')) && !routes.has('/companies/new')) return false
   return [...routes].some((allowed) => path === allowed || (allowed !== '/' && path.startsWith(`${allowed}/`)))
 }

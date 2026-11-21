@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
-const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), setEmploymentStatus: vi.fn(), reviewSubmission: vi.fn(), reviewSubmissions: vi.fn(), approvalQueueSummary: vi.fn(), changeCapabilities: vi.fn(), requestApprovedChange: vi.fn(), pendingChangeRequests: vi.fn(), reviewChangeRequest: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
+const serviceMocks = vi.hoisted(() => ({ list: vi.fn(), byId: vi.fn(), history: vi.fn(), employmentHistory: vi.fn(), lifecycleCapabilities: vi.fn(), lifecycleRequests: vi.fn(), createLifecycleRequest: vi.fn(), reviewLifecycleRequest: vi.fn(), lifecycleSummary: vi.fn(), reviewSubmission: vi.fn(), reviewSubmissions: vi.fn(), approvalQueueSummary: vi.fn(), changeCapabilities: vi.fn(), requestApprovedChange: vi.fn(), pendingChangeRequests: vi.fn(), reviewChangeRequest: vi.fn(), createDraft: vi.fn(), correctionDetails: vi.fn(), updateDraft: vi.fn(), submitForHrApproval: vi.fn() }))
 const workspaceMocks = vi.hoisted(() => ({ companies: [] as unknown[], activeCompanyId: 'company-synthetic', setActiveCompany: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 vi.mock('../../services/live-business-services', () => ({
@@ -54,7 +54,11 @@ describe('LIVE employee screens', () => {
     serviceMocks.byId.mockResolvedValue(employee)
     serviceMocks.history.mockResolvedValue([{ id: 1, action: 'SUBMITTED', reason: null, occurred_at: '2026-10-28T07:00:00Z', actor_id: 'synthetic-actor-1' }])
     serviceMocks.employmentHistory.mockResolvedValue([])
-    serviceMocks.setEmploymentStatus.mockResolvedValue(undefined)
+    serviceMocks.lifecycleCapabilities.mockResolvedValue({ can_request: false, can_approve: false, can_reject: false, status: 'ACTIVE', contract_expired: false, contract_end_date: null, current_user_id: 'reviewer-synthetic' })
+    serviceMocks.lifecycleRequests.mockResolvedValue([])
+    serviceMocks.createLifecycleRequest.mockResolvedValue('lifecycle-synthetic-1')
+    serviceMocks.reviewLifecycleRequest.mockResolvedValue(undefined)
+    serviceMocks.lifecycleSummary.mockResolvedValue({ active: 0, suspended: 0, separated: 0, terminated: 0, contract_expired: 0, upcoming_expiry: 0, final_settlement_review: 0 })
     serviceMocks.reviewSubmission.mockResolvedValue('employee-synthetic-1')
     serviceMocks.reviewSubmissions.mockResolvedValue([])
     serviceMocks.approvalQueueSummary.mockResolvedValue({ total_pending: 1, ready_for_approval: 1, needs_correction: 0, approved: 0, rejected: 0, approval_eligible: 1, rejection_eligible: 1 })
@@ -81,15 +85,15 @@ describe('LIVE employee screens', () => {
     expect(serviceMocks.list).toHaveBeenCalledWith({ page: 1, pageSize: 25, search: '' })
   })
 
-  it('requires a reason and submits employment status changes through the trusted service', async () => {
+  it('submits effective-dated lifecycle changes for independent review, not immediate status mutation', async () => {
     serviceMocks.byId.mockResolvedValue({ ...employee, approval_status: 'APPROVED' })
+    serviceMocks.lifecycleCapabilities.mockResolvedValue({ can_request: true, can_approve: false, can_reject: false, status: 'ACTIVE', contract_expired: false, contract_end_date: null, current_user_id: 'requester-synthetic' })
     renderProfileRoute()
-    expect(await screen.findByRole('heading', { name: 'Employment status' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Suspend' }))
-    expect(await screen.findByText(/Enter a reason/)).toBeInTheDocument()
-    fireEvent.change(screen.getByPlaceholderText('Document the reason for this change'), { target: { value: 'Synthetic policy review' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Suspend' }))
-    await waitFor(() => expect(serviceMocks.setEmploymentStatus).toHaveBeenCalledWith(employee.id, 'SUSPENDED', 'Synthetic policy review'))
+    expect(await screen.findByRole('heading', { name: 'Status, contracts and history' })).toBeInTheDocument()
+    await screen.findByLabelText('Lifecycle action')
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Synthetic policy review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
+    await waitFor(() => expect(serviceMocks.createLifecycleRequest).toHaveBeenCalledWith(employee.id, expect.objectContaining({ action: 'SUSPENSION', reason: 'Synthetic policy review', pay_classification: 'UNPAID' })))
   })
 
   it('shows approved-record employment and compensation actions only when existing capabilities allow them', async () => {
@@ -116,7 +120,7 @@ describe('LIVE employee screens', () => {
   it('does not render approved-record edit controls when database capabilities deny access', async () => {
     serviceMocks.byId.mockResolvedValue({ ...employee, approval_status: 'APPROVED' })
     renderProfileRoute()
-    await screen.findByRole('heading', { name: 'Employment status' })
+    await screen.findByRole('heading', { name: 'Status, contracts and history' })
     expect(screen.queryByRole('heading', { name: 'Edit employee or request a salary change' })).not.toBeInTheDocument()
     expect(serviceMocks.requestApprovedChange).not.toHaveBeenCalled()
   })

@@ -24,6 +24,7 @@ describe('role scoped navigation', () => {
     expect(roleCanOpenPath(routes, '/branches')).toBe(true)
     expect(roleCanOpenPath(routes, '/employees')).toBe(true)
     expect(roleCanOpenPath(routes, '/employees/import')).toBe(true)
+    expect(roleCanOpenPath(routes, '/employees/lifecycle')).toBe(false)
     expect(roleCanOpenPath(routes, '/attendance')).toBe(true)
     expect(roleCanOpenPath(routes, '/leave')).toBe(true)
     expect(roleCanOpenPath(routes, '/payroll')).toBe(true)
@@ -36,6 +37,7 @@ describe('role scoped navigation', () => {
   it('keeps HR workflows but hides super administrator setup', () => {
     const routes = visibleWorkspaceRoutes(['OVERALL_HR_MANAGER'])
     expect(roleCanOpenPath(routes, '/employees/import')).toBe(true)
+    expect(roleCanOpenPath(routes, '/employees/lifecycle')).toBe(true)
     expect(roleCanOpenPath(routes, '/employee-approvals')).toBe(true)
     expect(roleCanOpenPath(routes, '/companies/new')).toBe(false)
     expect(roleCanOpenPath(routes, '/users')).toBe(false)
@@ -46,6 +48,7 @@ describe('role scoped navigation', () => {
     const routes = visibleWorkspaceRoutes(['BRANCH_MANAGER'])
     expect(roleCanOpenPath(routes, '/employees/new')).toBe(true)
     expect(roleCanOpenPath(routes, '/employees/import')).toBe(false)
+    expect(roleCanOpenPath(routes, '/employees/lifecycle')).toBe(false)
     expect(roleCanOpenPath(routes, '/attendance')).toBe(true)
     expect(roleCanOpenPath(routes, '/payroll')).toBe(true)
     expect(roleCanOpenPath(routes, '/employee-approvals')).toBe(false)

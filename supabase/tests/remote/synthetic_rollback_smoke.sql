@@ -352,10 +352,14 @@ begin
 end $$;
 
 do $$
-declare v_employee_id uuid; v_inputs jsonb;
+declare v_employee_id uuid; v_lifecycle_request uuid; v_inputs jsonb;
 begin
   select id into strict v_employee_id from public.employees where employee_number = 'REMOTE-SMOKE-EMP-1';
-  perform public.employee_set_employment_status(v_employee_id, 'SUSPENDED', 'Synthetic status workflow verification');
+  perform set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  v_lifecycle_request:=public.employee_lifecycle_request_create(v_employee_id,jsonb_build_object(
+    'action','SUSPENSION','effective_date','2026-10-01','reason','Synthetic status workflow verification','pay_classification','UNPAID'));
+  perform set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  perform public.employee_lifecycle_request_review(v_lifecycle_request,'APPROVE',null);
   if (select employment_status from public.employees where id = v_employee_id) <> 'SUSPENDED'
     or (select count(*) from public.employee_employment_history where employee_id = v_employee_id and previous_status = 'ACTIVE' and new_status = 'SUSPENDED') <> 1 then
     raise exception 'Employment status change or history was not recorded.';
@@ -365,7 +369,11 @@ begin
   if exists (select 1 from jsonb_array_elements(v_inputs->'items') item where item->>'employee_number' = 'REMOTE-SMOKE-EMP-1') then
     raise exception 'Suspended employee remained eligible in the payroll input preview.';
   end if;
-  perform public.employee_set_employment_status(v_employee_id, 'ACTIVE', 'Synthetic return to active status');
+  perform set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  v_lifecycle_request:=public.employee_lifecycle_request_create(v_employee_id,jsonb_build_object(
+    'action','SUSPENSION_LIFTED','effective_date','2026-11-01','reason','Synthetic return to active status'));
+  perform set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  perform public.employee_lifecycle_request_review(v_lifecycle_request,'APPROVE',null);
   if (select employment_status from public.employees where id = v_employee_id) <> 'ACTIVE'
     or (select count(*) from public.employee_employment_history where employee_id = v_employee_id) <> 2 then
     raise exception 'Allowed reactivation from suspended status did not retain both history events.';
@@ -414,10 +422,14 @@ end $$;
 -- idempotent payout-instruction preparation. All fixtures remain rollback-only.
 select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
 do $$
-declare v_unpaid_employee uuid;
+declare v_unpaid_employee uuid; v_lifecycle_request uuid;
 begin
   select id into strict v_unpaid_employee from public.employees where employee_number='REMOTE-SMOKE-CORRECTION-1';
-  perform public.employee_set_employment_status(v_unpaid_employee,'SUSPENDED','Exclude synthetic unpaid-leave case from this monthly acceptance run');
+  perform set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  v_lifecycle_request:=public.employee_lifecycle_request_create(v_unpaid_employee,jsonb_build_object(
+    'action','SUSPENSION','effective_date','2026-10-01','reason','Exclude synthetic unpaid-leave case from this monthly acceptance run','pay_classification','UNPAID'));
+  perform set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  perform public.employee_lifecycle_request_review(v_lifecycle_request,'APPROVE',null);
 end $$;
 
 select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
@@ -652,8 +664,16 @@ begin
   exception when insufficient_privilege then null;
   end;
 end $$;
-select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
-select public.employee_set_employment_status((select id from public.employees where employee_number='REMOTE-SMOKE-CORRECTION-1'),'ACTIVE','Restore synthetic employee after payroll workflow test');
+do $$
+declare v_employee_id uuid; v_lifecycle_request uuid;
+begin
+  select id into strict v_employee_id from public.employees where employee_number='REMOTE-SMOKE-CORRECTION-1';
+  perform set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  v_lifecycle_request:=public.employee_lifecycle_request_create(v_employee_id,jsonb_build_object(
+    'action','SUSPENSION_LIFTED','effective_date',current_date,'reason','Restore synthetic employee after payroll workflow test'));
+  perform set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  perform public.employee_lifecycle_request_review(v_lifecycle_request,'APPROVE',null);
+end $$;
 
 
 
