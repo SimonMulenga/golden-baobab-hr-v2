@@ -1,0 +1,15 @@
+.payslip-access-page{min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--app-bg,#f4f7f8)}
+.payslip-access-card{width:min(100%,460px);padding:32px;border:1px solid var(--border,#dce5e7);border-radius:18px;background:var(--surface,#fff);box-shadow:0 18px 50px #123d4912;display:grid;gap:16px}
+.payslip-access-mark{width:48px;height:48px;border-radius:14px;background:#e5f2ef;color:#167c72;display:grid;place-items:center}
+.payslip-access-eyebrow{display:flex;align-items:center;gap:7px;color:#167c72;font-size:11px;font-weight:750;letter-spacing:.08em}
+.payslip-access-card h1{margin:0;color:var(--text-primary,#17313a);font-size:26px}
+.payslip-access-card>p{margin:0;color:var(--text-muted,#5f7077);line-height:1.55}
+.payslip-access-card form{display:grid;gap:14px}
+.payslip-access-card label{display:grid;gap:6px;color:var(--text-primary,#17313a);font-size:13px;font-weight:650}
+.payslip-access-card input{width:100%;min-width:0;height:44px;padding:0 12px;border:1px solid var(--border,#dce5e7);border-radius:9px;background:var(--surface,#fff);color:var(--text-primary,#17313a);font:inherit}
+.payslip-access-card input:focus-visible{outline:3px solid #178a8244;border-color:#178a82}
+.payslip-access-card .button-primary{min-height:46px;justify-content:center}
+.payslip-access-error,.payslip-access-notice{padding:11px 12px;border-radius:9px;font-size:13px;line-height:1.45}
+.payslip-access-error{background:#fff0ef;color:#922b25}.payslip-access-notice{background:#eaf5ef;color:#236b44}
+.payslip-access-card footer{border-top:1px solid var(--border,#dce5e7);padding-top:14px;color:var(--text-muted,#5f7077);font-size:11px;line-height:1.45}
+@media(max-width:480px){.payslip-access-page{padding:14px}.payslip-access-card{padding:22px;border-radius:14px}}

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
-import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type PayslipStatementDetails } from '../../services/live-business-services'
+import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type LiveBusinessServices, type PayslipDistributionRecord, type PayslipEmailEventRecord, type PayslipStatementDetails } from '../../services/live-business-services'
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { buildPayslipView } from './payslip-model'
 import './live-payslips.css'
@@ -30,11 +30,14 @@ export function LivePayslips() {
   const [artifactOwner, setArtifactOwner] = useState('')
   const [signedUrl, setSignedUrl] = useState('')
   const [deliveryRows, setDeliveryRows] = useState<Array<{ id: string; status: string; attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null }>>([])
+  const [deliveryEvents, setDeliveryEvents] = useState<PayslipEmailEventRecord[]>([])
   const [statementDetails, setStatementDetails] = useState<PayslipStatementDetails | null>(null)
   const [statementDetailsOwner, setStatementDetailsOwner] = useState('')
   const [statementDetailsState, setStatementDetailsState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [artifactBusy, setArtifactBusy] = useState(false)
   const [deliveryClock, setDeliveryClock] = useState(0)
+  const [payslipView, setPayslipView] = useState<'PREVIEW' | 'DISTRIBUTION'>('PREVIEW')
+  const requestedPreviewEmployee = useRef('')
   const selectedRun = runs.find((run) => run.id === runId)
   const selectedRunId = selectedRun?.id
   const selectedRunVersion = selectedRun?.version
@@ -47,7 +50,7 @@ export function LivePayslips() {
   const model = useMemo(() => selectedRun && selectedItem && selectedEmployee && company
     ? buildPayslipView({ company, branch: company.branches.find((branch) => branch.id === selectedRun.branch_id), employee: selectedEmployee, run: selectedRun, item: selectedItem, statementDetails: currentStatementDetails })
     : null, [selectedRun, selectedItem, selectedEmployee, company, currentStatementDetails])
-  const api = () => createLiveBusinessServices(getSupabaseClient())
+  const api = useMemo(() => createLiveBusinessServices(getSupabaseClient()), [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setDeliveryClock(Date.now()), 15_000)
@@ -57,7 +60,7 @@ export function LivePayslips() {
   useEffect(() => {
     if (!companyId) return
     let cancelled = false
-    api().payslips.finalizedRuns(companyId, branchId === 'all' ? undefined : branchId)
+    api.payslips.finalizedRuns(companyId, branchId === 'all' ? undefined : branchId)
       .then((result) => { if (!cancelled) { setError(''); setRuns(result); setLoadingItems(Boolean(result[0])); setRunId(result[0]?.id ?? '') } })
       .catch(() => { if (!cancelled) { setRuns([]); setError('Finalized payroll records could not be loaded for this company and access scope.') } })
       .finally(() => { if (!cancelled) setLoadingRuns(false) })
@@ -67,11 +70,14 @@ export function LivePayslips() {
   useEffect(() => {
     if (!selectedRunId || selectedRunVersion == null) return
     let cancelled = false
-    api().payslips.finalizedItems(selectedRunId, selectedRunVersion, page)
+    api.payslips.finalizedItems(selectedRunId, selectedRunVersion, page)
       .then(async (result) => {
-        const employeeRows = await api().employees.byIds(result.items.map((item) => item.employee_id))
+        const employeeRows = await api.employees.byIds(result.items.map((item) => item.employee_id))
         if (cancelled) return
-        setItems(result.items); setTotal(result.total); setEmployees(employeeRows); setEmployeeId(result.items[0]?.employee_id ?? '')
+        setItems(result.items); setTotal(result.total); setEmployees(employeeRows)
+        setEmployeeId(result.items.some((item) => item.employee_id === requestedPreviewEmployee.current)
+          ? requestedPreviewEmployee.current : result.items[0]?.employee_id ?? '')
+        requestedPreviewEmployee.current = ''
       })
       .catch(() => { if (!cancelled) setError('Finalized payslip lines are unavailable under the current payroll and employee permissions.') })
       .finally(() => { if (!cancelled) setLoadingItems(false) })
@@ -85,7 +91,7 @@ export function LivePayslips() {
     setStatementDetails(null)
     setStatementDetailsOwner('')
     setStatementDetailsState('loading')
-    api().payslips.statementDetails(selectedRunId, selectedItem.employee_id)
+    api.payslips.statementDetails(selectedRunId, selectedItem.employee_id)
       .then((result) => { if (!cancelled) { setStatementDetails(result); setStatementDetailsOwner(owner); setStatementDetailsState('ready') } })
       .catch(() => { if (!cancelled) { setStatementDetails(null); setStatementDetailsOwner(owner); setStatementDetailsState('error') } })
     return () => { cancelled = true }
@@ -97,17 +103,18 @@ export function LivePayslips() {
     if (!selectedRun || !selectedItem) return
     setArtifactBusy(true); setError(''); setNotice('')
     try {
-      const result = await api().payslips.issueDocument(selectedRun.id, selectedItem.employee_id)
+      const result = await api.payslips.issueDocument(selectedRun.id, selectedItem.employee_id)
       setArtifactId(result.documentId); setArtifactOwner(`${selectedRun.id}:${selectedItem.employee_id}`); setSignedUrl(result.signedUrl)
       setNotice('Generated from the finalized payroll snapshot. The private download link expires after 60 seconds.')
-      try { setDeliveryRows(await api().payslips.deliveryHistory(result.documentId)) } catch { setDeliveryRows([]) }
+      try { setDeliveryRows(await api.payslips.deliveryHistory(result.documentId)) } catch { setDeliveryRows([]) }
+      try { setDeliveryEvents(await api.payslips.eventHistory(result.documentId)) } catch { setDeliveryEvents([]) }
     } catch (error) { setError(error instanceof Error ? error.message : 'The secure payslip could not be issued.') }
     finally { setArtifactBusy(false) }
   }
   const refreshSecureLink = async () => {
     if (!currentArtifactId) return
     setArtifactBusy(true); setError('')
-    try { const result = await api().payslips.downloadDocument(currentArtifactId); setSignedUrl(result.signedUrl) }
+    try { const result = await api.payslips.downloadDocument(currentArtifactId); setSignedUrl(result.signedUrl) }
     catch { setError('A secure download link could not be created under your current access scope.') }
     finally { setArtifactBusy(false) }
   }
@@ -115,26 +122,53 @@ export function LivePayslips() {
     if (!currentArtifactId) return
     setArtifactBusy(true); setError(''); setNotice('')
     try {
-      const result = await api().payslips.sendEmail(currentArtifactId)
+      const result = await api.payslips.sendEmail(currentArtifactId)
       setNotice(result.status === 'SENT' ? 'The configured email provider accepted the private payslip link for delivery.' : result.deliveryConfigured ? 'The private payslip link is queued for delivery.' : 'The payslip was not emailed. It is queued until the email provider and verified sender address are configured.')
-      setDeliveryRows(await api().payslips.deliveryHistory(currentArtifactId))
+      setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId))
+      setDeliveryEvents(await api.payslips.eventHistory(currentArtifactId))
     } catch {
       setError('Delivery could not be queued. Check payroll issuance permissions and the employee delivery address.')
-      try { setDeliveryRows(await api().payslips.deliveryHistory(currentArtifactId)) } catch { /* RLS may hide delivery history from a viewer without issuer rights. */ }
+      try { setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId)) } catch { /* RLS may hide delivery history from a viewer without issuer rights. */ }
     }
     finally { setArtifactBusy(false) }
   }
   const retrySecureEmail = async (deliveryId: string) => {
     setArtifactBusy(true); setError(''); setNotice('')
     try {
-      const result = await api().payslips.retryEmail(deliveryId)
+      const result = await api.payslips.retryEmail(deliveryId)
       setNotice(result.status === 'SENT' ? 'The configured email provider accepted the retry.' : 'The delivery retry is queued or still processing.')
-      if (currentArtifactId) setDeliveryRows(await api().payslips.deliveryHistory(currentArtifactId))
+      if (currentArtifactId) setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId))
+      if (currentArtifactId) setDeliveryEvents(await api.payslips.eventHistory(currentArtifactId))
     } catch {
       setError('This delivery cannot be retried. It may have reached the attempt limit or may not be failed.')
-      if (currentArtifactId) try { setDeliveryRows(await api().payslips.deliveryHistory(currentArtifactId)) } catch { /* Keep the failure generic when history is not visible. */ }
+      if (currentArtifactId) try { setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId)) } catch { /* Keep the failure generic when history is not visible. */ }
     }
     finally { setArtifactBusy(false) }
+  }
+  const revokeDeliveryAccess = async (deliveryId: string) => {
+    setArtifactBusy(true); setError(''); setNotice('')
+    try {
+      await api.payslips.revokeAccess(deliveryId)
+      setNotice('The recipient access link has been revoked.')
+    } catch { setError('This access link could not be revoked under your current payroll permissions.') }
+    finally { setArtifactBusy(false) }
+  }
+
+  const openPayslipFromDistribution = async (targetEmployeeId: string) => {
+    if (!selectedRun || !selectedRunVersion) return
+    requestedPreviewEmployee.current = targetEmployeeId
+    setPayslipView('PREVIEW')
+    const targetPageCount = Math.max(1, Math.ceil(total / 100))
+    for (let targetPage = 1; targetPage <= targetPageCount; targetPage += 1) {
+      const result = await api.payslips.finalizedItems(selectedRun.id, selectedRunVersion, targetPage)
+      if (result.items.some((item) => item.employee_id === targetEmployeeId)) {
+        if (targetPage === page) { setEmployeeId(targetEmployeeId); requestedPreviewEmployee.current = '' }
+        else setPage(targetPage)
+        return
+      }
+    }
+    requestedPreviewEmployee.current = ''
+    setError('This employee’s finalized payslip is no longer available in the selected payroll run.')
   }
 
   return <div className="live-payslips">
@@ -147,15 +181,20 @@ export function LivePayslips() {
       <label>Finalized payroll<select aria-label="Finalized payroll run" value={runId} onChange={(event) => { setLoadingItems(Boolean(event.target.value)); setItems([]); setEmployees([]); setRunId(event.target.value); setPage(1) }}><option value="">Select a finalized run</option>{runs.map((run) => <option value={run.id} key={run.id}>{period(run, preferences)} · {company?.branches.find((branch) => branch.id === run.branch_id)?.name ?? 'Branch'} · v{run.version}</option>)}</select></label>
       <label>Employee<select aria-label="Payslip employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} disabled={!items.length}><option value="">Select employee on this page</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.employee_number} · {employee.first_name} {employee.last_name}</option>)}</select></label>
     </section>
-    {loadingRuns || loadingItems ? <div className="panel live-payslip-state" role="status"><LoaderCircle size={18}/> Loading finalized records…</div>
+    <div className="live-payslip-tabs" role="tablist" aria-label="Payslip workspace">
+      <button role="tab" aria-selected={payslipView === 'PREVIEW'} className={payslipView === 'PREVIEW' ? 'active' : ''} onClick={() => setPayslipView('PREVIEW')}>Payslip preview</button>
+      <button role="tab" aria-selected={payslipView === 'DISTRIBUTION'} className={payslipView === 'DISTRIBUTION' ? 'active' : ''} onClick={() => setPayslipView('DISTRIBUTION')}>Payslip distribution</button>
+    </div>
+    {payslipView === 'DISTRIBUTION' && selectedRun && <PayslipDistribution key={`${selectedRun.id}:${selectedRun.version}`} run={selectedRun} api={api} onOpenPayslip={(id) => void openPayslipFromDistribution(id)} />}
+    {payslipView === 'PREVIEW' && (loadingRuns || loadingItems ? <div className="panel live-payslip-state" role="status"><LoaderCircle size={18}/> Loading finalized records…</div>
       : !runs.length ? <div className="panel live-payslip-state"><FileText size={22}/><strong>No finalized payroll found</strong><span>Only finalized payroll runs appear here.</span></div>
         : !model ? <div className="panel live-payslip-state"><FileText size={22}/><strong>Select an employee</strong><span>{total.toLocaleString()} finalized payslip records · 100 employees per page.</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div></div>
           : <>
             <div className="live-payslip-actions"><span>{total.toLocaleString()} employees in finalized {period(selectedRun!, preferences)} payroll · page {page}/{pageCount}</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button><button className="button-secondary" onClick={print}><Printer size={15}/> Print / save as PDF</button><button className="button-primary" disabled={artifactBusy} onClick={() => void issueSecurePdf()}>{artifactBusy ? <LoaderCircle size={15}/> : <FileText size={15}/>} Generate secure PDF</button></div></div>
             {currentArtifactId && <section className="panel live-payslip-delivery" aria-label="Payslip document and delivery">
-              <div><strong>Private finalized payslip PDF</strong><p>Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Download links expire after 60 seconds; emailed links expire after 24 hours.</p></div>
+              <div><strong>Private finalized payslip PDF</strong><p>Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Download links expire after 60 seconds; emailed access links expire after 48 hours and require employee identity verification.</p></div>
               <div className="live-payslip-pagination"><button className="button-secondary" onClick={() => void refreshSecureLink()} disabled={artifactBusy}><RefreshCw size={15}/> Refresh link</button>{signedUrl && <a className="button-primary" href={signedUrl} target="_blank" rel="noreferrer"><Download size={15}/> Download PDF</a>}<button className="button-secondary" onClick={() => void sendSecureEmail()} disabled={artifactBusy}><Mail size={15}/> Queue email</button></div>
-              <div className="live-payslip-delivery-history"><strong>Delivery history</strong>{deliveryRows.length ? deliveryRows.map((delivery) => { const stale = delivery.status === 'SENDING' && deliveryClock > 0 && deliveryClock - Date.parse(delivery.updated_at) > 10 * 60_000; const retryable = delivery.attempts < 3 && (delivery.status === 'FAILED' || stale); return <div key={delivery.id}><span>{delivery.status}{stale ? ' · stale claim' : ''} · {delivery.attempts}/3 attempts</span><span>{delivery.last_error_code || (delivery.sent_at ? 'Provider accepted' : 'Recorded')}</span>{retryable && <button className="button-secondary" disabled={artifactBusy} onClick={() => void retrySecureEmail(delivery.id)}>Retry</button>}</div> }) : <p>No delivery recorded. History requires payroll issuance access.</p>}</div>
+              <div className="live-payslip-delivery-history"><strong>Delivery history</strong>{deliveryRows.length ? deliveryRows.map((delivery) => { const stale = delivery.status === 'SENDING' && deliveryClock > 0 && deliveryClock - Date.parse(delivery.updated_at) > 10 * 60_000; const retryable = delivery.attempts < 3 && (delivery.status === 'FAILED' || stale); return <div key={delivery.id}><span>{delivery.status}{stale ? ' · stale claim' : ''} · {delivery.attempts}/3 attempts</span><span>{delivery.last_error_code || (delivery.sent_at ? 'Provider accepted' : 'Recorded')}</span>{retryable && <button className="button-secondary" disabled={artifactBusy} onClick={() => void retrySecureEmail(delivery.id)}>Retry</button>}{['SENT', 'DELIVERED'].includes(delivery.status) && <button className="button-secondary" disabled={artifactBusy} onClick={() => void revokeDeliveryAccess(delivery.id)}>Revoke access link</button>}</div> }) : <p>No delivery recorded. History requires payroll issuance access.</p>}{deliveryEvents.length > 0 && <details><summary>Provider event history</summary>{deliveryEvents.map((event) => <div key={event.event_id}><span>{event.event_type}</span><span>{event.occurred_at ? new Date(event.occurred_at).toLocaleString() : 'Time unavailable'}</span></div>)}</details>}</div>
             </section>}
             <article className="panel live-payslip-document" aria-label={`Payslip for ${model.employeeName}`}>
               <header className="live-payslip-company"><div className="live-payslip-mark">{model.companyMark}</div><div><h2>{model.companyName}</h2><p>{model.companyAddress}</p></div><span className="live-payslip-reference">{model.reference}</span></header>
@@ -172,6 +211,117 @@ export function LivePayslips() {
               <p className="live-payslip-footnote">This payslip reflects payroll version {selectedRun?.version} after finalization. It is not a bank transfer confirmation.</p>
             </article>
             <div className="live-payslip-note">Email delivery uses the employee email registered in their private HR details. The provider sends a time-limited private link; email remains queued until the provider and verified sender address are configured.</div>
-          </>}
+          </>)}
   </div>
+}
+
+function PayslipDistribution({
+  run,
+  api,
+  onOpenPayslip,
+}: {
+  run: FinalizedPayslipRunRecord
+  api: LiveBusinessServices
+  onOpenPayslip: (employeeId: string) => void
+}) {
+  const [rows, setRows] = useState<PayslipDistributionRecord[]>([])
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [selected, setSelected] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [confirmation, setConfirmation] = useState<'SELECTED' | 'ALL' | null>(null)
+  const [confirmationRows, setConfirmationRows] = useState<PayslipDistributionRecord[]>([])
+  const [loadingConfirmation, setLoadingConfirmation] = useState(false)
+  const pageCount = Math.max(1, Math.ceil(total / 100))
+  const eligible = (row: PayslipDistributionRecord) => Boolean(row.recipient_email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.recipient_email)
+    && ['PENDING', 'QUEUED'].includes(row.delivery_status))
+
+  const refresh = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const result = await api.payslips.distributionPreview(run.id, page, 100)
+      setRows(result.items); setTotal(result.total)
+    } catch {
+      setError('Payslip recipients could not be loaded for your payroll access scope.')
+      setRows([]); setTotal(0)
+    } finally { setLoading(false) }
+  }, [api, run.id, page])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const sendOne = async (row: PayslipDistributionRecord) => {
+    setBusy(true); setError(''); setMessage('')
+    try {
+      let documentId = row.document_id
+      if (!documentId) documentId = (await api.payslips.issueDocument(run.id, row.employee_id)).documentId
+      const result = await api.payslips.sendEmail(documentId)
+      setMessage(result.status === 'SENT'
+        ? 'The email provider accepted the payslip for delivery.'
+        : result.deliveryConfigured
+          ? 'The payslip is queued for delivery.'
+          : 'Delivery remains queued. Email sending is disabled until provider and sender verification are configured.')
+      await refresh()
+    } catch {
+      setError('This payslip could not be queued. Check the recipient address and your payroll permissions.')
+      await refresh()
+    } finally { setBusy(false) }
+  }
+
+  const retryOne = async (row: PayslipDistributionRecord) => {
+    if (!row.delivery_id) return
+    setBusy(true); setError(''); setMessage('')
+    try {
+      const result = await api.payslips.retryEmail(row.delivery_id)
+      setMessage(result.status === 'SENT' ? 'The email provider accepted the retry.' : 'The retry remains queued; no delivery is claimed until provider acceptance.')
+      await refresh()
+    } catch { setError('Retry is unavailable. The attempt limit may have been reached, or the delivery may no longer be failed.') }
+    finally { setBusy(false) }
+  }
+
+  const openConfirmation = async (scope: 'SELECTED' | 'ALL') => {
+    setLoadingConfirmation(true); setError('')
+    try {
+      if (scope === 'SELECTED' || scope === 'ALL') {
+        const pages = Math.max(1, Math.ceil(total / 200))
+        const results = await Promise.all(Array.from({ length: pages }, (_, index) => api.payslips.distributionPreview(run.id, index + 1, 200)))
+        const allRows = results.flatMap((result) => result.items)
+        setConfirmationRows(scope === 'ALL' ? allRows : allRows.filter((row) => selected.includes(row.employee_id)))
+      }
+      setConfirmation(scope)
+    } catch { setError('The confirmed distribution scope could not be loaded. Refresh and try again.') }
+    finally { setLoadingConfirmation(false) }
+  }
+
+  const sendMany = async () => {
+    setConfirmation(null); setBusy(true); setError(''); setMessage('')
+    let accepted = 0; let queued = 0; let failed = 0
+    try {
+      const targets = confirmationRows.filter(eligible)
+      for (const row of targets) {
+        try {
+          const documentId = row.document_id ?? (await api.payslips.issueDocument(run.id, row.employee_id)).documentId
+          const result = await api.payslips.sendEmail(documentId)
+          if (result.status === 'SENT') accepted += 1
+          else queued += 1
+        } catch { failed += 1 }
+      }
+      setSelected([])
+      setMessage(`${accepted} accepted by the email provider, ${queued} queued, ${failed} failed. Live email delivery remains disabled until the verified sender is configured.`)
+      await refresh()
+    } finally { setBusy(false) }
+  }
+
+  const statusLabel = (status: string) => status === 'PENDING' ? 'Pending' : status[0] + status.slice(1).toLowerCase()
+
+  return <section className="panel payslip-distribution" aria-label="Payslip distribution">
+    <div className="payslip-distribution-heading"><div><h2>Payslip distribution</h2><p>Finalized payroll {run.id.slice(0, 8)} · {total} recipients</p></div><button className="button-secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div>
+    <div className="live-data-notice"><ShieldCheck size={15}/> Bulk actions are limited to this finalized payroll and your authorized company scope. Delivery remains disabled until Resend and sender-domain verification are enabled.</div>
+    {error && <div className="auth-shell-error" role="alert">{error}</div>}{message && <div className="live-payslip-notice" role="status">{message}</div>}
+    <div className="payslip-distribution-actions"><button className="button-primary" disabled={busy || loadingConfirmation || selected.length === 0} onClick={() => void openConfirmation('SELECTED')}><Mail size={15}/> Send selected ({selected.length})</button><button className="button-secondary" disabled={busy || loadingConfirmation || total === 0} onClick={() => void openConfirmation('ALL')}><Mail size={15}/> Send all eligible</button></div>
+    {loading ? <div className="live-payslip-state" role="status"><LoaderCircle size={18}/> Loading recipients…</div> : <div className="table-scroll payslip-distribution-table"><table><thead><tr><th><input aria-label="Select all eligible on this page" type="checkbox" checked={rows.filter(eligible).length > 0 && rows.filter(eligible).every((row) => selected.includes(row.employee_id))} onChange={(event) => setSelected(event.target.checked ? [...new Set([...selected, ...rows.filter(eligible).map((row) => row.employee_id)])] : selected.filter((id) => !rows.some((row) => row.employee_id === id)))} /></th><th>Employee</th><th>Branch</th><th>Registered email</th><th>Status</th><th>Attempts</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => <tr key={row.employee_id}><td><input type="checkbox" aria-label={`Select ${row.employee_number}`} checked={selected.includes(row.employee_id)} disabled={!eligible(row)} onChange={(event) => setSelected(event.target.checked ? [...selected, row.employee_id] : selected.filter((id) => id !== row.employee_id))}/></td><td><strong>{row.first_name} {row.middle_name ? `${row.middle_name} ` : ''}{row.last_name}</strong><small>{row.employee_number} · {row.department || 'No department'} · {row.job_title || 'No job title'}</small></td><td>{row.branch_name}</td><td>{row.recipient_email || 'Email unavailable'}</td><td><span className={`delivery-status delivery-status-${row.delivery_status.toLowerCase()}`}>{statusLabel(row.delivery_status)}</span></td><td>{row.delivery_attempts}/3</td><td><div className="payslip-distribution-row-actions"><button className="button-secondary" onClick={() => onOpenPayslip(row.employee_id)}>Preview</button>{eligible(row) ? <button className="button-primary" disabled={busy} onClick={() => void sendOne(row)}>{row.delivery_status === 'QUEUED' ? 'Continue delivery' : 'Send'}</button> : row.delivery_status === 'FAILED' ? <button className="button-secondary" disabled={busy || row.delivery_attempts >= 3 || !row.delivery_id} onClick={() => void retryOne(row)}>Retry</button> : null}</div></td></tr>)}</tbody></table>{!rows.length && <p className="live-payslip-state">No employees are present in this finalized payroll.</p>}</div>}
+    <div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div>
+    {confirmation && <div className="payslip-distribution-backdrop" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="distribution-confirm-title" className="panel payslip-distribution-dialog"><h2 id="distribution-confirm-title">Confirm payslip distribution</h2><p>Payroll run {run.id.slice(0, 8)} · {confirmation === 'ALL' ? 'all employees in this authorized finalized run' : `${selected.length} selected in this authorized finalized run`}.</p><dl><div><dt>Recipients eligible</dt><dd>{confirmationRows.filter(eligible).length}</dd></div><div><dt>Invalid or missing addresses</dt><dd>{confirmationRows.filter((row) => !row.recipient_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.recipient_email)).length}</dd></div><div><dt>Already queued</dt><dd>{confirmationRows.filter((row) => row.delivery_status === 'QUEUED' || row.delivery_status === 'SENDING').length}</dd></div><div><dt>Already sent or bounced</dt><dd>{confirmationRows.filter((row) => ['SENT', 'DELIVERED', 'BOUNCED'].includes(row.delivery_status)).length}</dd></div></dl><p className="payslip-distribution-warning">The configured delivery switch must be enabled server-side. No email will be sent while it remains off.</p><div className="payslip-distribution-actions"><button className="button-secondary" onClick={() => setConfirmation(null)}>Cancel</button><button className="button-primary" disabled={busy || loadingConfirmation || !confirmationRows.some(eligible)} onClick={() => void sendMany()}><Mail size={15}/> Confirm queue</button></div></section></div>}
+  </section>
 }

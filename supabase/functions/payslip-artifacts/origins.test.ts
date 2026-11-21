@@ -7,7 +7,11 @@ function assertEqual(actual: string[], expected: string[]) {
 }
 
 Deno.test('production payslip origin is always allowed', () => {
-  assertEqual(approvedAppOrigins(''), ['https://golden-baobab-hr-v2.vercel.app'])
+  assertEqual(approvedAppOrigins(''), [
+    'https://golden-baobab-hr-v2.vercel.app',
+    'https://goldenbaobab.luskamtravelagents.com',
+    'https://goldenbaobab.byteandberry.com',
+  ])
 })
 
 Deno.test('configured preview origins are retained and normalized', () => {
@@ -15,11 +19,15 @@ Deno.test('configured preview origins are retained and normalized', () => {
     'https://preview.example',
     'https://localhost',
     'https://golden-baobab-hr-v2.vercel.app',
+    'https://goldenbaobab.luskamtravelagents.com',
+    'https://goldenbaobab.byteandberry.com',
   ])
 })
 
 Deno.test('duplicate production origin is not duplicated', () => {
   assertEqual(approvedAppOrigins('https://golden-baobab-hr-v2.vercel.app'), [
     'https://golden-baobab-hr-v2.vercel.app',
+    'https://goldenbaobab.luskamtravelagents.com',
+    'https://goldenbaobab.byteandberry.com',
   ])
 })

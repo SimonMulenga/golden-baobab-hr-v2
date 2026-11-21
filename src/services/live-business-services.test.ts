@@ -81,6 +81,14 @@ describe('live Supabase business service adapter', () => {
     expect(delivery).not.toHaveProperty('recipient_email')
   })
 
+  it('loads authorized finalized-run distribution recipients through the server preview function', async () => {
+    const recipient = { employee_id: 'employee-synthetic', employee_number: 'SYN-001', recipient_email: 'synthetic@example.test', delivery_status: 'PENDING', total_count: 1 }
+    const functions = { invoke: vi.fn(async () => ({ data: { items: [recipient], total: 1 }, error: null })) }
+    const services = createLiveBusinessServices({ functions } as unknown as SupabaseClient)
+    await expect(services.payslips.distributionPreview('run-synthetic', 2, 50)).resolves.toEqual({ items: [recipient], total: 1 })
+    expect(functions.invoke).toHaveBeenCalledWith('payslip-artifacts', { body: { action: 'distribution-preview', payrollRunId: 'run-synthetic', page: 2, pageSize: 50 } })
+  })
+
   it('loads period-scoped leave and advance balances through the payroll-view RPC', async () => {
     const details = { leave: { monthly_entitlement_days: 2, balance_days: 3, policies: [] }, deductions: [] }
     const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: details, error: null }))
