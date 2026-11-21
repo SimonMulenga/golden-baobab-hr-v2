@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
 import { approvedAppOrigins } from './origins.ts'
+import { createPayslipAccessToken } from '../_shared/payslip-tokens.ts'
+import { isLivePayslipDeliveryEnabled } from '../_shared/payslip-delivery-policy.ts'
 
 const baseHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
 const reply = (status: number, body: Record<string, unknown>, origin?: string) => new Response(JSON.stringify(body), {
@@ -200,6 +202,29 @@ Deno.serve(async (request) => {
       if (signedError) throw signedError
       return reply(200, { signedUrl: signed.signedUrl }, origin)
     }
+    if (action === 'distribution-preview') {
+      operation = 'distribution-preview'
+      const runId = text(body.payrollRunId)
+      const page = Math.max(1, Math.trunc(num(body.page) || 1))
+      const pageSize = Math.min(200, Math.max(1, Math.trunc(num(body.pageSize) || 100)))
+      const { data, error } = await caller.rpc('payslip_distribution_preview', {
+        p_payroll_run_id: runId, p_page: page, p_page_size: pageSize,
+      })
+      if (error) throw error
+      return reply(200, { items: data ?? [], total: Number(object(Array.isArray(data) ? data[0] : null).total_count ?? 0) }, origin)
+    }
+    if (action === 'revoke-access') {
+      operation = 'revoke-access'
+      const { error } = await caller.rpc('payslip_email_revoke_access', { p_delivery_id: text(body.deliveryId) })
+      if (error) throw error
+      return reply(200, { revoked: true }, origin)
+    }
+    if (action === 'event-history') {
+      operation = 'event-history'
+      const { data, error } = await caller.rpc('payslip_email_event_history', { p_document_id: text(body.documentId) })
+      if (error) throw error
+      return reply(200, { events: data ?? [] }, origin)
+    }
     if (action === 'email' || action === 'retry-email') {
       operation = 'email'
       const idResult = action === 'email'
@@ -208,7 +233,28 @@ Deno.serve(async (request) => {
       if (idResult.error) throw idResult.error
       const deliveryId = idResult.data as string
       const key = Deno.env.get('RESEND_API_KEY'), from = Deno.env.get('PAYSLIP_FROM_EMAIL')
-      if (!key || !from) return reply(202, { deliveryId, status: 'QUEUED', deliveryConfigured: false, message: 'Delivery is queued. Configure the server email provider and verified sender address to send.' }, origin)
+      const accessSecret = Deno.env.get('PAYSLIP_ACCESS_TOKEN_SECRET')
+      const publicAppUrl = Deno.env.get('PAYSLIP_PUBLIC_APP_URL')
+      const senderVerified = Deno.env.get('PAYSLIP_SENDER_DOMAIN_VERIFIED') === 'true'
+      const liveDeliveryEnabled = isLivePayslipDeliveryEnabled({
+        deliveryEnabled: Deno.env.get('PAYSLIP_LIVE_DELIVERY_ENABLED'),
+        firstLiveSendApproved: Deno.env.get('PAYSLIP_FIRST_LIVE_SEND_APPROVED'),
+      })
+      let accessPageUrl: URL | null = null
+      try {
+        if (publicAppUrl) {
+          const configuredUrl = new URL(publicAppUrl)
+          if (configuredUrl.protocol === 'https:' && origins.includes(configuredUrl.origin)) {
+            accessPageUrl = new URL('/payslip-access', configuredUrl.origin)
+          }
+        }
+      } catch { /* Invalid public URL leaves the queue disabled. */ }
+      const exactSender = 'Golden Baobab HR <payslips@luskamtravelagents.com>'
+      const deliveryConfigured = Boolean(key && from?.trim() === exactSender && senderVerified && accessSecret && accessSecret.length >= 32 && accessPageUrl)
+      if (!liveDeliveryEnabled || !deliveryConfigured) {
+        return reply(202, { deliveryId, status: 'QUEUED', deliveryConfigured: false, liveDeliveryEnabled: false,
+          message: 'Delivery is queued. Live sending remains disabled until the sender domain is verified and an authorized administrator enables it.' }, origin)
+      }
       const { data: claimed, error: claimError } = await admin.rpc('payslip_email_claim', { p_delivery_id: deliveryId, p_actor_id: identity.user.id })
       if (claimError) throw claimError
       const job = object(claimed)
@@ -218,22 +264,33 @@ Deno.serve(async (request) => {
       }
       const recipient = text(job.recipient_email).toLowerCase()
       try {
-        const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(text(job.storage_path), 86_400, { download: true })
-        if (signedError || !signed?.signedUrl) throw new Error('PRIVATE_PDF_LINK_FAILED')
-        const safeUrl = escapeHtml(signed.signedUrl)
+        const access = await createPayslipAccessToken(accessSecret!)
+        const { error: tokenError } = await admin.rpc('payslip_email_prepare_access', {
+          p_delivery_id: deliveryId, p_token_hash: access.tokenHash, p_actor_id: identity.user.id,
+        })
+        if (tokenError) throw new Error('PRIVATE_ACCESS_LINK_FAILED')
+        const accessUrl = new URL(accessPageUrl!.toString())
+        accessUrl.hash = `token=${encodeURIComponent(access.token)}`
+        const safeUrl = escapeHtml(accessUrl.toString())
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'Idempotency-Key': `gb-payslip-${deliveryId}` },
           body: JSON.stringify({ from, to: [recipient], subject: 'Your finalized payslip',
-            html: `<p>Your finalized payslip is ready.</p><p><a href="${safeUrl}">Open your private payslip PDF</a></p><p>This private link expires in 24 hours. Do not forward it.</p><p>Golden Baobab HR</p>`,
-            text: `Your finalized payslip is ready. Open the private PDF link: ${signed.signedUrl}\nThis link expires in 24 hours. Do not forward it.\nGolden Baobab HR` }),
+            tags: [{ name: 'product', value: 'golden-baobab-payslip' }],
+            html: `<p>Your finalized payslip is ready.</p><p><a href="${safeUrl}">Verify your identity and open your private payslip</a></p><p>This link expires in 48 hours. You will need your employee number and date of birth to open it. Do not forward it.</p><p>Golden Baobab HR</p>`,
+            text: `Your finalized payslip is ready. Verify your identity and open it here: ${accessUrl.toString()}\nThis link expires in 48 hours. You will need your employee number and date of birth. Do not forward it.\nGolden Baobab HR` }),
         })
         if (!response.ok) throw new Error(`PROVIDER_HTTP_${response.status}`)
         const result = object(await response.json())
-        await admin.from('payslip_email_deliveries').update({ status: 'SENT', provider_message_id: text(result.id) || null, sent_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_error_code: null }).eq('id', deliveryId).eq('status', 'SENDING')
+        const { data: markedSent, error: updateError } = await admin.rpc('payslip_email_mark_sent', {
+          p_delivery_id: deliveryId, p_provider_message_id: text(result.id), p_actor_id: identity.user.id,
+        })
+        if (updateError || markedSent !== true) throw new Error('DELIVERY_STATE_UPDATE_FAILED')
         return reply(200, { deliveryId, status: 'SENT', deliveryConfigured: true }, origin)
       } catch (error) {
         const code = error instanceof Error ? error.message : 'DELIVERY_FAILED'
-        await admin.from('payslip_email_deliveries').update({ status: 'FAILED', last_error_code: code.slice(0, 80), updated_at: new Date().toISOString() }).eq('id', deliveryId).eq('status', 'SENDING')
+        await admin.rpc('payslip_email_mark_failed', {
+          p_delivery_id: deliveryId, p_safe_error_code: code, p_actor_id: identity.user.id,
+        })
         return reply(502, { deliveryId, status: 'FAILED', error: 'Payslip delivery failed. Review delivery history before retrying.' }, origin)
       }
     }

@@ -388,6 +388,15 @@ deno_version = 2
 # the user-initiated test path validates the Supabase access token in-handler.
 verify_jwt = false
 
+[functions.payslip-access]
+# Email recipients do not have application sessions. This endpoint validates
+# a high-entropy, time-limited token plus employee identity fields in-handler.
+verify_jwt = false
+
+[functions.resend-payslip-webhook]
+# Resend authenticates events with Svix signatures verified against the raw body.
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

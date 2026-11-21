@@ -28,6 +28,15 @@ for (const path of protectedPaths) {
   })
 }
 
+test('payslip recipient access is public but requires identity verification before download', async ({ page }) => {
+  await page.goto('/payslip-access#token=synthetic-invalid-token', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Verify your identity' })).toBeVisible()
+  await expect(page.getByLabel('Employee number')).toBeVisible()
+  await expect(page.getByLabel('Date of birth')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Verify and download payslip' })).toBeVisible()
+  expect(new URL(page.url()).hash).toBe('')
+})
+
 test('password recovery navigation works without submitting a message', async ({ page }) => {
   await page.goto('/auth/login', { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()

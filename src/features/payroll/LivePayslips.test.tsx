@@ -5,7 +5,7 @@ import { mockCompanies } from '../companies/mockData'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { LivePayslips } from './LivePayslips'
 
-const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), statementDetails: vi.fn(), byIds: vi.fn(), issueDocument: vi.fn(), deliveryHistory: vi.fn(), sendEmail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), statementDetails: vi.fn(), byIds: vi.fn(), issueDocument: vi.fn(), deliveryHistory: vi.fn(), sendEmail: vi.fn(), distributionPreview: vi.fn(), retryEmail: vi.fn() }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payslips: mocks, employees: { byIds: mocks.byIds } }) }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 
@@ -28,6 +28,7 @@ describe('LIVE finalized payslips', () => {
     mocks.issueDocument.mockResolvedValue({ documentId: 'doc-1', signedUrl: 'https://private.example/signed?token=opaque' })
     mocks.deliveryHistory.mockResolvedValue([])
     mocks.sendEmail.mockResolvedValue({ deliveryId: 'delivery-1', status: 'QUEUED', deliveryConfigured: false })
+    mocks.distributionPreview.mockResolvedValue({ items: [{ employee_id: employee.id, employee_number: employee.employee_number, first_name: employee.first_name, middle_name: null, last_name: employee.last_name, company_id: company.id, branch_id: 'branch-live', branch_name: 'Lusaka Demo Branch', department: 'Finance', job_title: 'Analyst', recipient_email: 'synthetic@example.test', document_id: 'doc-1', delivery_id: null, delivery_status: 'PENDING', delivery_attempts: 0, total_count: 1 }], total: 1 })
     vi.stubGlobal('print', vi.fn())
   })
 
@@ -74,5 +75,18 @@ describe('LIVE finalized payslips', () => {
     expect(screen.getByText('K3,000.00')).toBeInTheDocument()
     expect(screen.getByText('K2,000.00')).toBeInTheDocument()
     expect(screen.getAllByText('K1,000.00')).toHaveLength(2)
+  })
+
+  it('limits distribution selection to the finalized run and reports queued rather than sent', async () => {
+    renderScreen()
+    fireEvent.click(await screen.findByRole('tab', { name: 'Payslip distribution' }))
+    expect(await screen.findByText('synthetic@example.test')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select SYN-001' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send selected (1)' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('1')
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm queue' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('0 accepted by the email provider, 1 queued, 0 failed')
+    expect(mocks.sendEmail).toHaveBeenCalledWith('doc-1')
+    expect(mocks.distributionPreview).toHaveBeenCalledWith(run.id, 1, 100)
   })
 })

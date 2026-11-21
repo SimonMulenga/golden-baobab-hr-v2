@@ -31,6 +31,7 @@ const LivePayrollInputs = lazy(() => import('./features/payroll/LivePayrollInput
 const LivePayrollApprovals = lazy(() => import('./features/payroll/LivePayrollApprovals').then((module) => ({ default: module.LivePayrollApprovals })))
 const LivePayrollReconciliation = lazy(() => import('./features/payroll/LivePayrollReconciliation').then((module) => ({ default: module.LivePayrollReconciliation })))
 const LivePayslips = lazy(() => import('./features/payroll/LivePayslips').then((module) => ({ default: module.LivePayslips })))
+const PayslipAccess = lazy(() => import('./features/payroll/PayslipAccess').then((module) => ({ default: module.PayslipAccess })))
 const LivePayrollReports = lazy(() => import('./features/payroll/LivePayrollReports').then((module) => ({ default: module.LivePayrollReports })))
 const LiveStatutoryFilings = lazy(() => import('./features/payroll/LiveStatutoryFilings').then((module) => ({ default: module.LiveStatutoryFilings })))
 const LiveDeductions = lazy(() => import('./features/payroll/LiveDeductions').then((module) => ({ default: module.LiveDeductions })))
@@ -331,5 +332,11 @@ function LiveDashboard({ companies, loading, canCreateCompany, availableRoutes }
 
 function Metric({ icon, tone, label, value, note }: { icon: React.ReactNode; tone: string; label: string; value: string; note: string }) { return <article className="metric-card"><div className="metric-top"><div className={`metric-icon ${tone}`}>{icon}</div></div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-bottom"><span>{note}</span></div></article> }
 
-function App() { return <PwaProvider><BrowserRouter><AuthProvider><AppShell /></AuthProvider></BrowserRouter></PwaProvider> }
+function AppRoutes() {
+  const location = useLocation()
+  if (location.pathname === '/payslip-access') return <Suspense fallback={<div className="route-loading">Opening secure payslip access…</div>}><PayslipAccess/></Suspense>
+  return <AppShell/>
+}
+
+function App() { return <PwaProvider><BrowserRouter><AuthProvider><AppRoutes /></AuthProvider></BrowserRouter></PwaProvider> }
 export default App

@@ -59,9 +59,16 @@ export type FinalizedPayslipItemRecord = {
 };
 export type LeaveLedgerReportRecord = { employee_id: string; branch_id: string; event_type: 'ACCRUAL' | 'PAID_LEAVE' | 'ADJUSTMENT' | 'REVERSAL'; amount_delta: number; period_start: string };
 export type PayslipDeliveryRecord = {
-  id: string; document_id: string; status: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+  id: string; document_id: string; status: 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'BOUNCED';
   attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null;
 };
+export type PayslipDistributionRecord = {
+  employee_id: string; employee_number: string; first_name: string; middle_name: string | null; last_name: string;
+  company_id: string; branch_id: string; branch_name: string; department: string; job_title: string;
+  recipient_email: string | null; document_id: string | null; delivery_id: string | null; delivery_status: 'PENDING' | PayslipDeliveryRecord['status'];
+  delivery_attempts: number; total_count: number;
+};
+export type PayslipEmailEventRecord = { event_id: string; event_type: string; occurred_at: string | null; received_at: string };
 export type PayslipStatementDetails = {
   leave: {
     monthly_entitlement_days: number;
@@ -480,6 +487,9 @@ export interface LiveBusinessServices {
     sendEmail(documentId: string): Promise<{ deliveryId: string; status: string; deliveryConfigured: boolean }>;
     retryEmail(deliveryId: string): Promise<{ deliveryId: string; status: string; deliveryConfigured: boolean }>;
     deliveryHistory(documentId: string): Promise<PayslipDeliveryRecord[]>;
+    distributionPreview(payrollRunId: string, page?: number, pageSize?: number): Promise<{ items: PayslipDistributionRecord[]; total: number }>;
+    revokeAccess(deliveryId: string): Promise<void>;
+    eventHistory(documentId: string): Promise<PayslipEmailEventRecord[]>;
   };
   audit: {
     list(request: PageRequest & { companyId?: string; branchId?: string; action?: string; from?: string; to?: string }): Promise<PageResult<AuditLogRecord>>;
@@ -1102,6 +1112,22 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         const result = await client.rpc('payslip_email_history', { p_document_id: documentId });
         if (result.error) throw result.error;
         return (result.data ?? []) as PayslipDeliveryRecord[];
+      },
+      async distributionPreview(payrollRunId, page = 1, pageSize = 100) {
+        const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'distribution-preview', payrollRunId, page, pageSize } });
+        if (result.error) throw await payslipFunctionError(result.error);
+        const data = result.data as { items?: unknown; total?: unknown } | null;
+        return { items: Array.isArray(data?.items) ? data.items as PayslipDistributionRecord[] : [], total: Number(data?.total ?? 0) };
+      },
+      async revokeAccess(deliveryId) {
+        const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'revoke-access', deliveryId } });
+        if (result.error) throw await payslipFunctionError(result.error);
+      },
+      async eventHistory(documentId) {
+        const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'event-history', documentId } });
+        if (result.error) throw await payslipFunctionError(result.error);
+        const data = result.data as { events?: unknown } | null;
+        return Array.isArray(data?.events) ? data.events as PayslipEmailEventRecord[] : [];
       },
     },
     audit: {
