@@ -6,6 +6,7 @@ import { AuthProvider } from './features/auth/AuthContext'
 import { useAuth } from './features/auth/auth-context'
 import { getAuthGateDecision } from './features/auth/auth-routing'
 import { mergeWorkspaceRoles, roleCanOpenPath, visibleWorkspaceRoutes, type WorkspaceRole } from './features/auth/workspace-access'
+import { canShowEmailManagementNavigation, currentEmailManagementAccess, emailManagementRouteAccess, resolveEmailManagementAccess, type EmailManagementAuthorization } from './features/admin/email-management/email-management-access'
 import { isLiveMode } from './lib/data-mode'
 import { getSupabaseClient } from './lib/supabase/client'
 import { createLiveCompanyServices } from './services/live-company-services'
@@ -54,6 +55,15 @@ const nav = [
   { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Pending payroll approval', path: '/payroll-approvals', icon: ClipboardCheck }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
   { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Email Management', path: '/email-management', icon: Mail }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
+
+function functionErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('context' in error)) return undefined
+  const context = error.context
+  if (context instanceof Response) return context.status
+  if (context && typeof context === 'object' && 'status' in context && typeof context.status === 'number') return context.status
+  return undefined
+}
+
 function AppShell() {
   const auth = useAuth()
   const authUserId = auth.user?.id
@@ -69,7 +79,8 @@ function AppShell() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesOwnerId, setCompaniesOwnerId] = useState<string | null>(null)
   const [roleContext, setRoleContext] = useState<{ roles: WorkspaceRole[]; loading: boolean }>({ roles: [], loading: true })
-  const [emailManagementAccess, setEmailManagementAccess] = useState<'checking' | 'allowed' | 'denied'>('checking')
+  const [emailManagementAuthorization, setEmailManagementAuthorization] = useState<EmailManagementAuthorization>({ userId: null, state: 'checking' })
+  const emailManagementAccess = currentEmailManagementAccess(authUserId, emailManagementAuthorization)
   const companiesLoading = isLiveMode && auth.user?.id !== companiesOwnerId
   const [workspaceError, setWorkspaceError] = useState('')
   const [activeCompanyId, setActiveCompanyId] = useState('all')
@@ -98,7 +109,7 @@ function AppShell() {
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
   const canOpenPayrollApprovals = allowedRoutes.has('/payroll-approvals')
   const canOpenEmployeeApprovals = allowedRoutes.has('/employee-approvals')
-  const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => item.path === '/email-management' ? Boolean(authUserId) && emailManagementAccess === 'allowed' : allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes, authUserId, emailManagementAccess])
+  const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => item.path === '/email-management' ? canShowEmailManagementNavigation(authUserId, emailManagementAuthorization) : allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes, authUserId, emailManagementAuthorization])
   const searchItems = useMemo(() => visibleNav.flatMap((section) => section.items).filter((item) => item.name.toLowerCase().includes(searchQuery.trim().toLowerCase())), [visibleNav, searchQuery])
   const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
   const maySelectCompany = !branchOnly && companies.length > 1
@@ -210,15 +221,34 @@ function AppShell() {
     return () => { cancelled = true }
   }, [authUserId])
   useEffect(() => {
-    if (!isLiveMode || !authUserId) { setEmailManagementAccess('denied'); return }
+    if (!isLiveMode || !authUserId) { setEmailManagementAuthorization({ userId: authUserId ?? null, state: 'denied' }); return }
     let cancelled = false
-    setEmailManagementAccess('checking')
-    void getSupabaseClient().functions.invoke('payslip-email-admin-status', { method: 'GET' })
-      .then(({ data: result, error }) => {
-        if (!cancelled) setEmailManagementAccess(!error && result?.authorized === true ? 'allowed' : 'denied')
-      })
-      .catch(() => { if (!cancelled) setEmailManagementAccess('denied') })
-    return () => { cancelled = true }
+    setEmailManagementAuthorization({ userId: authUserId, state: 'checking' })
+    let retryTimer: number | undefined
+    const verifyPlatformAdmin = async (retry = false) => {
+      try {
+        const { data: result, error } = await getSupabaseClient().functions.invoke('payslip-email-admin-status', { method: 'GET' })
+        const access = resolveEmailManagementAccess({
+          authenticated: true,
+          authorized: !error && result?.authorized === true ? true : !error && result?.authorized === false ? false : undefined,
+          errorStatus: error ? functionErrorStatus(error) : undefined,
+        })
+        if (access === 'unavailable' && !retry) {
+          retryTimer = window.setTimeout(() => { void verifyPlatformAdmin(true) }, 750)
+          return
+        }
+        if (!cancelled) setEmailManagementAuthorization({ userId: authUserId, state: access })
+      } catch (error) {
+        const access = resolveEmailManagementAccess({ authenticated: true, errorStatus: functionErrorStatus(error) })
+        if (access === 'unavailable' && !retry) {
+          retryTimer = window.setTimeout(() => { void verifyPlatformAdmin(true) }, 750)
+          return
+        }
+        if (!cancelled) setEmailManagementAuthorization({ userId: authUserId, state: access })
+      }
+    }
+    void verifyPlatformAdmin()
+    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer) }
   }, [authUserId])
   useEffect(() => {
     if (!authUserId || companiesOwnerId !== authUserId || companies.length !== 1) return
@@ -256,13 +286,15 @@ function AppShell() {
   if (authGate === 'loading') return <main className="auth-prototype" aria-live="polite"><div className="route-loading"><span className="route-loading-mark">GB</span><span>Securing your session…</span></div></main>
   if (authGate === 'recovery') return <Navigate to="/auth/reset" replace />
   if (authGate === 'login') return <Navigate to="/auth/login" replace />
+  const emailRouteAccess = emailManagementRouteAccess(authUserId, emailManagementAuthorization)
   const routeAllowed = roleCanOpenPath(allowedRoutes, location.pathname)
-    || (location.pathname === '/email-management' && Boolean(authUserId) && emailManagementAccess === 'allowed')
+    || (location.pathname === '/email-management' && emailRouteAccess === 'allow')
+  if (isLiveMode && location.pathname === '/email-management' && emailRouteAccess === 'deny') return <Navigate to="/" replace />
   const knownRoute = nav.flatMap((section) => section.items).some((item) => item.path === location.pathname)
     || /^\/(employees|companies)\/[^/]+(?:\/(edit|correct))?$/.test(location.pathname)
     || location.pathname.startsWith('/employees/import/')
   if (isLiveMode && knownRoute && !roleContext.loading && !companiesLoading && location.pathname !== '/' && !routeAllowed
-    && !(location.pathname === '/email-management' && emailManagementAccess === 'checking')) return <Navigate to="/" replace />
+    && !(location.pathname === '/email-management' && emailRouteAccess === 'wait')) return <Navigate to="/" replace />
   if (location.pathname.startsWith('/auth/')) return <Suspense fallback={<div className="route-loading">Opening sign-in…</div>}><Routes><Route path="/auth/:screen" element={<AuthPrototype/>}/></Routes></Suspense>
   return <WorkspaceContext.Provider value={data}><div className={`app-shell ${collapsed ? 'is-collapsed' : ''}`}><a className="skip-to-content" href="#main-content">Skip to content</a>{mobileOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside id="workspace-navigation" className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
@@ -275,7 +307,7 @@ function AppShell() {
     </aside>
     <div className="main-column"><header className="topbar"><div className="top-left"><button ref={mobileMenuButton} className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="workspace-navigation" aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{currentName}</strong></div></div><div className="top-actions">{maySelectCompany ? <label className="company-switch"><Building2 size={15} /><select value={activeCompanyId} onChange={(event) => setActiveCompanyId(event.target.value)} aria-label="Select company"><option value="all">All authorized companies</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><ChevronDown size={14} /></label> : companies.length === 1 && <div className="company-switch company-context" aria-label="Assigned company"><Building2 size={15}/><span>{companies[0].name}</span></div>}<button className="icon-button theme-toggle" onClick={() => setDark(!dark)} aria-label={`Switch to ${dark ? 'light' : 'dark'} theme`}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button search-trigger" aria-label="Search pages" aria-haspopup="dialog" aria-expanded={searchOpen} onClick={() => { setSearchQuery(""); setSearchOpen(true) }}><Search size={17} /><kbd>âŒ˜ K</kbd></button><Link className="icon-button notification-button" to="/notifications" aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}><Bell size={17} />{unreadNotifications > 0 && <span className="notification-badge" aria-hidden="true">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</Link><div className="account-menu-anchor" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProfileMenuOpen(false) }}><button className="account-menu-trigger" type="button" aria-haspopup="menu" aria-expanded={profileMenuOpen} aria-label={"Account menu for " + profileName} onClick={() => setProfileMenuOpen((open) => !open)}><span className="top-avatar">{isLiveMode ? (auth.user?.email?.slice(0, 2).toUpperCase() ?? 'HR') : 'CM'}</span><ChevronDown size={14}/></button>{profileMenuOpen && <div className="account-menu" role="menu"><div className="account-menu-identity"><strong>{profileName}</strong><span>{isLiveMode ? auth.user?.email : 'Workspace administrator'}</span></div><button role="menuitem" type="button" onClick={() => { setDark((value) => !value); setProfileMenuOpen(false) }}>{dark ? <Sun size={15}/> : <Moon size={15}/>} {dark ? 'Use light theme' : 'Use dark theme'}</button>{isLiveMode && <button role="menuitem" type="button" onClick={async () => { setAuthActionError(''); try { await auth.signOut() } catch { setAuthActionError('We could not sign you out. Please try again.') } finally { setProfileMenuOpen(false) } }}><X size={15}/> Sign out</button>}</div>}</div></div></header>
       {searchOpen && <div className="quick-search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false) }}><section className="quick-search" role="dialog" aria-modal="true" aria-label="Search workspace pages"><label htmlFor="workspace-page-search"><Search size={17}/><input ref={searchInput} id="workspace-page-search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Find an authorized page…" /></label><div role="listbox" aria-label="Available pages">{searchItems.length ? searchItems.map(({ name, path, icon: Icon }) => <Link role="option" aria-selected="false" key={path} to={path} onClick={() => setSearchOpen(false)}><Icon size={16}/><span>{name}</span><ChevronRight size={14}/></Link>) : <p>No accessible pages match that search.</p>}</div><footer><span>Only pages available to your account are shown.</span><button className="button-secondary" onClick={() => setSearchOpen(false)}>Close</button></footer></section></div>}
-      {authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}
+      {authActionError && <div className="auth-shell-error" role="alert">{authActionError}</div>}{workspaceError && <div className="auth-shell-error" role="alert">{workspaceError}</div>}{authUserId && emailManagementAccess === 'unavailable' && <div className="auth-shell-error" role="status">We could not verify administrative access. Refresh the page to retry.</div>}
       <main id="main-content" className="page-content" tabIndex={-1}><RouteErrorBoundary key={location.pathname}><Suspense fallback={<div className="route-loading"><span className="route-loading-mark">GB</span><span>Opening workspace…</span></div>}><Routes>
           <Route path="/" element={<LiveDashboard companies={companies} loading={companiesLoading} canCreateCompany={roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN'].includes(role))} availableRoutes={allowedRoutes} />} />
           <Route path="/companies" element={<CompanyDirectory />} />
@@ -306,7 +338,7 @@ function AppShell() {
           <Route path="/audit" element={<LiveAuditLogs />} />
           <Route path="/notifications" element={<LiveNotifications userId={authUserId} />} />
           <Route path="/settings" element={<LiveSettings />} />
-          <Route path="/email-management" element={<LiveEmailManagement />} />
+          <Route path="/email-management" element={emailRouteAccess === 'allow' ? <LiveEmailManagement /> : emailRouteAccess === 'wait' ? <div className="route-loading" role="status">Checking administrator access…</div> : <Navigate to="/" replace />} />
           <Route path="*" element={<main className="not-found" role="status"><span>404</span><h1>Page not found</h1><p>This workspace route does not exist or is no longer available.</p><Link className="button-primary" to="/">Return to overview</Link></main>} />
         </Routes></Suspense></RouteErrorBoundary></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span>People and payroll workspace</span></footer>
