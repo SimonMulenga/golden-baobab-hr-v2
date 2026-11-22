@@ -397,6 +397,14 @@ verify_jwt = false
 # Resend authenticates events with Svix signatures verified against the raw body.
 verify_jwt = false
 
+[functions.payslip-resend-diagnostic]
+# Only a verified, authenticated platform administrator can consume the server-side one-time claim.
+verify_jwt = true
+
+[functions.payslip-email-admin-status]
+# Read-only configuration and diagnostic status is available only to authenticated platform administrators.
+verify_jwt = true
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

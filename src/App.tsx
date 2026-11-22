@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Bell, BriefcaseBusiness, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
+import { Activity, Bell, BriefcaseBusiness, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCheck, Clock3, FileBarChart2, FileText, Fingerprint, LayoutDashboard, Mail, Menu, Moon, MoreHorizontal, Search, Settings, ShieldCheck, Sun, Users, Wallet, X } from 'lucide-react'
 import { WorkspaceContext, defaultWorkspacePreferences, useWorkspace, type WorkspacePreferences } from './features/companies/WorkspaceContext'
 import { AuthProvider } from './features/auth/AuthContext'
 import { useAuth } from './features/auth/auth-context'
@@ -40,6 +40,7 @@ const LiveAuditLogs = lazy(() => import('./features/admin/LiveAuditLogs').then((
 const LiveHrCatalog = lazy(() => import('./features/admin/LiveHrCatalog').then((module) => ({ default: module.LiveHrCatalog })))
 const LiveNotifications = lazy(() => import('./features/admin/LiveOperations').then((module) => ({ default: module.LiveNotifications })))
 const LiveSettings = lazy(() => import('./features/admin/LiveOperations').then((module) => ({ default: module.LiveSettings })))
+const LiveEmailManagement = lazy(() => import('./features/admin/email-management/LiveEmailManagement').then((module) => ({ default: module.LiveEmailManagement })))
 const AuthPrototype = lazy(() => import('./features/auth/AuthPrototype').then((module) => ({ default: module.AuthPrototype })))
 import './index.css'
 import './client-ui.css'
@@ -51,7 +52,7 @@ const nav = [
   { label: 'OVERVIEW', items: [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }] },
   { label: 'PEOPLE & OPERATIONS', items: [{ name: 'Companies', path: '/companies', icon: Building2 }, { name: 'Branches', path: '/branches', icon: Building2 }, { name: 'Employees', path: '/employees', icon: Users }, { name: 'Employment Lifecycle', path: '/employees/lifecycle', icon: Activity }, { name: 'Employee Import', path: '/employees/import', icon: FileText }, { name: 'Employee Approvals', path: '/employee-approvals', icon: ShieldCheck }, { name: 'Departments', path: '/departments', icon: Building2 }, { name: 'Job roles', path: '/job-roles', icon: BriefcaseBusiness }, { name: 'Attendance', path: '/attendance', icon: Clock3 }, { name: 'Leave Management', path: '/leave', icon: CalendarDays }] },
   { label: 'PAYROLL & INSIGHTS', items: [{ name: 'Payroll', path: '/payroll', icon: Wallet }, { name: 'Pending payroll approval', path: '/payroll-approvals', icon: ClipboardCheck }, { name: 'Payslips', path: '/payslips', icon: FileText }, { name: 'Payout Reconciliation', path: '/reconciliation', icon: CircleHelp }, { name: 'Deductions & Advances', path: '/deductions', icon: Wallet }, { name: 'Statutory Deductions', path: '/statutory', icon: ShieldCheck }, { name: 'Reports', path: '/reports', icon: FileBarChart2 }] },
-  { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Settings', path: '/settings', icon: Settings }] },
+  { label: 'ADMINISTRATION', items: [{ name: 'Users & Permissions', path: '/users', icon: Fingerprint }, { name: 'Audit Logs', path: '/audit', icon: Activity }, { name: 'Notifications', path: '/notifications', icon: Bell }, { name: 'Email Management', path: '/email-management', icon: Mail }, { name: 'Settings', path: '/settings', icon: Settings }] },
 ]
 function AppShell() {
   const auth = useAuth()
@@ -68,6 +69,7 @@ function AppShell() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesOwnerId, setCompaniesOwnerId] = useState<string | null>(null)
   const [roleContext, setRoleContext] = useState<{ roles: WorkspaceRole[]; loading: boolean }>({ roles: [], loading: true })
+  const [emailManagementAccess, setEmailManagementAccess] = useState<'checking' | 'allowed' | 'denied'>('checking')
   const companiesLoading = isLiveMode && auth.user?.id !== companiesOwnerId
   const [workspaceError, setWorkspaceError] = useState('')
   const [activeCompanyId, setActiveCompanyId] = useState('all')
@@ -96,7 +98,7 @@ function AppShell() {
   const allowedRoutes = useMemo(() => visibleWorkspaceRoutes(roleContext.roles), [roleContext.roles])
   const canOpenPayrollApprovals = allowedRoutes.has('/payroll-approvals')
   const canOpenEmployeeApprovals = allowedRoutes.has('/employee-approvals')
-  const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes])
+  const visibleNav = useMemo(() => nav.map((section) => ({ ...section, items: section.items.filter((item) => item.path === '/email-management' ? Boolean(authUserId) && emailManagementAccess === 'allowed' : allowedRoutes.has(item.path)) })).filter((section) => section.items.length), [allowedRoutes, authUserId, emailManagementAccess])
   const searchItems = useMemo(() => visibleNav.flatMap((section) => section.items).filter((item) => item.name.toLowerCase().includes(searchQuery.trim().toLowerCase())), [visibleNav, searchQuery])
   const branchOnly = roleContext.roles.includes('BRANCH_MANAGER') && !roleContext.roles.some((role) => ['PORTFOLIO_ADMIN', 'PORTFOLIO_COMPANY_ADMIN', 'OVERALL_HR_MANAGER'].includes(role))
   const maySelectCompany = !branchOnly && companies.length > 1
@@ -208,6 +210,17 @@ function AppShell() {
     return () => { cancelled = true }
   }, [authUserId])
   useEffect(() => {
+    if (!isLiveMode || !authUserId) { setEmailManagementAccess('denied'); return }
+    let cancelled = false
+    setEmailManagementAccess('checking')
+    void getSupabaseClient().functions.invoke('payslip-email-admin-status', { method: 'GET' })
+      .then(({ data: result, error }) => {
+        if (!cancelled) setEmailManagementAccess(!error && result?.authorized === true ? 'allowed' : 'denied')
+      })
+      .catch(() => { if (!cancelled) setEmailManagementAccess('denied') })
+    return () => { cancelled = true }
+  }, [authUserId])
+  useEffect(() => {
     if (!authUserId || companiesOwnerId !== authUserId || companies.length !== 1) return
     setActiveCompanyId((current) => current === 'all' ? companies[0].id : current)
   }, [authUserId, companiesOwnerId, companies])
@@ -244,10 +257,12 @@ function AppShell() {
   if (authGate === 'recovery') return <Navigate to="/auth/reset" replace />
   if (authGate === 'login') return <Navigate to="/auth/login" replace />
   const routeAllowed = roleCanOpenPath(allowedRoutes, location.pathname)
+    || (location.pathname === '/email-management' && Boolean(authUserId) && emailManagementAccess === 'allowed')
   const knownRoute = nav.flatMap((section) => section.items).some((item) => item.path === location.pathname)
     || /^\/(employees|companies)\/[^/]+(?:\/(edit|correct))?$/.test(location.pathname)
     || location.pathname.startsWith('/employees/import/')
-  if (isLiveMode && knownRoute && !roleContext.loading && !companiesLoading && location.pathname !== '/' && !routeAllowed) return <Navigate to="/" replace />
+  if (isLiveMode && knownRoute && !roleContext.loading && !companiesLoading && location.pathname !== '/' && !routeAllowed
+    && !(location.pathname === '/email-management' && emailManagementAccess === 'checking')) return <Navigate to="/" replace />
   if (location.pathname.startsWith('/auth/')) return <Suspense fallback={<div className="route-loading">Opening sign-in…</div>}><Routes><Route path="/auth/:screen" element={<AuthPrototype/>}/></Routes></Suspense>
   return <WorkspaceContext.Provider value={data}><div className={`app-shell ${collapsed ? 'is-collapsed' : ''}`}><a className="skip-to-content" href="#main-content">Skip to content</a>{mobileOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside id="workspace-navigation" className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
@@ -291,6 +306,7 @@ function AppShell() {
           <Route path="/audit" element={<LiveAuditLogs />} />
           <Route path="/notifications" element={<LiveNotifications userId={authUserId} />} />
           <Route path="/settings" element={<LiveSettings />} />
+          <Route path="/email-management" element={<LiveEmailManagement />} />
           <Route path="*" element={<main className="not-found" role="status"><span>404</span><h1>Page not found</h1><p>This workspace route does not exist or is no longer available.</p><Link className="button-primary" to="/">Return to overview</Link></main>} />
         </Routes></Suspense></RouteErrorBoundary></main>
       <footer className="app-footer"><span>Â© 2026 Golden Baobab HR</span><span>Built for the way Zambia works <span className="footer-sun">âœ³</span></span><span>People and payroll workspace</span></footer>

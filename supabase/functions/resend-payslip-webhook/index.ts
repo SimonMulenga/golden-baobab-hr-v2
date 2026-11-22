@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { verifyResendWebhookSignature } from '../_shared/payslip-tokens.ts'
+import { hasDiagnosticPurposeTag, supportedResendEvents } from './policy.ts'
 
 const reply = (status: number, value: Record<string, unknown>) => new Response(JSON.stringify(value), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
@@ -22,12 +23,13 @@ Deno.serve(async (request) => {
   const type = text(parsed.type)
   const data = object(parsed.data)
   const tags = Array.isArray(data.tags) ? data.tags.map(object) : []
+  const diagnostic = hasDiagnosticPurposeTag(data.tags)
   if (!tags.some((tag) => tag.name === 'product' && tag.value === 'golden-baobab-payslip')) {
     return reply(202, { received: true, ignored: true })
   }
   const messageId = text(data.email_id || data.id)
   const eventTime = text(parsed.created_at || data.created_at)
-  if (!/^email\.(sent|delivered|bounced|failed|delivery_delayed)$/u.test(type) || !messageId) {
+  if (!supportedResendEvents.has(type) || !messageId) {
     // A correctly signed but unrelated event is acknowledged and ignored.
     return reply(202, { received: true, ignored: true })
   }
@@ -44,6 +46,18 @@ Deno.serve(async (request) => {
     // Do not log provider payloads, recipient addresses, or payroll details.
     console.error('Resend payslip webhook persistence failed')
     return reply(500, { error: 'Delivery event could not be recorded.' })
+  }
+  if (diagnostic) {
+    const { error: diagnosticError } = await admin.rpc('payslip_resend_diagnostic_apply_event', {
+      p_provider_event_id: eventId,
+      p_provider_message_id: messageId,
+      p_event_type: type,
+      p_occurred_at: Number.isFinite(Date.parse(eventTime)) ? new Date(eventTime).toISOString() : null,
+    })
+    if (diagnosticError) {
+      console.error('Resend diagnostic event status update failed')
+      return reply(500, { error: 'Diagnostic event status could not be recorded.' })
+    }
   }
   return reply(200, { received: true, applied: applied === true })
 })
