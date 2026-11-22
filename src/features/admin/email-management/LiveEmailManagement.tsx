@@ -21,6 +21,20 @@ const statusDescription: Record<DiagnosticState, string> = {
   UNKNOWN: 'The one-time attempt may have been consumed, but its outcome is not confirmed.',
 }
 
+const deliveryStatusLabel: Record<string, string> = {
+  QUEUED: 'Queued', SENDING: 'Processing', SENT: 'Sent / accepted', DELIVERED: 'Delivered',
+  DELAYED: 'Delayed', FAILED: 'Failed', BOUNCED: 'Bounced',
+}
+
+function errorLabel(code: string | null): string | null {
+  if (!code) return null
+  if (/^PROVIDER_HTTP_4\d{2}$/.test(code)) return `Provider rejected request (${code.slice(-3)})`
+  if (/^PROVIDER_HTTP_5\d{2}$/.test(code)) return `Provider returned a server error (${code.slice(-3)})`
+  if (code === 'PROVIDER_REPORTED_FAILURE') return 'Resend reported a delivery failure'
+  if (code === 'DELIVERY_FAILED') return 'Delivery failed before provider acceptance was confirmed'
+  return null
+}
+
 function eventLabel(eventType: string): string {
   switch (eventType) {
     case 'email.sent': return 'Accepted by Resend'
@@ -104,12 +118,12 @@ export function LiveEmailManagement() {
           <div><dt>Webhook signing secret</dt><dd><StatusValue ok={configuration.resendWebhookSecretConfigured}/></dd></div>
           <div><dt>Sender address</dt><dd>{configuration.senderConfigured ? configuration.sender : 'Not configured'}</dd></div>
           <div><dt>Sender address matches verified domain</dt><dd><StatusValue ok={configuration.senderAddressValid}/></dd></div>
-          <div><dt>Sender domain verified</dt><dd><StatusValue ok={configuration.senderDomainVerified}/></dd></div>
+          <div><dt>Sender domain verification setting</dt><dd><StatusValue ok={configuration.senderDomainVerified}/></dd></div>
           <div><dt>Live payslip delivery</dt><dd><StatusValue ok={!configuration.livePayslipDeliveryEnabled} value={configuration.livePayslipDeliveryEnabled ? 'Enabled' : 'Disabled'}/></dd></div>
           <div><dt>First live send approval</dt><dd><StatusValue ok={!configuration.firstLiveSendApproved} value={configuration.firstLiveSendApproved ? 'Approved' : 'Disabled'}/></dd></div>
           <div><dt>Diagnostic recipient</dt><dd>{configuration.diagnosticRecipient}</dd></div>
         </dl>
-        <p className="email-management-footnote">Credentials are never returned to the browser. Live payslip delivery and first-send approval are independent of this diagnostic.</p>
+        <p className="email-management-footnote">Credentials are never returned to the browser. Domain status reflects the configured Supabase setting; the Resend dashboard is not queried live. Live payslip delivery and first-send approval are independent of this diagnostic.</p>
       </section>
 
       <section className="panel email-management-panel" aria-label="One-time Resend diagnostic">
@@ -138,11 +152,28 @@ export function LiveEmailManagement() {
       </section>
 
       <section className="panel email-management-panel" aria-label="Recent payslip delivery activity">
-        <header><div><div className="section-eyebrow">SANITIZED HISTORY</div><h2>Recent payslip email delivery activity</h2></div><span className="email-management-owner-badge">Status and time only</span></header>
+        <header><div><div className="section-eyebrow">BACKEND DELIVERY RECORDS</div><h2>Payslip email delivery activity</h2></div><span className="email-management-owner-badge">Owner-only status data</span></header>
+        {status.deliverySummaryAvailable && status.deliverySummary ? <div className="email-delivery-summary" aria-label="Payslip delivery totals">
+          <SummaryValue label="Total processed" value={status.deliverySummary.totalProcessed}/>
+          <SummaryValue label="Queued" value={status.deliverySummary.queued}/>
+          <SummaryValue label="Sent / accepted" value={status.deliverySummary.sent}/>
+          <SummaryValue label="Delivered" value={status.deliverySummary.delivered}/>
+          <SummaryValue label="Failed" value={status.deliverySummary.failed}/>
+          <SummaryValue label="Rejected" value={status.deliverySummary.rejected}/>
+          <SummaryValue label="Bounced" value={status.deliverySummary.bounced}/>
+          <SummaryValue label="Delay events" value={status.deliverySummary.deliveryDelayEvents}/>
+        </div> : <p className="email-management-footnote" role="status">Delivery totals are temporarily unavailable.</p>}
         <div className="email-diagnostic-history email-payslip-history">
-          {!status.deliveryHistoryAvailable ? <p role="status">Recent delivery history could not be loaded.</p> : status.deliveryHistory.length ? status.deliveryHistory.map((item, index) => <div className="email-diagnostic-event" key={`${item.status}-${item.updatedAt}-${index}`}><span>{item.status}</span><time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleString()}</time></div>) : <p>No payslip email delivery activity has been recorded.</p>}
+          {!status.deliveryHistoryAvailable ? <p role="status">Recent delivery history could not be loaded.</p> : status.deliveryHistory.length ? status.deliveryHistory.map((item, index) => <div className="email-diagnostic-event email-delivery-event" key={`${item.status}-${item.updatedAt}-${index}`}>
+            <strong>{deliveryStatusLabel[item.status] ?? 'Unknown'}</strong>
+            <time dateTime={item.updatedAt}>Updated {new Date(item.updatedAt).toLocaleString()}</time>
+            {item.providerMessageId && <code>Provider ID: {item.providerMessageId}</code>}
+            {errorLabel(item.errorCode) && <span className="email-delivery-error">{errorLabel(item.errorCode)}</span>}
+            {item.attempts > 0 && <span>{item.attempts} attempt{item.attempts === 1 ? '' : 's'}</span>}
+            <span>{item.retryEligibleByDeliveryState ? 'Retry state eligible; payroll authorization is still required' : 'Retry state not eligible'}</span>
+          </div>) : <p>No payslip email delivery activity has been recorded.</p>}
         </div>
-        <p className="email-management-footnote">This view excludes employee names, company details, recipient addresses, payslip values and provider identifiers.</p>
+        <p className="email-management-footnote">Rows include only backend status, timestamps, provider message IDs, safe error codes and delivery-state retry eligibility. Every retry is still checked against the existing company and branch payroll permissions.</p>
       </section>
     </> : null}
 
@@ -158,4 +189,8 @@ export function LiveEmailManagement() {
 
 function StatusValue({ ok, value }: { ok: boolean; value?: string }) {
   return <span className={`email-config-value ${ok ? 'is-ok' : 'is-bad'}`}>{ok ? <CheckCircle2 size={13}/> : <AlertCircle size={13}/>} {value ?? (ok ? 'Configured' : 'Not configured')}</span>
+}
+
+function SummaryValue({ label, value }: { label: string; value: number }) {
+  return <div className="email-delivery-summary-value"><span>{label}</span><strong>{value.toLocaleString()}</strong></div>
 }

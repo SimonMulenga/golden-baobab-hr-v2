@@ -1,11 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { approvedAppOrigins } from '../payslip-artifacts/origins.ts'
 import { validDiagnosticConfiguration } from '../payslip-resend-diagnostic/policy.ts'
-import { configuredBoolean, diagnosticStatus, fixedDiagnosticRecipient, isFixedRecipient, safeDeliveryHistory, safeEventHistory } from './policy.ts'
+import { buildDeliverySummary, configuredBoolean, diagnosticStatus, fixedDiagnosticRecipient, isFixedRecipient, safeDeliveryHistory, safeEventHistory } from './policy.ts'
 
 const corsHeaders = (request: Request) => {
   const origin = request.headers.get('origin') ?? ''
-  const allowedOrigins = approvedAppOrigins(Deno.env.get('PAYSLIP_ALLOWED_ORIGINS') ?? '')
+  const allowedOrigins = approvedAppOrigins(Deno.env.get('APPROVED_APP_ORIGINS') ?? '')
   return {
     ...(allowedOrigins.includes(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
@@ -80,15 +80,53 @@ Deno.serve(async (request) => {
   }
 
   const { data: deliveryRows, error: deliveryHistoryError } = await admin.from('payslip_email_deliveries')
-    .select('status,updated_at')
+    .select('status,updated_at,created_at,sent_at,delivered_at,bounced_at,provider_message_id,last_error_code,attempts')
     .order('updated_at', { ascending: false })
     .limit(20)
-  const deliveryHistoryAvailable = !deliveryHistoryError
+  const messageIds = (deliveryRows ?? []).map((row) => text(row.provider_message_id)).filter(Boolean)
+  let eventStateError = false
+  const latestEvents = new Map<string, string>()
+  if (messageIds.length) {
+    const { data: deliveryEvents, error: deliveryEventsError } = await admin.from('payslip_email_events')
+      .select('provider_message_id,event_type')
+      .in('provider_message_id', messageIds)
+      .order('received_at', { ascending: false })
+      .limit(1000)
+    eventStateError = Boolean(deliveryEventsError)
+    if (!deliveryEventsError) for (const event of deliveryEvents ?? []) {
+      const id = text(event.provider_message_id)
+      if (id && !latestEvents.has(id)) latestEvents.set(id, text(event.event_type))
+    }
+  }
+  const deliveryHistoryAvailable = !deliveryHistoryError && !eventStateError
   const deliveryHistory = deliveryHistoryAvailable
-    ? (deliveryRows ?? [])
-      .filter((row) => typeof row.status === 'string' && typeof row.updated_at === 'string')
-      .map((row) => ({ status: text(row.status), updated_at: text(row.updated_at) }))
+    ? safeDeliveryHistory((deliveryRows ?? []).map((row) => ({
+      status: text(row.status),
+      updated_at: text(row.updated_at),
+      created_at: text(row.created_at),
+      sent_at: text(row.sent_at),
+      delivered_at: text(row.delivered_at),
+      bounced_at: text(row.bounced_at),
+      provider_message_id: text(row.provider_message_id),
+      last_error_code: text(row.last_error_code),
+      attempts: typeof row.attempts === 'number' ? row.attempts : 0,
+      latest_event_type: latestEvents.get(text(row.provider_message_id)) ?? null,
+    })))
     : []
+
+  const deliveryStates = ['QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'FAILED', 'BOUNCED'] as const
+  const [stateCounts, rejectedResult, delayedEventResult] = await Promise.all([
+    Promise.all(deliveryStates.map(async (state) => {
+      const { count, error } = await admin.from('payslip_email_deliveries').select('id', { count: 'exact', head: true }).eq('status', state)
+      return { state, count: count ?? 0, error }
+    })),
+    admin.from('payslip_email_deliveries').select('id', { count: 'exact', head: true }).eq('status', 'FAILED').like('last_error_code', 'PROVIDER_HTTP_4%'),
+    admin.from('payslip_email_events').select('id', { count: 'exact', head: true }).eq('event_type', 'email.delivery_delayed'),
+  ])
+  const deliverySummaryAvailable = stateCounts.every((entry) => !entry.error) && !rejectedResult.error && !delayedEventResult.error
+  const deliverySummary = deliverySummaryAvailable
+    ? buildDeliverySummary(Object.fromEntries(stateCounts.map((entry) => [entry.state, entry.count])), rejectedResult.count ?? 0, delayedEventResult.count ?? 0)
+    : null
 
   const providerStatus = ['ACCEPTED', 'DELIVERED', 'DELAYED', 'FAILED'].includes(text(attempt?.provider_status))
     ? text(attempt?.provider_status)
@@ -122,7 +160,9 @@ Deno.serve(async (request) => {
         ? text(attempt?.error_code)
         : null,
     },
+    deliverySummaryAvailable,
+    deliverySummary,
     deliveryHistoryAvailable,
-    deliveryHistory: safeDeliveryHistory(deliveryHistory),
+    deliveryHistory,
   })
 })

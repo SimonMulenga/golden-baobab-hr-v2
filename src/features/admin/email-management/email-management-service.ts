@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../lib/supabase/client'
 
 export type DiagnosticState = 'NOT_SENT' | 'ACCEPTED' | 'DELIVERED' | 'DELAYED' | 'FAILED' | 'UNKNOWN'
 export type DiagnosticEventType = 'email.sent' | 'email.delivered' | 'email.bounced' | 'email.failed' | 'email.delivery_delayed'
+export type PayslipDeliveryState = 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'DELAYED' | 'FAILED' | 'BOUNCED'
 
 export interface EmailManagementStatus {
   authorized: true
@@ -29,8 +30,32 @@ export interface EmailManagementStatus {
     events: Array<{ eventType: DiagnosticEventType; occurredAt: string }>
     errorCode: 'PROVIDER_REJECTED' | 'OUTCOME_UNKNOWN' | 'STATUS_PERSISTENCE_FAILED' | null
   }
+  deliverySummaryAvailable: boolean
+  deliverySummary: {
+    totalProcessed: number
+    queued: number
+    sending: number
+    sent: number
+    delivered: number
+    failed: number
+    rejected: number
+    bounced: number
+    deliveryDelayEvents: number
+  } | null
   deliveryHistoryAvailable: boolean
-  deliveryHistory: Array<{ status: 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'BOUNCED'; updatedAt: string }>
+  deliveryHistory: Array<{
+    status: PayslipDeliveryState
+    updatedAt: string
+    createdAt: string | null
+    sentAt: string | null
+    deliveredAt: string | null
+    bouncedAt: string | null
+    providerMessageId: string | null
+    errorCode: string | null
+    attempts: number
+    latestEventType: DiagnosticEventType | null
+    retryEligibleByDeliveryState: boolean
+  }>
 }
 
 export async function loadEmailManagementStatus(): Promise<EmailManagementStatus> {

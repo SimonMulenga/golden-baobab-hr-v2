@@ -37,6 +37,8 @@ function status(overrides: Record<string, unknown> = {}) {
       errorCode: null,
     },
     deliveryHistoryAvailable: true,
+    deliverySummaryAvailable: true,
+    deliverySummary: { totalProcessed: 0, queued: 0, sending: 0, sent: 0, delivered: 0, failed: 0, rejected: 0, bounced: 0, deliveryDelayEvents: 0 },
     deliveryHistory: [],
     ...overrides,
   }
@@ -94,13 +96,24 @@ describe('platform-owner Email Management', () => {
     expect(screen.getByText('Attempt consumed')).toBeTruthy()
   })
 
-  it('shows sanitized delivery history without employee or recipient fields', async () => {
-    mocks.load.mockResolvedValue(status({ deliveryHistory: [{ status: 'FAILED', updatedAt: '2026-11-22T10:00:00Z' }] }))
+  it('shows backend delivery totals and sanitized row metadata without employee or recipient fields', async () => {
+    mocks.load.mockResolvedValue(status({
+      deliverySummary: { totalProcessed: 5, queued: 1, sending: 0, sent: 1, delivered: 2, failed: 1, rejected: 1, bounced: 0, deliveryDelayEvents: 3 },
+      deliveryHistory: [{ status: 'FAILED', updatedAt: '2026-11-22T10:00:00Z', createdAt: '2026-11-22T09:00:00Z', sentAt: null, deliveredAt: null, bouncedAt: null, providerMessageId: 'msg_safe_1', errorCode: 'PROVIDER_HTTP_422', attempts: 1, latestEventType: null, retryEligibleByDeliveryState: true }],
+    }))
     render(<LiveEmailManagement />)
     expect(await screen.findByRole('region', { name: 'Recent payslip delivery activity' })).toBeTruthy()
-    expect(screen.getByText('Status and time only')).toBeTruthy()
-    expect(screen.getByText('This view excludes employee names, company details, recipient addresses, payslip values and provider identifiers.')).toBeTruthy()
+    expect(screen.getByText('5')).toBeTruthy()
+    expect(screen.getByText('Provider rejected request (422)')).toBeTruthy()
+    expect(screen.getByText('Provider ID: msg_safe_1')).toBeTruthy()
+    expect(screen.getByText('Retry state eligible; payroll authorization is still required')).toBeTruthy()
     expect(screen.queryByText(/employee@example|Payroll Run/)).toBeNull()
+  })
+
+  it('labels sender verification as a configured setting rather than a live provider query', async () => {
+    render(<LiveEmailManagement />)
+    expect(await screen.findByText('Sender domain verification setting')).toBeTruthy()
+    expect(screen.getByText(/Resend dashboard is not queried live/)).toBeTruthy()
   })
 
   it('does not display internal errors returned by the status loader', async () => {

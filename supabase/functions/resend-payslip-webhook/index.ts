@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { verifyResendWebhookSignature } from '../_shared/payslip-tokens.ts'
-import { hasDiagnosticPurposeTag, supportedResendEvents } from './policy.ts'
+import { hasDiagnosticPurposeTag, hasPayslipProductTag, supportedResendEvents } from './policy.ts'
 
 const reply = (status: number, value: Record<string, unknown>) => new Response(JSON.stringify(value), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
@@ -22,9 +22,8 @@ Deno.serve(async (request) => {
   try { parsed = object(JSON.parse(rawBody)) } catch { return reply(400, { error: 'Invalid event payload.' }) }
   const type = text(parsed.type)
   const data = object(parsed.data)
-  const tags = Array.isArray(data.tags) ? data.tags.map(object) : []
   const diagnostic = hasDiagnosticPurposeTag(data.tags)
-  if (!tags.some((tag) => tag.name === 'product' && tag.value === 'golden-baobab-payslip')) {
+  if (!hasPayslipProductTag(data.tags)) {
     return reply(202, { received: true, ignored: true })
   }
   const messageId = text(data.email_id || data.id)

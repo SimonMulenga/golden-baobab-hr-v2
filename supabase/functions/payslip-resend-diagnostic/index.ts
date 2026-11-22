@@ -4,7 +4,7 @@ import { approvedAppOrigins } from '../payslip-artifacts/origins.ts'
 
 const corsHeaders = (request: Request) => {
   const origin = request.headers.get('origin') ?? ''
-  const allowedOrigins = approvedAppOrigins(Deno.env.get('PAYSLIP_ALLOWED_ORIGINS') ?? '')
+  const allowedOrigins = approvedAppOrigins(Deno.env.get('APPROVED_APP_ORIGINS') ?? '')
   return {
     ...(allowedOrigins.includes(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
