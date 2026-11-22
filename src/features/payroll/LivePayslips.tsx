@@ -9,6 +9,13 @@ import '../../module-modernization.css'
 
 const money = (value: number) => `K${value.toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const period = (run: FinalizedPayslipRunRecord, preferences?: ReturnType<typeof useWorkspace>['preferences']) => formatWorkspaceDate(`${run.payroll_periods.period_start}T00:00:00Z`, preferences, { month: 'long', year: 'numeric', timeZone: 'UTC' })
+const authorizationMessages = [
+  'Your account does not have payslip issuance access for this company and branch.',
+  'Sign in again before issuing a payslip.',
+  'Your session expired. Sign in again before issuing a payslip.',
+  'This application address is not enabled for secure payslip operations. Contact the system administrator.',
+]
+const isAuthorizationFailure = (error: unknown) => error instanceof Error && authorizationMessages.includes(error.message)
 
 export function LivePayslips() {
   const { companies, preferences } = useWorkspace()
@@ -253,18 +260,28 @@ function PayslipDistribution({
 
   const sendOne = async (row: PayslipDistributionRecord) => {
     setBusy(true); setError(''); setMessage('')
+    let phase: 'issuance' | 'email' = 'issuance'
     try {
       let documentId = row.document_id
       if (!documentId) documentId = (await api.payslips.issueDocument(run.id, row.employee_id)).documentId
+      phase = 'email'
       const result = await api.payslips.sendEmail(documentId)
       setMessage(result.status === 'SENT'
         ? 'The email provider accepted the payslip for delivery.'
+        : result.status === 'FAILED'
+          ? 'Email delivery failed. Provider acceptance is unconfirmed; review delivery history before retrying.'
         : result.deliveryConfigured
           ? 'The payslip is queued for delivery.'
           : 'Delivery remains queued. Email sending is disabled until provider and sender verification are configured.')
       await refresh()
-    } catch {
-      setError('This payslip could not be queued. Check the recipient address and your payroll permissions.')
+    } catch (error) {
+      setError(phase === 'issuance'
+        ? isAuthorizationFailure(error)
+          ? 'Authorization failed during payslip issuance. Verify your company and branch permissions.'
+          : 'Document issuance failed. Verify the finalized payroll source and issue permissions.'
+        : isAuthorizationFailure(error)
+          ? 'Authorization failed while queueing the email. Verify payroll delivery permissions.'
+          : 'Email delivery request failed. Provider acceptance is unconfirmed; check delivery history before retrying.')
       await refresh()
     } finally { setBusy(false) }
   }
@@ -296,19 +313,42 @@ function PayslipDistribution({
 
   const sendMany = async () => {
     setConfirmation(null); setBusy(true); setError(''); setMessage('')
-    let accepted = 0; let queued = 0; let failed = 0
+    let accepted = 0; let queued = 0; let issuanceFailed = 0; let authorizationFailed = 0; let emailRequestFailed = 0
     try {
       const targets = confirmationRows.filter(eligible)
       for (const row of targets) {
+        let documentId = row.document_id
+        if (!documentId) {
+          try { documentId = (await api.payslips.issueDocument(run.id, row.employee_id)).documentId }
+          catch (error) {
+            if (isAuthorizationFailure(error)) authorizationFailed += 1
+            else issuanceFailed += 1
+            continue
+          }
+        }
         try {
-          const documentId = row.document_id ?? (await api.payslips.issueDocument(run.id, row.employee_id)).documentId
           const result = await api.payslips.sendEmail(documentId)
           if (result.status === 'SENT') accepted += 1
+          else if (result.status === 'FAILED') emailRequestFailed += 1
           else queued += 1
-        } catch { failed += 1 }
+        } catch (error) {
+          if (isAuthorizationFailure(error)) authorizationFailed += 1
+          else emailRequestFailed += 1
+        }
       }
       setSelected([])
-      setMessage(`${accepted} accepted by the email provider, ${queued} queued, ${failed} failed. Live email delivery remains disabled until the verified sender is configured.`)
+      const failed = issuanceFailed + authorizationFailed + emailRequestFailed
+      const summary = `${accepted} accepted by the email provider, ${queued} queued, ${failed} failed.`
+      const details = [
+        issuanceFailed ? `${issuanceFailed} document issuance failed` : '',
+        authorizationFailed ? `${authorizationFailed} authorization check${authorizationFailed === 1 ? '' : 's'} failed` : '',
+        emailRequestFailed ? `${emailRequestFailed} email delivery request${emailRequestFailed === 1 ? '' : 's'} failed; provider acceptance is unconfirmed` : '',
+      ].filter(Boolean).join('; ')
+      setMessage(failed > 0
+        ? `${summary} ${details}. Review delivery history before retrying.`
+        : queued > 0
+          ? `${summary} Live sending remains disabled until both delivery gates are approved and sender configuration is valid.`
+          : summary)
       await refresh()
     } finally { setBusy(false) }
   }
