@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Eye, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type LiveBusinessServices, type PayslipDeliveryBlockReason, type PayslipDistributionRecord, type PayslipEmailEventRecord, type PayslipEmailRequestResult, type PayslipStatementDetails } from '../../services/live-business-services'
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
@@ -45,7 +45,7 @@ export function LivePayslips() {
   const [notice, setNotice] = useState('')
   const [artifactId, setArtifactId] = useState('')
   const [artifactOwner, setArtifactOwner] = useState('')
-  const [signedUrl, setSignedUrl] = useState('')
+  const [artifactLookup, setArtifactLookup] = useState<'loading' | 'existing' | 'missing' | 'error'>('loading')
   const [deliveryRows, setDeliveryRows] = useState<Array<{ id: string; status: string; attempts: number; last_error_code: string | null; created_at: string; updated_at: string; sent_at: string | null }>>([])
   const [deliveryEvents, setDeliveryEvents] = useState<PayslipEmailEventRecord[]>([])
   const [statementDetails, setStatementDetails] = useState<PayslipStatementDetails | null>(null)
@@ -68,6 +68,28 @@ export function LivePayslips() {
     ? buildPayslipView({ company, branch: company.branches.find((branch) => branch.id === selectedRun.branch_id), employee: selectedEmployee, run: selectedRun, item: selectedItem, statementDetails: currentStatementDetails })
     : null, [selectedRun, selectedItem, selectedEmployee, company, currentStatementDetails])
   const api = useMemo(() => createLiveBusinessServices(getSupabaseClient()), [])
+
+  useEffect(() => {
+    if (!selectedRunId || !selectedItem?.employee_id) return
+    let cancelled = false
+    const owner = `${selectedRunId}:${selectedItem.employee_id}`
+    setArtifactOwner(owner)
+    setArtifactId('')
+    setArtifactLookup('loading')
+    setDeliveryRows([])
+    setDeliveryEvents([])
+    api.payslips.existingDocument(selectedRunId, selectedItem.employee_id)
+      .then(async (documentId) => {
+        if (cancelled) return
+        if (!documentId) { setArtifactLookup('missing'); return }
+        setArtifactId(documentId)
+        setArtifactLookup('existing')
+        try { setDeliveryRows(await api.payslips.deliveryHistory(documentId)) } catch { if (!cancelled) setDeliveryRows([]) }
+        try { setDeliveryEvents(await api.payslips.eventHistory(documentId)) } catch { if (!cancelled) setDeliveryEvents([]) }
+      })
+      .catch(() => { if (!cancelled) setArtifactLookup('error') })
+    return () => { cancelled = true }
+  }, [selectedRunId, selectedItem?.employee_id])
 
   useEffect(() => {
     const timer = window.setInterval(() => setDeliveryClock(Date.now()), 15_000)
@@ -121,18 +143,28 @@ export function LivePayslips() {
     setArtifactBusy(true); setError(''); setNotice('')
     try {
       const result = await api.payslips.issueDocument(selectedRun.id, selectedItem.employee_id)
-      setArtifactId(result.documentId); setArtifactOwner(`${selectedRun.id}:${selectedItem.employee_id}`); setSignedUrl(result.signedUrl)
-      setNotice('Generated from the finalized payroll snapshot. The private download link expires after 60 seconds.')
+      setArtifactId(result.documentId); setArtifactOwner(`${selectedRun.id}:${selectedItem.employee_id}`); setArtifactLookup('existing')
+      setNotice('The secured payslip was generated from the finalized payroll snapshot and stored privately. It is available to authorized users.')
       try { setDeliveryRows(await api.payslips.deliveryHistory(result.documentId)) } catch { setDeliveryRows([]) }
       try { setDeliveryEvents(await api.payslips.eventHistory(result.documentId)) } catch { setDeliveryEvents([]) }
     } catch (error) { setError(error instanceof Error ? error.message : 'The secure payslip could not be issued.') }
     finally { setArtifactBusy(false) }
   }
-  const refreshSecureLink = async () => {
+  const openSecureDocument = async (disposition: 'download' | 'inline') => {
     if (!currentArtifactId) return
+    const target = window.open('about:blank', '_blank')
+    if (!target) { setError('Allow this site to open a new tab, then try the secure document action again.'); return }
+    target.opener = null
     setArtifactBusy(true); setError('')
-    try { const result = await api.payslips.downloadDocument(currentArtifactId); setSignedUrl(result.signedUrl) }
-    catch { setError('A secure download link could not be created under your current access scope.') }
+    try {
+      const result = await api.payslips.downloadDocument(currentArtifactId, disposition)
+      target.location.replace(result.signedUrl)
+      setNotice(disposition === 'download' ? 'Secure download started.' : 'Secure payslip view opened.')
+    }
+    catch {
+      target.close()
+      setError('The payslip could not be opened under your current access. Your permissions may have changed; refresh the record or contact an administrator.')
+    }
     finally { setArtifactBusy(false) }
   }
   const sendSecureEmail = async () => {
@@ -207,11 +239,11 @@ export function LivePayslips() {
       : !runs.length ? <div className="panel live-payslip-state"><FileText size={22}/><strong>No finalized payroll found</strong><span>Only finalized payroll runs appear here.</span></div>
         : !model ? <div className="panel live-payslip-state"><FileText size={22}/><strong>Select an employee</strong><span>{total.toLocaleString()} finalized payslip records · 100 employees per page.</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div></div>
           : <>
-            <div className="live-payslip-actions"><span>{total.toLocaleString()} employees in finalized {period(selectedRun!, preferences)} payroll · page {page}/{pageCount}</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button><button className="button-secondary" onClick={print}><Printer size={15}/> Print / save as PDF</button><button className="button-primary" disabled={artifactBusy} onClick={() => void issueSecurePdf()}>{artifactBusy ? <LoaderCircle size={15}/> : <FileText size={15}/>} Generate secure PDF</button></div></div>
-            {currentArtifactId && <section className="panel live-payslip-delivery" aria-label="Payslip document and delivery">
-              <div><strong>Private finalized payslip PDF</strong><p>Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Download links expire after 60 seconds; emailed access links expire after 48 hours and require employee identity verification.</p></div>
-              <div className="live-payslip-pagination"><button className="button-secondary" onClick={() => void refreshSecureLink()} disabled={artifactBusy}><RefreshCw size={15}/> Refresh link</button>{signedUrl && <a className="button-primary" href={signedUrl} target="_blank" rel="noreferrer"><Download size={15}/> Download PDF</a>}<button className="button-secondary" onClick={() => void sendSecureEmail()} disabled={artifactBusy}><Mail size={15}/> Queue email</button></div>
-              <div className="live-payslip-delivery-history"><strong>Delivery history</strong>{deliveryRows.length ? deliveryRows.map((delivery) => { const stale = delivery.status === 'SENDING' && deliveryClock > 0 && deliveryClock - Date.parse(delivery.updated_at) > 10 * 60_000; const retryable = delivery.attempts < 3 && (delivery.status === 'FAILED' || stale); return <div key={delivery.id}><span>{delivery.status}{stale ? ' · stale claim' : ''} · {delivery.attempts}/3 attempts</span><span>{delivery.last_error_code || (delivery.sent_at ? 'Provider accepted' : 'Recorded')}</span>{retryable && <button className="button-secondary" disabled={artifactBusy} onClick={() => void retrySecureEmail(delivery.id)}>Retry</button>}{['SENT', 'DELIVERED'].includes(delivery.status) && <button className="button-secondary" disabled={artifactBusy} onClick={() => void revokeDeliveryAccess(delivery.id)}>Revoke access link</button>}</div> }) : <p>No delivery recorded. History requires payroll issuance access.</p>}{deliveryEvents.length > 0 && <details><summary>Provider event history</summary>{deliveryEvents.map((event) => <div key={event.event_id}><span>{event.event_type}</span><span>{event.occurred_at ? new Date(event.occurred_at).toLocaleString() : 'Time unavailable'}</span></div>)}</details>}</div>
+            <div className="live-payslip-actions"><span>{total.toLocaleString()} employees in finalized {period(selectedRun!, preferences)} payroll · page {page}/{pageCount}</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button><button className="button-secondary" onClick={print}><Printer size={15}/> Print / save as PDF</button>{artifactLookup === 'missing' && <button className="button-primary" disabled={artifactBusy} onClick={() => void issueSecurePdf()}>{artifactBusy ? <LoaderCircle size={15}/> : <FileText size={15}/>} Generate Secured Payslip PDF</button>}{artifactLookup === 'loading' && <span role="status"><LoaderCircle size={15}/> Checking secured document…</span>}{artifactLookup === 'error' && <span role="alert">Existing payslip access could not be checked. Refresh or contact an administrator.</span>}</div></div>
+                        {currentArtifactId && artifactLookup === 'existing' && <section className="panel live-payslip-delivery" aria-label="Payslip document and delivery">
+              <div><strong>Private finalized payslip PDF</strong><p>This document is securely stored and remains available to authorized users. Generated from run {selectedRun?.id.slice(0, 8)} version {selectedRun?.version}. Emailed access links expire after 48 hours and require employee identity verification.</p></div>
+              <div className="live-payslip-pagination"><button className="button-primary" onClick={() => void openSecureDocument('download')} disabled={artifactBusy}><Download size={15}/> Download PDF</button><button className="button-secondary" onClick={() => void openSecureDocument('inline')} disabled={artifactBusy}><Eye size={15}/> View Payslip</button><button className="button-secondary" onClick={() => void sendSecureEmail()} disabled={artifactBusy}><Mail size={15}/> Email Payslip</button></div>
+              <div className="live-payslip-delivery-history"><strong>Delivery Status</strong>{deliveryRows.length ? deliveryRows.map((delivery) => { const stale = delivery.status === 'SENDING' && deliveryClock > 0 && deliveryClock - Date.parse(delivery.updated_at) > 10 * 60_000; const retryable = delivery.attempts < 3 && (delivery.status === 'FAILED' || stale); return <div key={delivery.id}><span>{delivery.status}{stale ? ' · stale claim' : ''} · {delivery.attempts}/3 attempts</span><span>{delivery.last_error_code || (delivery.sent_at ? 'Provider accepted' : 'Recorded')}</span>{retryable && <button className="button-secondary" disabled={artifactBusy} onClick={() => void retrySecureEmail(delivery.id)}>Retry</button>}{['SENT', 'DELIVERED'].includes(delivery.status) && <button className="button-secondary" disabled={artifactBusy} onClick={() => void revokeDeliveryAccess(delivery.id)}>Revoke access link</button>}</div> }) : <p>No delivery recorded. History requires payroll issuance access.</p>}{deliveryEvents.length > 0 && <details><summary>Provider event history</summary>{deliveryEvents.map((event) => <div key={event.event_id}><span>{event.event_type}</span><span>{event.occurred_at ? new Date(event.occurred_at).toLocaleString() : 'Time unavailable'}</span></div>)}</details>}</div>
             </section>}
             <article className="panel live-payslip-document" aria-label={`Payslip for ${model.employeeName}`}>
               <header className="live-payslip-company"><div className="live-payslip-mark">{model.companyMark}</div><div><h2>{model.companyName}</h2><p>{model.companyAddress}</p></div><span className="live-payslip-reference">{model.reference}</span></header>

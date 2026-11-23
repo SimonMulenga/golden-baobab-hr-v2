@@ -489,8 +489,9 @@ export interface LiveBusinessServices {
     finalizedRuns(companyId: string, branchId?: string): Promise<FinalizedPayslipRunRecord[]>;
     finalizedItems(payrollRunId: string, payrollVersion: number, page?: number): Promise<PageResult<FinalizedPayslipItemRecord>>;
     statementDetails(payrollRunId: string, employeeId: string): Promise<PayslipStatementDetails>;
-    issueDocument(payrollRunId: string, employeeId: string): Promise<{ documentId: string; signedUrl: string }>;
-    downloadDocument(documentId: string): Promise<{ signedUrl: string }>;
+    existingDocument(payrollRunId: string, employeeId: string): Promise<string | null>;
+    issueDocument(payrollRunId: string, employeeId: string): Promise<{ documentId: string }>;
+    downloadDocument(documentId: string, disposition?: 'download' | 'inline'): Promise<{ signedUrl: string }>;
     sendEmail(documentId: string): Promise<PayslipEmailRequestResult>;
     retryEmail(deliveryId: string): Promise<PayslipEmailRequestResult>;
     deliveryHistory(documentId: string): Promise<PayslipDeliveryRecord[]>;
@@ -1091,15 +1092,21 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
           p_payroll_run_id: payrollRunId, p_employee_id: employeeId,
         })) as PayslipStatementDetails;
       },
+      async existingDocument(payrollRunId, employeeId) {
+        const result = await client.from('payslip_documents').select('id')
+          .eq('payroll_run_id', payrollRunId).eq('employee_id', employeeId).maybeSingle();
+        if (result.error) throw result.error;
+        return typeof result.data?.id === 'string' ? result.data.id : null;
+      },
       async issueDocument(payrollRunId, employeeId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'issue', payrollRunId, employeeId } });
         if (result.error) throw await payslipFunctionError(result.error);
-        const data = result.data as { documentId?: unknown; signedUrl?: unknown } | null;
-        if (typeof data?.documentId !== 'string' || typeof data.signedUrl !== 'string') throw new Error('Payslip document response is invalid.');
-        return { documentId: data.documentId, signedUrl: data.signedUrl };
+        const data = result.data as { documentId?: unknown } | null;
+        if (typeof data?.documentId !== 'string') throw new Error('Payslip document response is invalid.');
+        return { documentId: data.documentId };
       },
-      async downloadDocument(documentId) {
-        const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'download', documentId } });
+      async downloadDocument(documentId, disposition = 'download') {
+        const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'download', documentId, disposition } });
         if (result.error) throw await payslipFunctionError(result.error);
         const data = result.data as { signedUrl?: unknown } | null;
         if (typeof data?.signedUrl !== 'string') throw new Error('Payslip download response is invalid.');

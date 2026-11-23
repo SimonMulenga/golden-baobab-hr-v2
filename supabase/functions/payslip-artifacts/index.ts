@@ -82,21 +82,19 @@ Deno.serve(async (request) => {
         if (registerError) throw registerError
         documentId = registered as string
       }
-      const { data: authorized, error: documentError } = await caller.rpc('payslip_authorized_document', { p_document_id: documentId })
-      if (documentError) throw documentError
-      const path = text(object(authorized).storage_path)
-      const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(path, 60, { download: true })
-      if (signedError) throw signedError
-      return reply(200, { documentId, signedUrl: signed.signedUrl }, origin)
+      return reply(200, { documentId }, origin)
     }
     if (action === 'download') {
       operation = 'download'
       const { data: authorized, error } = await caller.rpc('payslip_authorized_document', { p_document_id: text(body.documentId) })
       if (error) throw error
       const path = text(object(authorized).storage_path)
-      const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(path, 60, { download: true })
+      const disposition = body.disposition === 'inline' ? 'inline' : 'download'
+      const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(path, 60, {
+        download: disposition === 'download',
+      })
       if (signedError) throw signedError
-      return reply(200, { signedUrl: signed.signedUrl }, origin)
+      return reply(200, { signedUrl: signed.signedUrl, expiresInSeconds: 60 }, origin)
     }
     if (action === 'distribution-preview') {
       operation = 'distribution-preview'

@@ -5,7 +5,7 @@ import { mockCompanies } from '../companies/mockData'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
 import { LivePayslips } from './LivePayslips'
 
-const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), statementDetails: vi.fn(), byIds: vi.fn(), issueDocument: vi.fn(), deliveryHistory: vi.fn(), sendEmail: vi.fn(), distributionPreview: vi.fn(), retryEmail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ finalizedRuns: vi.fn(), finalizedItems: vi.fn(), statementDetails: vi.fn(), byIds: vi.fn(), existingDocument: vi.fn(), issueDocument: vi.fn(), downloadDocument: vi.fn(), deliveryHistory: vi.fn(), eventHistory: vi.fn(), sendEmail: vi.fn(), distributionPreview: vi.fn(), retryEmail: vi.fn(), revokeAccess: vi.fn() }))
 vi.mock('../../services/live-business-services', () => ({ createLiveBusinessServices: () => ({ payslips: mocks, employees: { byIds: mocks.byIds } }) }))
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseClient: () => ({}) }))
 
@@ -25,11 +25,16 @@ describe('LIVE finalized payslips', () => {
     mocks.finalizedItems.mockResolvedValue({ items: [item], total: 1 })
     mocks.statementDetails.mockResolvedValue({ leave: { monthly_entitlement_days: 2, balance_days: 3, policies: [{ leave_type: 'ANNUAL_LEAVE', monthly_entitlement_days: 2, balance_days: 3 }] }, deductions: [{ description: '100025 Advance recovery', deduction_type: 'SALARY_ADVANCE', total_amount: 3000, amount_recovered: 2000, balance: 1000 }] })
     mocks.byIds.mockResolvedValue([employee])
-    mocks.issueDocument.mockResolvedValue({ documentId: 'doc-1', signedUrl: 'https://private.example/signed?token=opaque' })
+    mocks.existingDocument.mockResolvedValue(null)
+    mocks.issueDocument.mockResolvedValue({ documentId: 'doc-1' })
+    mocks.downloadDocument.mockResolvedValue({ signedUrl: 'https://private.example/signed?token=opaque' })
     mocks.deliveryHistory.mockResolvedValue([])
+    mocks.eventHistory.mockResolvedValue([])
+    mocks.revokeAccess.mockResolvedValue(undefined)
     mocks.sendEmail.mockResolvedValue({ deliveryId: 'delivery-1', status: 'QUEUED', deliveryConfigured: false, deliveryBlockReason: 'PROVIDER_CONFIGURATION_INCOMPLETE' })
     mocks.distributionPreview.mockResolvedValue({ items: [{ employee_id: employee.id, employee_number: employee.employee_number, first_name: employee.first_name, middle_name: null, last_name: employee.last_name, company_id: company.id, branch_id: 'branch-live', branch_name: 'Lusaka Demo Branch', department: 'Finance', job_title: 'Analyst', recipient_email: 'synthetic@example.test', document_id: 'doc-1', delivery_id: null, delivery_status: 'PENDING', delivery_attempts: 0, total_count: 1 }], total: 1 })
     vi.stubGlobal('print', vi.fn())
+    vi.spyOn(window, 'open').mockReturnValue({ location: { replace: vi.fn() }, close: vi.fn(), opener: null } as unknown as Window)
   })
 
   it('loads the finalized run version and presents immutable persisted amounts', async () => {
@@ -51,17 +56,49 @@ describe('LIVE finalized payslips', () => {
   it('issues a private server PDF from the selected finalized run item', async () => {
     renderScreen()
     await screen.findByRole('heading', { name: 'October 2026 payslip' })
-    fireEvent.click(screen.getByRole('button', { name: 'Generate secure PDF' }))
-    expect(await screen.findByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', 'https://private.example/signed?token=opaque')
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Secured Payslip PDF' }))
+    expect(await screen.findByText(/securely stored/)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Download PDF' })).toBeInTheDocument()
+    expect(screen.queryByText(/Download links expire after 60 seconds/)).not.toBeInTheDocument()
     expect(mocks.issueDocument).toHaveBeenCalledWith(run.id, item.employee_id)
-    expect(await screen.findByText(/Generated from the finalized payroll snapshot/)).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent('generated from the finalized payroll snapshot and stored privately')
+  })
+
+  it('rediscovers an existing document and obtains a fresh authorized URL for each download and view', async () => {
+    mocks.existingDocument.mockResolvedValue('doc-existing')
+    mocks.downloadDocument
+      .mockResolvedValueOnce({ signedUrl: 'https://private.example/fresh-1' })
+      .mockResolvedValueOnce({ signedUrl: 'https://private.example/fresh-2' })
+    renderScreen()
+    expect(await screen.findByRole('button', { name: 'Download PDF' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate Secured Payslip PDF' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }))
+    await vi.waitFor(() => expect(mocks.downloadDocument).toHaveBeenNthCalledWith(1, 'doc-existing', 'download'))
+    expect(await screen.findByText('Secure download started.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'View Payslip' }))
+    await vi.waitFor(() => expect(mocks.downloadDocument).toHaveBeenNthCalledWith(2, 'doc-existing', 'inline'))
+    const firstTarget = vi.mocked(window.open).mock.results[0]?.value as Window
+    const secondTarget = vi.mocked(window.open).mock.results[1]?.value as Window
+    expect(firstTarget.location.replace).toHaveBeenCalledWith('https://private.example/fresh-1')
+    expect(secondTarget.location.replace).toHaveBeenCalledWith('https://private.example/fresh-2')
+  })
+
+  it('does not expose a signed URL and reports authorization revocation on download', async () => {
+    mocks.existingDocument.mockResolvedValue('doc-existing')
+    mocks.downloadDocument.mockRejectedValueOnce(new Error('not authorized'))
+    renderScreen()
+    await vi.waitFor(() => expect(mocks.existingDocument).toHaveBeenCalledWith(run.id, item.employee_id))
+    fireEvent.click(await screen.findByRole('button', { name: 'Download PDF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('permissions may have changed')
+    expect(screen.queryByRole('link', { name: 'Download PDF' })).not.toBeInTheDocument()
+    expect(mocks.issueDocument).not.toHaveBeenCalled()
   })
 
   it('shows queued email state without claiming that a message was sent', async () => {
     renderScreen()
     await screen.findByRole('heading', { name: 'October 2026 payslip' })
-    fireEvent.click(screen.getByRole('button', { name: 'Generate secure PDF' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Queue email' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Secured Payslip PDF' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Email Payslip' }))
     expect(await screen.findByText(/queued because provider or sender configuration is incomplete; no email was sent/)).toBeInTheDocument()
     expect(mocks.sendEmail).toHaveBeenCalledWith('doc-1')
   })

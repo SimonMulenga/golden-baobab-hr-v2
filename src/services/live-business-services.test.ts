@@ -3,6 +3,28 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createLiveBusinessServices } from './live-business-services';
 
 describe('live Supabase business service adapter', () => {
+  it('rediscovers existing payslip IDs under table RLS and requests a fresh URL with the selected disposition', async () => {
+    const filters = vi.fn()
+    const query: any = { eq: filters, maybeSingle: vi.fn(async () => ({ data: { id: 'document-synthetic' }, error: null })) }
+    filters.mockImplementation(() => query)
+    const from = vi.fn(() => ({ select: vi.fn(() => query) }))
+    const functions = { invoke: vi.fn(async (_name: string, _options: unknown) => ({ data: { signedUrl: 'https://storage.example.test/fresh' }, error: null })) }
+    const services = createLiveBusinessServices({ from, functions } as unknown as SupabaseClient)
+
+    await expect(services.payslips.existingDocument('run-synthetic', 'employee-synthetic')).resolves.toBe('document-synthetic')
+    expect(from).toHaveBeenCalledWith('payslip_documents')
+    expect(filters.mock.calls).toEqual([['payroll_run_id', 'run-synthetic'], ['employee_id', 'employee-synthetic']])
+    await expect(services.payslips.downloadDocument('document-synthetic', 'inline')).resolves.toEqual({ signedUrl: 'https://storage.example.test/fresh' })
+    expect(functions.invoke).toHaveBeenCalledWith('payslip-artifacts', { body: { action: 'download', documentId: 'document-synthetic', disposition: 'inline' } })
+  })
+
+  it('issues and registers a document without returning or caching an expiring Storage URL', async () => {
+    const functions = { invoke: vi.fn(async () => ({ data: { documentId: 'document-synthetic' }, error: null })) }
+    const services = createLiveBusinessServices({ functions } as unknown as SupabaseClient)
+    await expect(services.payslips.issueDocument('run-synthetic', 'employee-synthetic')).resolves.toEqual({ documentId: 'document-synthetic' })
+    expect(functions.invoke).toHaveBeenCalledWith('payslip-artifacts', { body: { action: 'issue', payrollRunId: 'run-synthetic', employeeId: 'employee-synthetic' } })
+  })
+
   it('uses scoped bulk approval and permission-filtered queue summary RPCs', async () => {
     const outcomes = [{ employee_id: 'employee-synthetic', success: true, status: 'APPROVED' }]
     const summary = { total_pending: 2, ready_for_approval: 1, needs_correction: 1, approved: 4, rejected: 0, approval_eligible: 1, rejection_eligible: 1 }
