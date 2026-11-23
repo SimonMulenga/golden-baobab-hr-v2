@@ -149,6 +149,13 @@ Deno.serve(async (request) => {
       if (error) throw error
       const document = object(authorized)
       const documentId = text(body.documentId)
+      const { data: withinRateLimit, error: rateLimitError } = await admin.rpc('payslip_document_download_rate_limit', {
+        p_document_id: documentId, p_actor_id: identity.user.id,
+      })
+      if (rateLimitError) throw rateLimitError
+      if (withinRateLimit !== true) return reply(429, {
+        code: 'DOCUMENT_DOWNLOAD_RATE_LIMITED', error: 'Too many downloads. Please wait a minute and try again.',
+      }, origin)
       const { data: birthYear, error: birthYearError } = await admin.rpc('payslip_document_birth_year', {
         p_document_id: documentId, p_actor_id: identity.user.id,
       })

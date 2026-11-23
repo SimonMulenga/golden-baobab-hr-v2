@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261123006900_encrypt_payslip_pdf_artifacts.sql'), 'utf8')
+const rateLimitMigration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261123007000_limit_payslip_document_retrieval.sql'), 'utf8')
 
 describe('encrypted payslip artifact migration', () => {
   it('marks old documents for conversion and requires a trusted post-validation mark for new PDFs', () => {
@@ -28,5 +29,15 @@ describe('encrypted payslip artifact migration', () => {
     expect(migration).toContain("'PAYSLIP_DOCUMENT_ENCRYPTED'")
     expect(migration).not.toMatch(/delete\s+from\s+storage\.objects/iu)
     expect(migration).not.toMatch(/delete\s+from\s+public\.payroll/iu)
+  })
+
+  it('limits valid document retrievals server-side and counts only failed DOB checks toward lockout', () => {
+    expect(rateLimitMigration).toContain("interval '1 minute'")
+    expect(rateLimitMigration).toContain('return v_count<=20')
+    expect(rateLimitMigration).toContain('if v_request_count>20 then return; end if;')
+    expect(rateLimitMigration).toContain('p_date_of_birth is distinct from v_employee.date_of_birth')
+    expect(rateLimitMigration).toContain('verification_attempts=a.verification_attempts+1')
+    expect(rateLimitMigration).toContain('Successful opens do not consume failed-verification attempts')
+    expect(rateLimitMigration).toContain('to service_role')
   })
 })
