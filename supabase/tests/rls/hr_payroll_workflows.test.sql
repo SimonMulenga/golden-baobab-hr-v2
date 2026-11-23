@@ -1,7 +1,7 @@
 -- Run only after migrations 00100 through 05000 on a disposable database.
 -- Synthetic account portfolios/users and rollback-only end-to-end authorization tests.
 begin;
-select extensions.plan(90);
+select extensions.plan(97);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
@@ -37,6 +37,9 @@ insert into public.companies(id, portfolio_id, name, registration_number, tpin, 
   ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Synthetic company A', 'REG-SA', '1000000001', 'Retail', 'a@test.invalid', '+260000000001', 'Copperbelt', 'Kitwe', 'Synthetic address A', 'Synthetic contact'),
   ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'Synthetic company A2', 'REG-SA2', '1000000002', 'Retail', 'a2@test.invalid', '+260000000002', 'Lusaka', 'Lusaka', 'Synthetic address A2', 'Synthetic contact'),
   ('20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', 'Synthetic company B', 'REG-SB', '1000000003', 'Retail', 'b@test.invalid', '+260000000003', 'Lusaka', 'Lusaka', 'Synthetic address B', 'Synthetic contact');
+
+insert into public.company_memberships(portfolio_id, company_id, user_id, role, created_by) values
+  ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'a0000000-0000-4000-8000-000000000005', 'COMPANY_ADMIN', 'a0000000-0000-4000-8000-000000000001');
 
 insert into public.branches(id, portfolio_id, company_id, name, code, province, town, physical_address) values
   ('30000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'Synthetic branch 1', 'S-A-1', 'Copperbelt', 'Kitwe', 'Synthetic branch address'),
@@ -129,6 +132,8 @@ select extensions.is((select count(*) from public.employee_private_details), 0::
 select extensions.is((select count(*) from public.employee_compensation), 1::bigint, 'branch manager can read compensation for the assigned branch');
 select extensions.is((select count(*) from public.employee_compensation where workplace_branch_id = '30000000-0000-0000-0000-000000000002'), 0::bigint, 'branch manager cannot read compensation outside the assigned branch');
 select extensions.is((select count(*) from public.employees where portfolio_id = '10000000-0000-0000-0000-000000000002'), 0::bigint, 'branch manager cannot cross portfolios');
+select extensions.is(app_private.has_permission('payslip.issue','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001'), true, 'branch manager has payslip issue permission on the assigned branch');
+select extensions.is(app_private.has_permission('payslip.issue','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002'), false, 'branch manager lacks payslip issue permission on an unassigned branch');
 select extensions.throws_ok($$insert into public.portfolio_memberships(portfolio_id,user_id,role) values ('10000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000002','PORTFOLIO_ADMIN')$$, '42501', 'branch manager cannot self-escalate');
 select extensions.throws_ok($$insert into public.employees(portfolio_id,company_id,workplace_branch_id,employee_number,first_name,last_name,date_of_birth,nationality,job_title,department,employment_type,contract_type,contract_start_date,created_by) values ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','FORGED-001','Forged','Record','1990-01-01','Zambian','Clerk','Finance','PERMANENT','MONTHLY','2026-01-01','a0000000-0000-4000-8000-000000000002')$$, '42501', 'employee rows cannot be inserted directly through table grants');
 select extensions.throws_ok($$update public.employees set department='Forged' where id='40000000-0000-0000-0000-000000000001'$$, '42501', 'employee rows cannot be edited directly through table grants');
@@ -230,13 +235,18 @@ select extensions.throws_ok($$select public.statutory_filing_list('20000000-0000
 select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000003', true);
 select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000003')$$, '42501', 'payroll.view-only user cannot call the service-only issuance RPC');
 select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000002', true);
-select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','a0000000-0000-4000-8000-000000000002')$$, '42501', 'ordinary authenticated branch user cannot issue payslip snapshots');
+select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','a0000000-0000-4000-8000-000000000002')$$, '42501', 'authenticated branch user cannot call the service-only issuance RPC');
 reset role;
+select extensions.is(app_private.payslip_actor_has_permission('a0000000-0000-4000-8000-000000000002','payslip.issue','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002'), false, 'branch manager cannot issue outside the assigned branch');
+select extensions.is(app_private.payslip_actor_has_permission('a0000000-0000-4000-8000-000000000005','payslip.issue','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000003'), false, 'company administrator cannot cross into another company');
+select extensions.is(app_private.payslip_actor_has_permission('a0000000-0000-4000-8000-000000000006','payslip.issue','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001'), false, 'an administrator record without an active scoped membership cannot issue');
 set local role service_role;
 select set_config('request.jwt.claim.role', 'service_role', true);
 select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000003')$$, '42501', 'trusted server cannot issue for actor without payslip.issue');
 select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',null)$$, '42501', 'trusted server rejects a missing human actor');
 select extensions.is(public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000007')->>'branch_id', '30000000-0000-0000-0000-000000000001', 'authorized issuer receives only the finalized run scope');
+select extensions.is(public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000005')->>'company_id', '20000000-0000-0000-0000-000000000001', 'company membership administrator can issue only within its company');
+select extensions.is(public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000002')->>'branch_id', '30000000-0000-0000-0000-000000000001', 'branch manager can issue within the active assigned branch');
 select extensions.throws_ok($$select public.payslip_issue_snapshot('70000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','a0000000-0000-4000-8000-000000000004')$$, '42501', 'issuer from another portfolio cannot access finalized payslip snapshot');
 select set_config('test.payslip_document', public.payslip_register_document(
   '70000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001',
