@@ -6,10 +6,15 @@
 .payslip-access-card>p{margin:0;color:var(--text-muted,#5f7077);line-height:1.55}
 .payslip-access-card form{display:grid;gap:14px}
 .payslip-access-card label{display:grid;gap:6px;color:var(--text-primary,#17313a);font-size:13px;font-weight:650}
-.payslip-access-card input{width:100%;min-width:0;height:44px;padding:0 12px;border:1px solid var(--border,#dce5e7);border-radius:9px;background:var(--surface,#fff);color:var(--text-primary,#17313a);font:inherit}
-.payslip-access-card input:focus-visible{outline:3px solid #178a8244;border-color:#178a82}
+.payslip-access-card input,.payslip-access-card select{width:100%;min-width:0;height:46px;padding:0 10px;border:1px solid var(--border,#dce5e7);border-radius:9px;background:var(--surface,#fff);color:var(--text-primary,#17313a);font:inherit}
+.payslip-access-card input:focus-visible,.payslip-access-card select:focus-visible{outline:3px solid #178a8244;border-color:#178a82}
+.payslip-access-brand{color:var(--text-primary,#17313a);font-size:16px;font-weight:750;letter-spacing:.01em}
+.payslip-access-date-fields{display:grid;grid-template-columns:.85fr 1.35fr 1fr;gap:9px}
+.payslip-access-viewer{display:grid;gap:10px}.payslip-access-viewer p{margin:0;color:#236b44;font-size:14px;font-weight:650}
+.payslip-access-viewer iframe{width:100%;height:min(72dvh,900px);min-height:480px;border:1px solid var(--border,#dce5e7);border-radius:9px;background:#fff}
 .payslip-access-card .button-primary{min-height:46px;justify-content:center}
 .payslip-access-error,.payslip-access-notice{padding:11px 12px;border-radius:9px;font-size:13px;line-height:1.45}
 .payslip-access-error{background:#fff0ef;color:#922b25}.payslip-access-notice{background:#eaf5ef;color:#236b44}
 .payslip-access-card footer{border-top:1px solid var(--border,#dce5e7);padding-top:14px;color:var(--text-muted,#5f7077);font-size:11px;line-height:1.45}
 @media(max-width:480px){.payslip-access-page{padding:14px}.payslip-access-card{padding:22px;border-radius:14px}}
+@media(max-width:350px){.payslip-access-date-fields{grid-template-columns:1fr;gap:12px}.payslip-access-viewer iframe{min-height:380px}}

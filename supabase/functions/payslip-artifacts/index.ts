@@ -3,6 +3,7 @@ import { approvedAppOrigins } from './origins.ts'
 import { createPayslipAccessToken } from '../_shared/payslip-tokens.ts'
 import { isLivePayslipDeliveryEnabled, payslipDeliveryBlockReason } from '../_shared/payslip-delivery-policy.ts'
 import { buildPayslipPdf } from './pdf.ts'
+import { encryptPayslipPdf, isBirthYearEncryptedPdf } from './encryption.ts'
 
 const baseHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
 const reply = (status: number, body: Record<string, unknown>, origin?: string) => new Response(JSON.stringify(body), {
@@ -17,6 +18,7 @@ function safeFailureCode(error: unknown) {
   const value = object(error)
   const code = text(value.code)
   const message = error instanceof Error ? error.message : text(value.message)
+  if (/EMPLOYEE_BIRTH_DATE_MISSING/u.test(message)) return 'EMPLOYEE_BIRTH_DATE_MISSING'
   if (code === '42501' || /not authorized|not permit/i.test(message)) return 'ISSUANCE_NOT_AUTHORIZED'
   if (code === 'P0002' || /finalized payslip source was not found/i.test(message)) return 'FINALIZED_PAYROLL_NOT_FOUND'
   if (/immutable.*conflict/i.test(message)) return 'IMMUTABLE_DOCUMENT_CONFLICT'
@@ -29,6 +31,37 @@ async function sha256(bytes: Uint8Array) {
   new Uint8Array(digestInput).set(bytes)
   const digest = await crypto.subtle.digest('SHA-256', digestInput)
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function convertLegacyArtifact(admin: any, args: {
+  documentId: string; actorId: string; storagePath: string; contentHash: string; birthYear: string;
+}) {
+  const { data: original, error: downloadError } = await admin.storage.from('gb-payslips').download(args.storagePath)
+  if (downloadError || !original) throw new Error('PRIVATE_DOCUMENT_STORAGE_FAILED')
+  const originalBytes = new Uint8Array(await original.arrayBuffer())
+  if (await sha256(originalBytes) !== args.contentHash) throw new Error('IMMUTABLE_DOCUMENT_CONFLICT')
+  const encrypted = await encryptPayslipPdf(originalBytes, args.birthYear)
+  if (!await isBirthYearEncryptedPdf(encrypted, args.birthYear)) throw new Error('PDF_ENCRYPTION_VALIDATION_FAILED')
+  const encryptedHash = await sha256(encrypted)
+  const newPath = `${args.storagePath.replace(/\.pdf$/u, '')}.enc-${crypto.randomUUID()}.pdf`
+  const { error: uploadError } = await admin.storage.from('gb-payslips').upload(newPath, encrypted, {
+    contentType: 'application/pdf', upsert: false,
+  })
+  if (uploadError) throw new Error('PRIVATE_DOCUMENT_STORAGE_FAILED')
+  const { data, error } = await admin.rpc('payslip_document_replace_encrypted_artifact', {
+    p_document_id: args.documentId, p_old_storage_path: args.storagePath, p_old_content_sha256: args.contentHash,
+    p_new_storage_path: newPath, p_new_content_sha256: encryptedHash, p_actor_id: args.actorId,
+  })
+  if (error) {
+    await admin.storage.from('gb-payslips').remove([newPath])
+    throw new Error('IMMUTABLE_DOCUMENT_CONFLICT')
+  }
+  const row = Array.isArray(data) ? object(data[0]) : object(data)
+  if (row.storage_path !== newPath) await admin.storage.from('gb-payslips').remove([newPath])
+  return {
+    storagePath: text(row.storage_path), contentHash: text(row.content_sha256),
+    encryptionVersion: Number(row.encryption_version ?? 0),
+  }
 }
 
 Deno.serve(async (request) => {
@@ -58,12 +91,18 @@ Deno.serve(async (request) => {
         p_payroll_run_id: runId, p_employee_id: employeeId, p_actor_id: identity.user.id,
       })
       if (snapshotError) throw snapshotError
+      const { data: birthYear, error: birthYearError } = await admin.rpc('payslip_issue_birth_year', {
+        p_payroll_run_id: runId, p_employee_id: employeeId, p_actor_id: identity.user.id,
+      })
+      if (birthYearError || typeof birthYear !== 'string' || !/^\d{4}$/u.test(birthYear)) {
+        throw new Error('EMPLOYEE_BIRTH_DATE_MISSING')
+      }
       const existing = await caller.from('payslip_documents').select('id').eq('payroll_run_id', runId).eq('employee_id', employeeId).maybeSingle()
       if (existing.error) throw existing.error
       let documentId = existing.data?.id as string | undefined
       if (!documentId) {
         const source = object(snapshot)
-        const bytes = await buildPayslipPdf(source)
+        const bytes = await buildPayslipPdf(source, birthYear)
         const hash = await sha256(bytes)
         const path = `${source.portfolio_id}/${source.company_id}/${runId}/${source.payroll_version}/${employeeId}.pdf`
         const { error: uploadError } = await admin.storage.from('gb-payslips').upload(path, bytes, { contentType: 'application/pdf', upsert: false })
@@ -71,9 +110,25 @@ Deno.serve(async (request) => {
           // Concurrent issuance or a retry must never overwrite an immutable file.
           // Accept an existing object only when its bytes match this exact source snapshot.
           const { data: existing, error: existingError } = await admin.storage.from('gb-payslips').download(path)
-          if (existingError || !existing || await sha256(new Uint8Array(await existing.arrayBuffer())) !== hash) {
+          if (existingError || !existing) {
             throw new Error('IMMUTABLE_PAYSLIP_ARTIFACT_CONFLICT')
           }
+          const existingBytes = new Uint8Array(await existing.arrayBuffer())
+          if (!await isBirthYearEncryptedPdf(existingBytes, birthYear)) throw new Error('IMMUTABLE_PAYSLIP_ARTIFACT_CONFLICT')
+          // Concurrent issuers may produce different random PDF keys. The
+          // first encrypted artifact at this immutable path wins.
+          const existingHash = await sha256(existingBytes)
+          const { data: registered, error: registerError } = await admin.rpc('payslip_register_document', {
+            p_payroll_run_id: runId, p_employee_id: employeeId, p_storage_path: path,
+            p_content_sha256: existingHash, p_actor_id: identity.user.id,
+          })
+          if (registerError) throw registerError
+          documentId = registered as string
+          const { data: marked, error: markError } = await admin.rpc('payslip_document_mark_encrypted', {
+            p_document_id: documentId, p_expected_content_sha256: existingHash, p_actor_id: identity.user.id,
+          })
+          if (markError || marked !== true) throw new Error('PDF_ENCRYPTION_VALIDATION_FAILED')
+          return reply(200, { documentId }, origin)
         }
         const { data: registered, error: registerError } = await admin.rpc('payslip_register_document', {
           p_payroll_run_id: runId, p_employee_id: employeeId, p_storage_path: path,
@@ -81,6 +136,10 @@ Deno.serve(async (request) => {
         })
         if (registerError) throw registerError
         documentId = registered as string
+        const { data: marked, error: markError } = await admin.rpc('payslip_document_mark_encrypted', {
+          p_document_id: documentId, p_expected_content_sha256: hash, p_actor_id: identity.user.id,
+        })
+        if (markError || marked !== true) throw new Error('PDF_ENCRYPTION_VALIDATION_FAILED')
       }
       return reply(200, { documentId }, origin)
     }
@@ -88,9 +147,37 @@ Deno.serve(async (request) => {
       operation = 'download'
       const { data: authorized, error } = await caller.rpc('payslip_authorized_document', { p_document_id: text(body.documentId) })
       if (error) throw error
-      const path = text(object(authorized).storage_path)
+      const document = object(authorized)
+      const documentId = text(body.documentId)
+      const { data: birthYear, error: birthYearError } = await admin.rpc('payslip_document_birth_year', {
+        p_document_id: documentId, p_actor_id: identity.user.id,
+      })
+      if (birthYearError || typeof birthYear !== 'string' || !/^\d{4}$/u.test(birthYear)) throw new Error('EMPLOYEE_BIRTH_DATE_MISSING')
+      let artifact = {
+        storagePath: text(document.storage_path) || text(document.legacy_storage_path), contentHash: text(document.content_sha256),
+        encryptionVersion: Number(document.encryption_version ?? 0),
+      }
+      if (artifact.encryptionVersion === 0) {
+        artifact = await convertLegacyArtifact(admin, {
+          documentId, actorId: identity.user.id, ...artifact, birthYear,
+        })
+      }
+      const { data: storedPdf, error: storedPdfError } = await admin.storage.from('gb-payslips').download(artifact.storagePath)
+      if (storedPdfError || !storedPdf) throw new Error('PRIVATE_DOCUMENT_STORAGE_FAILED')
+      const storedBytes = new Uint8Array(await storedPdf.arrayBuffer())
+      if (await sha256(storedBytes) !== artifact.contentHash || !await isBirthYearEncryptedPdf(storedBytes, birthYear)) {
+        throw new Error('PDF_ENCRYPTION_VALIDATION_FAILED')
+      }
+      // Recheck the caller's current permissions after any conversion work so
+      // revoked administrators do not receive a fresh signed URL.
+      const { data: finalAuthorization, error: finalAuthorizationError } = await caller.rpc('payslip_authorized_document', { p_document_id: documentId })
+      if (finalAuthorizationError) throw finalAuthorizationError
+      const finalDocument = object(finalAuthorization)
+      if (Number(finalDocument.encryption_version) !== 1 || text(finalDocument.content_sha256) !== artifact.contentHash) {
+        throw new Error('IMMUTABLE_DOCUMENT_CONFLICT')
+      }
       const disposition = body.disposition === 'inline' ? 'inline' : 'download'
-      const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(path, 60, {
+      const { data: signed, error: signedError } = await admin.storage.from('gb-payslips').createSignedUrl(text(finalDocument.storage_path), 60, {
         download: disposition === 'download',
       })
       if (signedError) throw signedError
@@ -182,8 +269,8 @@ Deno.serve(async (request) => {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'Idempotency-Key': `gb-payslip-${deliveryId}` },
           body: JSON.stringify({ from, to: [recipient], subject: 'Your finalized payslip',
             tags: [{ name: 'product', value: 'golden-baobab-payslip' }],
-            html: `<p>Your finalized payslip is ready.</p><p><a href="${safeUrl}">Verify your identity and open your private payslip</a></p><p>This link expires in 48 hours. You will need your employee number and date of birth to open it. Do not forward it.</p><p>Golden Baobab HR</p>`,
-            text: `Your finalized payslip is ready. Verify your identity and open it here: ${accessUrl.toString()}\nThis link expires in 48 hours. You will need your employee number and date of birth. Do not forward it.\nGolden Baobab HR` }),
+            html: `<p>Your finalized payslip is ready.</p><p><a href="${safeUrl}">Verify your identity and open your private payslip</a></p><p>This link expires in 48 hours. You will need your date of birth to verify your identity. The downloaded PDF asks for your four-digit birth year to open. Keep the file private and do not forward this email.</p><p>Golden Baobab HR</p>`,
+            text: `Your finalized payslip is ready. Verify your identity and open it here: ${accessUrl.toString()}\nThis link expires in 48 hours. You will need your date of birth to verify your identity. The downloaded PDF asks for your four-digit birth year to open. Keep the file private and do not forward this email.\nGolden Baobab HR` }),
         })
         if (!response.ok) throw new Error(`PROVIDER_HTTP_${response.status}`)
         const result = object(await response.json())
@@ -208,6 +295,8 @@ Deno.serve(async (request) => {
     console.error(`Payslip ${operation} failed (${code})`)
     const userMessage = code === 'ISSUANCE_NOT_AUTHORIZED'
       ? 'Your account does not have payslip issuance access for this company and branch.'
+      : code === 'EMPLOYEE_BIRTH_DATE_MISSING'
+        ? 'The employee date of birth is missing or invalid. Contact HR before issuing or opening this payslip.'
       : code === 'FINALIZED_PAYROLL_NOT_FOUND'
         ? 'This payroll run has no finalized payslip for the selected employee.'
         : code === 'IMMUTABLE_DOCUMENT_CONFLICT'

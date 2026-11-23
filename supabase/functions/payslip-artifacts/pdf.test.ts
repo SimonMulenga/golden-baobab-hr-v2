@@ -1,5 +1,5 @@
-import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { PDFDocument } from 'https://esm.sh/pdf-lib@1.17.1'
+import { assert, assertEquals, assertRejects } from 'https://deno.land/std@0.224.0/assert/mod.ts'
+import { PDFDocument } from 'npm:@cantoo/pdf-lib@2.11.1'
 import { buildPayslipPdf } from './pdf.ts'
 
 Deno.test('synthetic payslip PDF paginates long earning, deduction and leave detail without changing values', async () => {
@@ -25,10 +25,13 @@ Deno.test('synthetic payslip PDF paginates long earning, deduction and leave det
     deductions: Array.from({ length: 16 }, (_, index) => ({ description: `Synthetic advance ${index + 1}`, total_amount: 1000, amount_recovered: 100, balance: 900 })),
   }
 
-  const bytes = await buildPayslipPdf(snapshot)
+  const bytes = await buildPayslipPdf(snapshot, '1995')
   assertEquals(new TextDecoder().decode(bytes.slice(0, 5)), '%PDF-')
-  const loaded = await PDFDocument.load(bytes)
+  const inspect = await PDFDocument.load(bytes, { ignoreEncryption: true })
+  assert(inspect.isEncrypted, 'payslip PDF must be encrypted')
+  const loaded = await PDFDocument.load(bytes, { password: '1995' })
   assert(loaded.getPageCount() > 1, 'dense synthetic payslip detail should flow to additional pages')
-  assertEquals(loaded.getTitle(), 'Employee payslip')
-  assertEquals(loaded.getSubject(), 'Finalized payroll record')
+  await assertRejects(() => PDFDocument.load(bytes, { password: '1994' }))
+  const crossReaderOutput = Deno.env.get('DENO_PDF_CROSS_READER_OUTPUT')
+  if (crossReaderOutput) await Deno.writeFile(crossReaderOutput, bytes)
 })

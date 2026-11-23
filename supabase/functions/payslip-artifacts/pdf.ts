@@ -1,4 +1,5 @@
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
+import { PDFDocument, StandardFonts, rgb } from 'npm:@cantoo/pdf-lib@2.11.1'
+import { encryptPayslipPdf } from './encryption.ts'
 
 type Json = Record<string, unknown>
 const object = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
@@ -7,7 +8,8 @@ const text = (value: unknown) => typeof value === 'string' ? value : ''
 const money = (value: unknown) => `K${num(value).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const safeText = (value: unknown) => text(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '?')
 
-export async function buildPayslipPdf(snapshot: Json): Promise<Uint8Array> {
+export async function buildPayslipPdf(snapshot: Json, birthYear: string): Promise<Uint8Array> {
+  if (!/^\d{4}$/u.test(birthYear)) throw new Error('EMPLOYEE_BIRTH_YEAR_REQUIRED')
   const pdf = await PDFDocument.create()
   const regular = await pdf.embedFont(StandardFonts.Helvetica)
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
@@ -132,7 +134,7 @@ export async function buildPayslipPdf(snapshot: Json): Promise<Uint8Array> {
   page.drawText('NET SALARY', { x: 54, y: y - 19, size: 11, font: bold, color: rgb(0.04, 0.24, 0.2) })
   page.drawText(money(item.net_pay), { x: width - 150, y: y - 20, size: 14, font: bold, color: rgb(0.04, 0.24, 0.2) })
   page.drawText(`Finalized payroll version ${snapshot.payroll_version}. This statement is not proof of bank payment.`, { x: 44, y: 42, size: 8, font: regular, color: rgb(0.38, 0.42, 0.44) })
-  return await pdf.save({ useObjectStreams: true })
+  return encryptPayslipPdf(await pdf.save({ useObjectStreams: true }), birthYear)
 }
 
 function statementDays(value: unknown) { return `${num(value).toFixed(2)} days` }
