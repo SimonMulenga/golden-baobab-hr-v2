@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { mockCompanies } from '../companies/mockData'
 import { WorkspaceContext } from '../companies/WorkspaceContext'
@@ -44,6 +44,40 @@ describe('LIVE finalized payslips', () => {
     expect(screen.getByText('K12,602.45')).toBeInTheDocument()
     expect(screen.getByText('FINALIZED')).toBeInTheDocument()
     expect(mocks.finalizedItems).toHaveBeenCalledWith(run.id, run.version, 1)
+  })
+
+  it('does not remain on the loading state when no company is selected', () => {
+    render(<WorkspaceContext.Provider value={{ companies: [company], saveCompany: vi.fn(), deleteCompany: vi.fn(), setActiveCompany: vi.fn(), activeCompanyId: 'all' }}><LivePayslips /></WorkspaceContext.Provider>)
+    expect(screen.queryByText('Loading finalized records…')).not.toBeInTheDocument()
+    expect(screen.getByText('Select a company')).toBeInTheDocument()
+    expect(mocks.finalizedRuns).not.toHaveBeenCalled()
+  })
+
+  it('times out an unresolved finalized-record request, offers retry, and recovers on a successful retry', async () => {
+    vi.useFakeTimers()
+    mocks.finalizedRuns.mockImplementationOnce(() => new Promise(() => undefined))
+    const view = renderScreen()
+    expect(screen.getByText('Loading finalized records…')).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(screen.queryByText('Loading finalized records…')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Finalized records are unavailable')
+    vi.useRealTimers()
+    mocks.finalizedRuns.mockResolvedValueOnce([run])
+    fireEvent.click(screen.getByRole('button', { name: 'Retry finalized records' }))
+    expect(await screen.findByRole('heading', { name: 'October 2026 payslip' })).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it('clears the loading state and exposes retry when employee lookup fails after finalized lines load', async () => {
+    mocks.byIds.mockRejectedValueOnce(new Error('Synthetic employee lookup failure'))
+    renderScreen()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Finalized records are unavailable')
+    expect(screen.queryByText('Loading finalized records…')).not.toBeInTheDocument()
+    mocks.byIds.mockResolvedValueOnce([employee])
+    fireEvent.click(screen.getByRole('button', { name: 'Retry finalized records' }))
+    expect(await screen.findByRole('heading', { name: 'October 2026 payslip' })).toBeInTheDocument()
+    expect(mocks.finalizedRuns).toHaveBeenCalledTimes(1)
+    expect(mocks.finalizedItems).toHaveBeenCalledTimes(2)
   })
 
   it('keeps a separate local print view without implying secure storage or delivery', async () => {

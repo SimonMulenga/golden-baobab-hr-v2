@@ -27,6 +27,12 @@ const emailResultNotice = (result: PayslipEmailRequestResult, acceptedMessage: s
     : result.status === 'FAILED' ? failedMessage
       : queuedDeliveryNotice(result.deliveryBlockReason)
 
+const FINALIZED_RECORDS_TIMEOUT_MS = 30_000
+const withFinalizedRecordsTimeout = <T,>(request: () => Promise<T>) => new Promise<T>((resolve, reject) => {
+  const timer = window.setTimeout(() => reject(new Error('FINALIZED_RECORDS_TIMEOUT')), FINALIZED_RECORDS_TIMEOUT_MS)
+  Promise.resolve().then(request).then((value) => { window.clearTimeout(timer); resolve(value) }, (error) => { window.clearTimeout(timer); reject(error) })
+})
+
 export function LivePayslips() {
   const { companies, preferences } = useWorkspace()
   const { companyId, setCompanyId } = useCompanySelection()
@@ -39,9 +45,12 @@ export function LivePayslips() {
   const [total, setTotal] = useState(0)
   const [employees, setEmployees] = useState<EmployeeDirectoryRecord[]>([])
   const [employeeId, setEmployeeId] = useState('')
-  const [loadingRuns, setLoadingRuns] = useState(true)
+  const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingItems, setLoadingItems] = useState(false)
   const [error, setError] = useState('')
+  const [recordsError, setRecordsError] = useState('')
+  const [recordsRetry, setRecordsRetry] = useState(0)
+  const [itemsRetry, setItemsRetry] = useState(0)
   const [notice, setNotice] = useState('')
   const [artifactId, setArtifactId] = useState('')
   const [artifactOwner, setArtifactOwner] = useState('')
@@ -97,31 +106,46 @@ export function LivePayslips() {
   }, [])
 
   useEffect(() => {
-    if (!companyId) return
+    if (!companyId) {
+      setLoadingRuns(false)
+      setLoadingItems(false)
+      setRuns([]); setRunId(''); setItems([]); setEmployees([]); setTotal(0)
+      setRecordsError('')
+      return
+    }
     let cancelled = false
-    api.payslips.finalizedRuns(companyId, branchId === 'all' ? undefined : branchId)
-      .then((result) => { if (!cancelled) { setError(''); setRuns(result); setLoadingItems(Boolean(result[0])); setRunId(result[0]?.id ?? '') } })
-      .catch(() => { if (!cancelled) { setRuns([]); setError('Finalized payroll records could not be loaded for this company and access scope.') } })
+    setLoadingRuns(true)
+    setLoadingItems(false)
+    setRecordsError('')
+    withFinalizedRecordsTimeout(() => api.payslips.finalizedRuns(companyId, branchId === 'all' ? undefined : branchId))
+      .then((result) => { if (!cancelled) { setError(''); setRuns(result); setItems([]); setEmployees([]); setTotal(0); setPage(1); setLoadingItems(Boolean(result[0])); setRunId(result[0]?.id ?? '') } })
+      .catch(() => { if (!cancelled) { setRuns([]); setRunId(''); setItems([]); setEmployees([]); setTotal(0); setLoadingItems(false); setRecordsError('Finalized payroll records could not be loaded for this company and access scope. Check your connection and retry.') } })
       .finally(() => { if (!cancelled) setLoadingRuns(false) })
     return () => { cancelled = true }
-  }, [companyId, branchId])
+  }, [companyId, branchId, recordsRetry])
 
   useEffect(() => {
-    if (!selectedRunId || selectedRunVersion == null) return
+    if (!selectedRunId || selectedRunVersion == null) {
+      setLoadingItems(false)
+      setItems([]); setEmployees([]); setTotal(0)
+      return
+    }
     let cancelled = false
-    api.payslips.finalizedItems(selectedRunId, selectedRunVersion, page)
+    setLoadingItems(true)
+    setRecordsError('')
+    withFinalizedRecordsTimeout(() => api.payslips.finalizedItems(selectedRunId, selectedRunVersion, page))
       .then(async (result) => {
-        const employeeRows = await api.employees.byIds(result.items.map((item) => item.employee_id))
+        const employeeRows = await withFinalizedRecordsTimeout(() => api.employees.byIds(result.items.map((item) => item.employee_id)))
         if (cancelled) return
         setItems(result.items); setTotal(result.total); setEmployees(employeeRows)
         setEmployeeId(result.items.some((item) => item.employee_id === requestedPreviewEmployee.current)
           ? requestedPreviewEmployee.current : result.items[0]?.employee_id ?? '')
         requestedPreviewEmployee.current = ''
       })
-      .catch(() => { if (!cancelled) setError('Finalized payslip lines are unavailable under the current payroll and employee permissions.') })
+      .catch(() => { if (!cancelled) { setItems([]); setEmployees([]); setTotal(0); setRecordsError('Finalized payroll employees could not be loaded under the current payroll and employee permissions. Check your connection and retry.') } })
       .finally(() => { if (!cancelled) setLoadingItems(false) })
     return () => { cancelled = true }
-  }, [selectedRunId, selectedRunVersion, page])
+  }, [selectedRunId, selectedRunVersion, page, itemsRetry])
 
   useEffect(() => {
     if (!selectedRunId || !selectedItem?.employee_id) return
@@ -236,6 +260,8 @@ export function LivePayslips() {
     </div>
     {payslipView === 'DISTRIBUTION' && selectedRun && <PayslipDistribution key={`${selectedRun.id}:${selectedRun.version}`} run={selectedRun} api={api} onOpenPayslip={(id) => void openPayslipFromDistribution(id)} />}
     {payslipView === 'PREVIEW' && (loadingRuns || loadingItems ? <div className="panel live-payslip-state" role="status"><LoaderCircle size={18}/> Loading finalized records…</div>
+      : recordsError ? <div className="panel live-payslip-state" role="alert"><FileText size={22}/><strong>Finalized records are unavailable</strong><span>Access was not assumed. Retry the authorized request or check your connection.</span><button className="button-secondary" onClick={() => { setRecordsError(''); if (runs.length && selectedRunId) { setLoadingItems(true); setItemsRetry((value) => value + 1) } else { setLoadingRuns(Boolean(companyId)); setRecordsRetry((value) => value + 1) } }}>Retry finalized records</button></div>
+      : !companyId ? <div className="panel live-payslip-state"><FileText size={22}/><strong>Select a company</strong><span>Choose an authorized company to view its finalized payroll runs.</span></div>
       : !runs.length ? <div className="panel live-payslip-state"><FileText size={22}/><strong>No finalized payroll found</strong><span>Only finalized payroll runs appear here.</span></div>
         : !model ? <div className="panel live-payslip-state"><FileText size={22}/><strong>Select an employee</strong><span>{total.toLocaleString()} finalized payslip records · 100 employees per page.</span><div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div></div>
           : <>
