@@ -27,7 +27,7 @@ describe('LIVE finalized payslips', () => {
     mocks.byIds.mockResolvedValue([employee])
     mocks.issueDocument.mockResolvedValue({ documentId: 'doc-1', signedUrl: 'https://private.example/signed?token=opaque' })
     mocks.deliveryHistory.mockResolvedValue([])
-    mocks.sendEmail.mockResolvedValue({ deliveryId: 'delivery-1', status: 'QUEUED', deliveryConfigured: false })
+    mocks.sendEmail.mockResolvedValue({ deliveryId: 'delivery-1', status: 'QUEUED', deliveryConfigured: false, deliveryBlockReason: 'PROVIDER_CONFIGURATION_INCOMPLETE' })
     mocks.distributionPreview.mockResolvedValue({ items: [{ employee_id: employee.id, employee_number: employee.employee_number, first_name: employee.first_name, middle_name: null, last_name: employee.last_name, company_id: company.id, branch_id: 'branch-live', branch_name: 'Lusaka Demo Branch', department: 'Finance', job_title: 'Analyst', recipient_email: 'synthetic@example.test', document_id: 'doc-1', delivery_id: null, delivery_status: 'PENDING', delivery_attempts: 0, total_count: 1 }], total: 1 })
     vi.stubGlobal('print', vi.fn())
   })
@@ -62,8 +62,22 @@ describe('LIVE finalized payslips', () => {
     await screen.findByRole('heading', { name: 'October 2026 payslip' })
     fireEvent.click(screen.getByRole('button', { name: 'Generate secure PDF' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Queue email' }))
-    expect(await screen.findByText(/not emailed\. It is queued until the email provider and verified sender address are configured/)).toBeInTheDocument()
+    expect(await screen.findByText(/queued because provider or sender configuration is incomplete; no email was sent/)).toBeInTheDocument()
     expect(mocks.sendEmail).toHaveBeenCalledWith('doc-1')
+  })
+
+  it('identifies the first-send approval gate without blaming provider configuration', async () => {
+    mocks.sendEmail.mockResolvedValueOnce({ deliveryId: 'delivery-1', status: 'QUEUED', deliveryConfigured: true, deliveryBlockReason: 'FIRST_LIVE_SEND_APPROVAL_REQUIRED' })
+    renderScreen()
+    fireEvent.click(await screen.findByRole('tab', { name: 'Payslip distribution' }))
+    await screen.findByText('synthetic@example.test')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select SYN-001' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send selected (1)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm queue' }))
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('1 queued')
+    expect(status).toHaveTextContent('first live payslip send is awaiting owner approval; no email was sent')
+    expect(status).not.toHaveTextContent('provider or sender configuration is incomplete')
   })
 
   it('renders the period-end leave balance and advance repayment balance on the payslip', async () => {

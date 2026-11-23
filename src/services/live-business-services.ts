@@ -69,6 +69,13 @@ export type PayslipDistributionRecord = {
   delivery_attempts: number; total_count: number;
 };
 export type PayslipEmailEventRecord = { event_id: string; event_type: string; occurred_at: string | null; received_at: string };
+export type PayslipDeliveryBlockReason = 'PROVIDER_CONFIGURATION_INCOMPLETE' | 'LIVE_DELIVERY_DISABLED' | 'FIRST_LIVE_SEND_APPROVAL_REQUIRED';
+export type PayslipEmailRequestResult = {
+  deliveryId: string;
+  status: string;
+  deliveryConfigured: boolean;
+  deliveryBlockReason?: PayslipDeliveryBlockReason;
+};
 export type PayslipStatementDetails = {
   leave: {
     monthly_entitlement_days: number;
@@ -484,8 +491,8 @@ export interface LiveBusinessServices {
     statementDetails(payrollRunId: string, employeeId: string): Promise<PayslipStatementDetails>;
     issueDocument(payrollRunId: string, employeeId: string): Promise<{ documentId: string; signedUrl: string }>;
     downloadDocument(documentId: string): Promise<{ signedUrl: string }>;
-    sendEmail(documentId: string): Promise<{ deliveryId: string; status: string; deliveryConfigured: boolean }>;
-    retryEmail(deliveryId: string): Promise<{ deliveryId: string; status: string; deliveryConfigured: boolean }>;
+    sendEmail(documentId: string): Promise<PayslipEmailRequestResult>;
+    retryEmail(deliveryId: string): Promise<PayslipEmailRequestResult>;
     deliveryHistory(documentId: string): Promise<PayslipDeliveryRecord[]>;
     distributionPreview(payrollRunId: string, page?: number, pageSize?: number): Promise<{ items: PayslipDistributionRecord[]; total: number }>;
     revokeAccess(deliveryId: string): Promise<void>;
@@ -1101,12 +1108,12 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
       async sendEmail(documentId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'email', documentId } });
         if (result.error) throw await payslipFunctionError(result.error);
-        return result.data as { deliveryId: string; status: string; deliveryConfigured: boolean };
+        return result.data as PayslipEmailRequestResult;
       },
       async retryEmail(deliveryId) {
         const result = await client.functions.invoke('payslip-artifacts', { body: { action: 'retry-email', deliveryId } });
         if (result.error) throw await payslipFunctionError(result.error);
-        return result.data as { deliveryId: string; status: string; deliveryConfigured: boolean };
+        return result.data as PayslipEmailRequestResult;
       },
       async deliveryHistory(documentId) {
         const result = await client.rpc('payslip_email_history', { p_document_id: documentId });

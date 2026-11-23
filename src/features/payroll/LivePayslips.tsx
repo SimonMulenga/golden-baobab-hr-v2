@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Mail, Printer, RefreshCw, ShieldCheck } from 'lucide-react'
 import { getSupabaseClient } from '../../lib/supabase/client'
-import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type LiveBusinessServices, type PayslipDistributionRecord, type PayslipEmailEventRecord, type PayslipStatementDetails } from '../../services/live-business-services'
+import { createLiveBusinessServices, type EmployeeDirectoryRecord, type FinalizedPayslipItemRecord, type FinalizedPayslipRunRecord, type LiveBusinessServices, type PayslipDeliveryBlockReason, type PayslipDistributionRecord, type PayslipEmailEventRecord, type PayslipEmailRequestResult, type PayslipStatementDetails } from '../../services/live-business-services'
 import { formatWorkspaceDate, useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { buildPayslipView } from './payslip-model'
 import './live-payslips.css'
@@ -16,6 +16,16 @@ const authorizationMessages = [
   'This application address is not enabled for secure payslip operations. Contact the system administrator.',
 ]
 const isAuthorizationFailure = (error: unknown) => error instanceof Error && authorizationMessages.includes(error.message)
+const queuedDeliveryNotice = (reason?: PayslipDeliveryBlockReason) => {
+  if (reason === 'FIRST_LIVE_SEND_APPROVAL_REQUIRED') return 'Delivery remains queued. The first live payslip send is awaiting owner approval; no email was sent.'
+  if (reason === 'LIVE_DELIVERY_DISABLED') return 'Delivery remains queued because live payslip delivery is disabled; no email was sent.'
+  if (reason === 'PROVIDER_CONFIGURATION_INCOMPLETE') return 'Delivery remains queued because provider or sender configuration is incomplete; no email was sent.'
+  return 'Delivery remains queued or is processing; provider acceptance is unconfirmed.'
+}
+const emailResultNotice = (result: PayslipEmailRequestResult, acceptedMessage: string, failedMessage: string) =>
+  result.status === 'SENT' ? acceptedMessage
+    : result.status === 'FAILED' ? failedMessage
+      : queuedDeliveryNotice(result.deliveryBlockReason)
 
 export function LivePayslips() {
   const { companies, preferences } = useWorkspace()
@@ -130,7 +140,7 @@ export function LivePayslips() {
     setArtifactBusy(true); setError(''); setNotice('')
     try {
       const result = await api.payslips.sendEmail(currentArtifactId)
-      setNotice(result.status === 'SENT' ? 'The configured email provider accepted the private payslip link for delivery.' : result.deliveryConfigured ? 'The private payslip link is queued for delivery.' : 'The payslip was not emailed. It is queued until the email provider and verified sender address are configured.')
+      setNotice(emailResultNotice(result, 'The configured email provider accepted the private payslip link for delivery.', 'Payslip delivery failed. Provider acceptance is unconfirmed; review delivery history before retrying.'))
       setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId))
       setDeliveryEvents(await api.payslips.eventHistory(currentArtifactId))
     } catch {
@@ -143,7 +153,7 @@ export function LivePayslips() {
     setArtifactBusy(true); setError(''); setNotice('')
     try {
       const result = await api.payslips.retryEmail(deliveryId)
-      setNotice(result.status === 'SENT' ? 'The configured email provider accepted the retry.' : 'The delivery retry is queued or still processing.')
+      setNotice(emailResultNotice(result, 'The configured email provider accepted the retry.', 'Payslip delivery retry failed. Provider acceptance is unconfirmed; review delivery history.'))
       if (currentArtifactId) setDeliveryRows(await api.payslips.deliveryHistory(currentArtifactId))
       if (currentArtifactId) setDeliveryEvents(await api.payslips.eventHistory(currentArtifactId))
     } catch {
@@ -217,7 +227,7 @@ export function LivePayslips() {
               <footer className="live-payslip-net"><span>Net salary</span><strong>{money(model.net)}</strong></footer>
               <p className="live-payslip-footnote">This payslip reflects payroll version {selectedRun?.version} after finalization. It is not a bank transfer confirmation.</p>
             </article>
-            <div className="live-payslip-note">Email delivery uses the employee email registered in their private HR details. The provider sends a time-limited private link; email remains queued until the provider and verified sender address are configured.</div>
+            <div className="live-payslip-note">Email delivery uses the employee email registered in their private HR details. The provider sends a time-limited private link; sending remains paused until configuration and both delivery gates allow it.</div>
           </>)}
   </div>
 }
@@ -266,13 +276,7 @@ function PayslipDistribution({
       if (!documentId) documentId = (await api.payslips.issueDocument(run.id, row.employee_id)).documentId
       phase = 'email'
       const result = await api.payslips.sendEmail(documentId)
-      setMessage(result.status === 'SENT'
-        ? 'The email provider accepted the payslip for delivery.'
-        : result.status === 'FAILED'
-          ? 'Email delivery failed. Provider acceptance is unconfirmed; review delivery history before retrying.'
-        : result.deliveryConfigured
-          ? 'The payslip is queued for delivery.'
-          : 'Delivery remains queued. Email sending is disabled until provider and sender verification are configured.')
+      setMessage(emailResultNotice(result, 'The email provider accepted the payslip for delivery.', 'Email delivery failed. Provider acceptance is unconfirmed; review delivery history before retrying.'))
       await refresh()
     } catch (error) {
       setError(phase === 'issuance'
@@ -291,7 +295,7 @@ function PayslipDistribution({
     setBusy(true); setError(''); setMessage('')
     try {
       const result = await api.payslips.retryEmail(row.delivery_id)
-      setMessage(result.status === 'SENT' ? 'The email provider accepted the retry.' : 'The retry remains queued; no delivery is claimed until provider acceptance.')
+      setMessage(emailResultNotice(result, 'The email provider accepted the retry.', 'The retry failed. Provider acceptance is unconfirmed; review delivery history.'))
       await refresh()
     } catch { setError('Retry is unavailable. The attempt limit may have been reached, or the delivery may no longer be failed.') }
     finally { setBusy(false) }
@@ -313,7 +317,7 @@ function PayslipDistribution({
 
   const sendMany = async () => {
     setConfirmation(null); setBusy(true); setError(''); setMessage('')
-    let accepted = 0; let queued = 0; let issuanceFailed = 0; let authorizationFailed = 0; let emailRequestFailed = 0
+    let accepted = 0; let queued = 0; let queuedReason: PayslipDeliveryBlockReason | undefined; let issuanceFailed = 0; let authorizationFailed = 0; let emailRequestFailed = 0
     try {
       const targets = confirmationRows.filter(eligible)
       for (const row of targets) {
@@ -330,7 +334,7 @@ function PayslipDistribution({
           const result = await api.payslips.sendEmail(documentId)
           if (result.status === 'SENT') accepted += 1
           else if (result.status === 'FAILED') emailRequestFailed += 1
-          else queued += 1
+          else { queued += 1; queuedReason ??= result.deliveryBlockReason }
         } catch (error) {
           if (isAuthorizationFailure(error)) authorizationFailed += 1
           else emailRequestFailed += 1
@@ -347,7 +351,7 @@ function PayslipDistribution({
       setMessage(failed > 0
         ? `${summary} ${details}. Review delivery history before retrying.`
         : queued > 0
-          ? `${summary} Live sending remains disabled until both delivery gates are approved and sender configuration is valid.`
+          ? `${summary} ${queuedDeliveryNotice(queuedReason)}`
           : summary)
       await refresh()
     } finally { setBusy(false) }
@@ -362,6 +366,6 @@ function PayslipDistribution({
     <div className="payslip-distribution-actions"><button className="button-primary" disabled={busy || loadingConfirmation || selected.length === 0} onClick={() => void openConfirmation('SELECTED')}><Mail size={15}/> Send selected ({selected.length})</button><button className="button-secondary" disabled={busy || loadingConfirmation || total === 0} onClick={() => void openConfirmation('ALL')}><Mail size={15}/> Send all eligible</button></div>
     {loading ? <div className="live-payslip-state" role="status"><LoaderCircle size={18}/> Loading recipients…</div> : <div className="table-scroll payslip-distribution-table"><table><thead><tr><th><input aria-label="Select all eligible on this page" type="checkbox" checked={rows.filter(eligible).length > 0 && rows.filter(eligible).every((row) => selected.includes(row.employee_id))} onChange={(event) => setSelected(event.target.checked ? [...new Set([...selected, ...rows.filter(eligible).map((row) => row.employee_id)])] : selected.filter((id) => !rows.some((row) => row.employee_id === id)))} /></th><th>Employee</th><th>Branch</th><th>Registered email</th><th>Status</th><th>Attempts</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => <tr key={row.employee_id}><td><input type="checkbox" aria-label={`Select ${row.employee_number}`} checked={selected.includes(row.employee_id)} disabled={!eligible(row)} onChange={(event) => setSelected(event.target.checked ? [...selected, row.employee_id] : selected.filter((id) => id !== row.employee_id))}/></td><td><strong>{row.first_name} {row.middle_name ? `${row.middle_name} ` : ''}{row.last_name}</strong><small>{row.employee_number} · {row.department || 'No department'} · {row.job_title || 'No job title'}</small></td><td>{row.branch_name}</td><td>{row.recipient_email || 'Email unavailable'}</td><td><span className={`delivery-status delivery-status-${row.delivery_status.toLowerCase()}`}>{statusLabel(row.delivery_status)}</span></td><td>{row.delivery_attempts}/3</td><td><div className="payslip-distribution-row-actions"><button className="button-secondary" onClick={() => onOpenPayslip(row.employee_id)}>Preview</button>{eligible(row) ? <button className="button-primary" disabled={busy} onClick={() => void sendOne(row)}>{row.delivery_status === 'QUEUED' ? 'Continue delivery' : 'Send'}</button> : row.delivery_status === 'FAILED' ? <button className="button-secondary" disabled={busy || row.delivery_attempts >= 3 || !row.delivery_id} onClick={() => void retryOne(row)}>Retry</button> : null}</div></td></tr>)}</tbody></table>{!rows.length && <p className="live-payslip-state">No employees are present in this finalized payroll.</p>}</div>}
     <div className="live-payslip-pagination"><button className="button-secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button className="button-secondary" disabled={page >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15}/></button></div>
-    {confirmation && <div className="payslip-distribution-backdrop" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="distribution-confirm-title" className="panel payslip-distribution-dialog"><h2 id="distribution-confirm-title">Confirm payslip distribution</h2><p>Payroll run {run.id.slice(0, 8)} · {confirmation === 'ALL' ? 'all employees in this authorized finalized run' : `${selected.length} selected in this authorized finalized run`}.</p><dl><div><dt>Recipients eligible</dt><dd>{confirmationRows.filter(eligible).length}</dd></div><div><dt>Invalid or missing addresses</dt><dd>{confirmationRows.filter((row) => !row.recipient_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.recipient_email)).length}</dd></div><div><dt>Already queued</dt><dd>{confirmationRows.filter((row) => row.delivery_status === 'QUEUED' || row.delivery_status === 'SENDING').length}</dd></div><div><dt>Already sent or bounced</dt><dd>{confirmationRows.filter((row) => ['SENT', 'DELIVERED', 'BOUNCED'].includes(row.delivery_status)).length}</dd></div></dl><p className="payslip-distribution-warning">The configured delivery switch must be enabled server-side. No email will be sent while it remains off.</p><div className="payslip-distribution-actions"><button className="button-secondary" onClick={() => setConfirmation(null)}>Cancel</button><button className="button-primary" disabled={busy || loadingConfirmation || !confirmationRows.some(eligible)} onClick={() => void sendMany()}><Mail size={15}/> Confirm queue</button></div></section></div>}
+    {confirmation && <div className="payslip-distribution-backdrop" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="distribution-confirm-title" className="panel payslip-distribution-dialog"><h2 id="distribution-confirm-title">Confirm payslip distribution</h2><p>Payroll run {run.id.slice(0, 8)} · {confirmation === 'ALL' ? 'all employees in this authorized finalized run' : `${selected.length} selected in this authorized finalized run`}.</p><dl><div><dt>Recipients eligible</dt><dd>{confirmationRows.filter(eligible).length}</dd></div><div><dt>Invalid or missing addresses</dt><dd>{confirmationRows.filter((row) => !row.recipient_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.recipient_email)).length}</dd></div><div><dt>Already queued</dt><dd>{confirmationRows.filter((row) => row.delivery_status === 'QUEUED' || row.delivery_status === 'SENDING').length}</dd></div><div><dt>Already sent or bounced</dt><dd>{confirmationRows.filter((row) => ['SENT', 'DELIVERED', 'BOUNCED'].includes(row.delivery_status)).length}</dd></div></dl><p className="payslip-distribution-warning">Both server-side delivery gates and sender configuration must allow delivery. Queueing does not confirm provider acceptance.</p><div className="payslip-distribution-actions"><button className="button-secondary" onClick={() => setConfirmation(null)}>Cancel</button><button className="button-primary" disabled={busy || loadingConfirmation || !confirmationRows.some(eligible)} onClick={() => void sendMany()}><Mail size={15}/> Confirm queue</button></div></section></div>}
   </section>
 }

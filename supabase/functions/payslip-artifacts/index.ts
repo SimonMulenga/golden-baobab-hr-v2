@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { approvedAppOrigins } from './origins.ts'
 import { createPayslipAccessToken } from '../_shared/payslip-tokens.ts'
-import { isLivePayslipDeliveryEnabled } from '../_shared/payslip-delivery-policy.ts'
+import { isLivePayslipDeliveryEnabled, payslipDeliveryBlockReason } from '../_shared/payslip-delivery-policy.ts'
 import { buildPayslipPdf } from './pdf.ts'
 
 const baseHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
@@ -132,9 +132,11 @@ Deno.serve(async (request) => {
       const accessSecret = Deno.env.get('PAYSLIP_ACCESS_TOKEN_SECRET')
       const publicAppUrl = Deno.env.get('PAYSLIP_PUBLIC_APP_URL')
       const senderVerified = Deno.env.get('PAYSLIP_SENDER_DOMAIN_VERIFIED') === 'true'
+      const deliveryEnabled = Deno.env.get('PAYSLIP_LIVE_DELIVERY_ENABLED')
+      const firstLiveSendApproved = Deno.env.get('PAYSLIP_FIRST_LIVE_SEND_APPROVED')
       const liveDeliveryEnabled = isLivePayslipDeliveryEnabled({
-        deliveryEnabled: Deno.env.get('PAYSLIP_LIVE_DELIVERY_ENABLED'),
-        firstLiveSendApproved: Deno.env.get('PAYSLIP_FIRST_LIVE_SEND_APPROVED'),
+        deliveryEnabled,
+        firstLiveSendApproved,
       })
       let accessPageUrl: URL | null = null
       try {
@@ -147,9 +149,19 @@ Deno.serve(async (request) => {
       } catch { /* Invalid public URL leaves the queue disabled. */ }
       const exactSender = 'Golden Baobab HR <payslips@luskamtravelagents.com>'
       const deliveryConfigured = Boolean(key && from?.trim() === exactSender && senderVerified && accessSecret && accessSecret.length >= 32 && accessPageUrl)
+      const deliveryBlock = payslipDeliveryBlockReason({
+        providerConfigured: deliveryConfigured,
+        deliveryEnabled,
+        firstLiveSendApproved,
+      })
       if (!liveDeliveryEnabled || !deliveryConfigured) {
-        return reply(202, { deliveryId, status: 'QUEUED', deliveryConfigured: false, liveDeliveryEnabled: false,
-          message: 'Delivery is queued. Live sending remains disabled until the sender domain is verified and an authorized administrator enables it.' }, origin)
+        return reply(202, {
+          deliveryId,
+          status: 'QUEUED',
+          deliveryConfigured,
+          liveDeliveryEnabled: false,
+          deliveryBlockReason: deliveryBlock ?? 'LIVE_DELIVERY_DISABLED',
+        }, origin)
       }
       const { data: claimed, error: claimError } = await admin.rpc('payslip_email_claim', { p_delivery_id: deliveryId, p_actor_id: identity.user.id })
       if (claimError) throw claimError
