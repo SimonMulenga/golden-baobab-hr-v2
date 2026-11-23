@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as XLSX from '@e965/xlsx'
 import ExcelJS from 'exceljs'
 import { readFileSync } from 'node:fs'
-import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, matchAuthorizedImportBranch, matchingInactiveImportBranch, recalculateStagedHousingAllowance, validateStagedEmployee } from './employee-import-staging'
+import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, matchAuthorizedImportBranch, matchingInactiveImportBranch, missingOptionalEmployeeFields, recalculateStagedHousingAllowance, validateStagedEmployee } from './employee-import-staging'
 import { calculateGrossEarningsPreview, calculateHousingAllowanceCents, formatCurrencyCents } from './employee-import-template'
 import { employeeTemplateColumns } from './live-import-model'
 
@@ -33,8 +33,10 @@ describe('workplace branch import mapping', () => {
   ]
 
   it('maps exact normalized branch names and company-scoped branch codes only', () => {
-    expect(matchAuthorizedImportBranch('  LUSAKA—HEADQUARTERS ', branches)?.id).toBe('branch-lusaka')
-    expect(matchAuthorizedImportBranch('lsk 01', branches)?.id).toBe('branch-lusaka')
+    expect(matchAuthorizedImportBranch('  LUSAKA   HEADQUARTERS ', branches)?.id).toBe('branch-lusaka')
+    expect(matchAuthorizedImportBranch('LUSAKA—HEADQUARTERS', branches)).toBeNull()
+    expect(matchAuthorizedImportBranch('LSK-01', branches)?.id).toBe('branch-lusaka')
+    expect(matchAuthorizedImportBranch('lsk 01', branches)).toBeNull()
     expect(matchAuthorizedImportBranch('Lusaka Head', branches)).toBeNull()
     expect(matchAuthorizedImportBranch('Lusaka Headquarters', [branches[0], { ...branches[0], id: 'duplicate' }])).toBeNull()
   })
@@ -48,10 +50,26 @@ describe('workplace branch import mapping', () => {
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
       ['Employee Number', 'First Name', 'Last Name', 'Company', 'Branch'],
-      ['SYN-BRANCH', 'Test', 'Worker', 'Golden Baobab Investments', 'MAIN!'],
+      ['SYN-BRANCH', 'Test', 'Worker', 'Golden Baobab Investments', 'Main'],
     ]), 'Employees')
     const result = extractEmployeeWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer, companies)
     expect(result.records[0]).toMatchObject({ branch_id: 'branch-1', current_data: { branch_name: 'Main' } })
+  })
+
+  it('matches multi-company rows only to exact registered organizations and rejects cross-company branches', () => {
+    const secondCompany = { id: 'company-2', name: 'Second Company', branches: [{ id: 'branch-2', name: 'Harbor', status: 'ACTIVE' }] }
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['First Name','Last Name','Company','Branch','Department','Basic Salary'],
+      ['Ada','One',' golden   baobab investments ','Main','Finance',6000],
+      ['Mina','Two','Second Company','Harbor','HR',5000],
+      ['Kai','Three','Second Company','Main','IT',4000],
+      ['Unknown','Org','Second Company XYZ','Harbor','HR',3000],
+    ]), 'Employees')
+    const result = extractEmployeeWorkbook(XLSX.write(workbook,{type:'array',bookType:'xlsx'}) as ArrayBuffer,[companies[0],secondCompany])
+    expect(result.records.map((row)=>[row.company_id,row.branch_id])).toEqual([
+      ['company-1','branch-1'],['company-2','branch-2'],['company-2',null],[null,null],
+    ])
   })
 })
 
@@ -93,9 +111,10 @@ describe('employee workbook staging', () => {
   it('validates missing details and malformed salary without rejecting workbook extraction', () => {
     const result = extractEmployeeWorkbook(workbookBuffer(), companies)
     const errors = validateStagedEmployee(result.records[1].current_data, 'company-1', 'branch-1')
-    expect(errors).toContain('employee_number is required')
-    expect(errors).toContain('Basic salary must be a positive amount with at most two decimal places')
-    expect(errors).toContain('Email or email unavailable reason is required')
+    expect(errors).toContain('last_name is required')
+    expect(errors).toContain('department is required')
+    expect(errors).toContain('Basic salary must be a valid positive amount with at most two decimal places')
+    expect(errors).not.toContain('Email or email unavailable reason is required')
   })
 
   it('detects same-company employee-number and identity/name collisions for review', () => {
@@ -120,21 +139,24 @@ describe('employee workbook staging', () => {
       ]))
   })
 
-  it('generates the exact blank 38-column template and supporting sheets with allowance formulas', async () => {
+  it('reports payment details according to the selected payment method', () => {
+    expect(missingOptionalEmployeeFields({ payment_method: '' })).not.toContain('Bank details')
+    expect(missingOptionalEmployeeFields({ payment_method: 'BANK_TRANSFER' })).toContain('Bank details')
+    expect(missingOptionalEmployeeFields({ payment_method: 'MOBILE_MONEY' })).toContain('Mobile money details')
+    expect(missingOptionalEmployeeFields({ payment_method: 'CASH' })).not.toContain('Mobile money details')
+  })
+
+  it('generates the exact blank 41-column template and supporting sheets with allowance formulas', async () => {
     const buffer = new Uint8Array(readFileSync('public/employee-template.xlsx')).buffer
     const template = XLSX.read(buffer, { type: 'array', cellFormula: true })
     expect(template.SheetNames).toEqual(['Employees', 'Instructions', 'Valid Values'])
     const worksheet = template.Sheets.Employees
     expect(XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, raw: true })[0]).toEqual(employeeTemplateColumns.map((column) => column.heading))
-    expect(employeeTemplateColumns).toHaveLength(38)
-    expect(employeeTemplateColumns.map(({ heading }) => heading)).toEqual([
-      'Employee Number','First Name','Middle Name','Last Name','Date of Birth','Gender','Nationality','NRC / ID Number',
-      'Residential Address','Phone Number','Email','Email Unavailable Reason','Company','Branch','Department','Job Title',
-      'Employment Type','Contract Type','Date Joined','Salary Frequency','Basic Salary','Housing allowance 30% of basic pay',
-      'Lunch Allwance','Transport Alwance','Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name',
-      'Bank Account Name','Bank Account Number','Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number',
-      'Emergency Contact Name','Emergency Contact Relationship','Emergency Contact Phone Number',
+    expect(employeeTemplateColumns).toHaveLength(41)
+    expect(employeeTemplateColumns.slice(0, 8).map(({ heading }) => heading)).toEqual([
+      'First Name *','Middle Name','Last Name *','Employee Number (optional)','Company *','Branch *','Department *','Basic Salary (ZMW) *',
     ])
+    expect(employeeTemplateColumns.map(({ key }) => key)).toContain('medical_allowance')
     const excel = new ExcelJS.Workbook()
     const loaded = await excel.xlsx.load(Buffer.from(buffer) as never)
     const sheet = loaded.getWorksheet('Employees')!
@@ -142,20 +164,20 @@ describe('employee workbook staging', () => {
     expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 })
     expect(sheet.getColumn(1).width).toBeGreaterThan(0)
     expect(sheet.getCell('A2').value).toBeNull()
-    expect(sheet.getCell('V2').value).toMatchObject({ formula: 'IF(U2="","",ROUND(U2*30%,2))' })
-    expect(sheet.getCell('V501').value).toMatchObject({ formula: 'IF(U501="","",ROUND(U501*30%,2))' })
-    expect(sheet.getCell('Z2').value).toMatchObject({ formula: 'IF(U2="","",SUM(U2:Y2))' })
-    expect(sheet.getCell('Z501').value).toMatchObject({ formula: 'IF(U501="","",SUM(U501:Y501))' })
-    expect(sheet.getCell('AD2').numFmt).toBe('@')
+    expect(sheet.getCell('I2').value).toMatchObject({ formula: 'IF(H2="","",ROUND(H2*30%,2))' })
+    expect(sheet.getCell('I501').value).toMatchObject({ formula: 'IF(H501="","",ROUND(H501*30%,2))' })
+    expect(sheet.getCell('N2').value).toMatchObject({ formula: 'IF(H2="","",SUM(H2:M2))' })
+    expect(sheet.getCell('N501').value).toMatchObject({ formula: 'IF(H501="","",SUM(H501:M501))' })
+    expect(sheet.getCell('AJ2').numFmt).toBe('@')
     expect((sheet.model as unknown as { sheetProtection?: unknown }).sheetProtection).toBeFalsy()
-    for (const cell of ['A2','Y2','AA2','AL2','A501','AL501']) expect(sheet.getCell(cell).protection?.locked ?? false).toBe(false)
+    for (const cell of ['A2','AO2','AH2','AK2','A501','AO501']) expect(sheet.getCell(cell).protection?.locked ?? false).toBe(false)
     expect(loaded.getWorksheet('Valid Values')?.getCell('A2').value).toBe('Male')
     const validations = (sheet as unknown as { dataValidations: { model: Record<string, { formulae: string[] }> } }).dataValidations.model
-    expect(validations.F2.formulae).toEqual(['=GenderValues'])
-    expect(validations.Q2.formulae).toEqual(['=EmploymentTypeValues'])
-    expect(validations.T2.formulae).toEqual(['=SalaryFrequencyValues'])
-    expect(validations.AA2.formulae).toEqual(['=PaymentMethodValues'])
-    expect(validations.AB2.formulae).toEqual(['=BankNameValues'])
+    expect(validations.V2.formulae).toEqual(['=GenderValues'])
+    expect(validations.P2.formulae).toEqual(['=EmploymentTypeValues'])
+    expect(validations.O2.formulae).toEqual(['=SalaryFrequencyValues'])
+    expect(validations.AF2.formulae).toEqual(['=PaymentMethodValues'])
+    expect(validations.AG2.formulae).toEqual(['=BankNameValues'])
     const parsedBlank = extractEmployeeWorkbook(buffer, companies)
     expect(parsedBlank.records).toEqual([])
     expect(parsedBlank.worksheetMappings.map(({ sheet }) => sheet)).toEqual(['Employees'])
@@ -168,7 +190,7 @@ describe('employee workbook staging', () => {
     const worksheet = template.getWorksheet('Employees')!
     const indexes = Object.fromEntries(employeeTemplateColumns.map((column, index) => [column.key, index]))
     const values: Record<string, string | number | Date> = {
-      employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office',
+      employee_number: 'SYN-0007', first_name: 'Mina', last_name: 'Test', company_name: 'Golden Baobab Investments', branch_name: 'North Office', department: 'Finance',
       basic_pay: 8000, meal_allowance: 450, transport_allowance: 250, other_allowances: 80, gross_pay: 10980,
       phone: '0970000007', tpin: '0000001234', contract_start_date: '2026-11-01',
       date_of_birth: new Date('1990-04-02T00:00:00Z'),
@@ -194,7 +216,7 @@ describe('employee workbook staging', () => {
     expect(employee.company_id).toBe('company-1')
     expect(employee.branch_id).toBe('north-1')
     expect(employee.original_data['Housing allowance 30% of basic pay']).toBe('')
-    expect(employee.payroll_data).toMatchObject({ 'Basic Salary': 8000, 'Groce Pay (Sum of all the earnings)': 10980, 'Bank Account Name': 'Mina Test', 'Bank Account Number': '00012345' })
+    expect(employee.payroll_data).toMatchObject({ 'Basic Salary (ZMW) *': 8000, 'Gross Pay (earnings preview)': 10980, 'Bank Account Name': 'Mina Test', 'Bank Account Number': '00012345' })
     expect(employee.current_data.gross_pay).toBe('10980')
     })
   })
@@ -207,6 +229,7 @@ describe('employee workbook staging', () => {
     worksheet.getCell(2, columns.employee_number).value = 'BEN-002'
     worksheet.getCell(2, columns.first_name).value = 'SIMON'
     worksheet.getCell(2, columns.last_name).value = 'MULENGA'
+    worksheet.getCell(2, columns.company_name).value = 'Golden Baobab Investments'
     worksheet.getCell(2, columns.department).value = 'IT'
     worksheet.getCell(2, columns.basic_pay).value = 5000
     worksheet.getCell(2, columns.payment_method).value = 'Bank transfer'
@@ -222,8 +245,7 @@ describe('employee workbook staging', () => {
       },
     })
     expect(validateStagedEmployee(parsed.records[0].current_data, 'company-1', '')).toEqual(expect.arrayContaining([
-      'contract_type is required', 'salary_frequency is required', 'Branch assignment is required',
-      'Bank details are required for bank transfer',
+      'Branch assignment is required',
     ]))
   })
 

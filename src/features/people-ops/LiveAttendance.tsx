@@ -94,7 +94,7 @@ export function LiveAttendance() {
       await services.attendance.saveEntry({ portfolioId: company.portfolioId, companyId, branchId,
         periodStart: monthStart(month), periodEnd: monthEnd(month), employeeId: editing.id,
         scheduledDays: scheduled, workedDays: worked, paidLeaveDays: paid,
-        unpaidLeaveDays: unpaid, payableAbsenceDays: other, contractType: editing.contract_type,
+        unpaidLeaveDays: unpaid, payableAbsenceDays: other, contractType: editing.contract_type ?? '',
         correctionNote: form.note })
       setEditing(null); setNotice('Monthly attendance entry saved.'); await load()
     } catch { setError('Attendance was not saved. Verify the values and your branch permission.') }

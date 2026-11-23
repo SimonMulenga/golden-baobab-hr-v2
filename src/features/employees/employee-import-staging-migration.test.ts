@@ -5,8 +5,28 @@ import allowanceMigration from '../../../supabase/migrations/20261120005700_empl
 import departmentValidationMigration from '../../../supabase/migrations/20261120005800_validate_staged_departments.sql?raw'
 import bulkApprovalMigration from '../../../supabase/migrations/20261120005900_employee_bulk_approval_and_queue_summary.sql?raw'
 import approvalSummaryScopeMigration from '../../../supabase/migrations/20261120006000_refine_employee_approval_summary_scope.sql?raw'
+import flexibleOnboardingMigration from '../../../supabase/migrations/20261124006900_flexible_employee_onboarding.sql?raw'
 
 describe('secure employee import staging migration contract', () => {
+  it('allows optional profile fields while enforcing mandatory name, organization and positive earnings server-side', () => {
+    expect(flexibleOnboardingMigration).toMatch(/alter column date_of_birth drop not null/i)
+    expect(flexibleOnboardingMigration).toMatch(/alter column residential_address drop not null/i)
+    expect(flexibleOnboardingMigration).toMatch(/alter column salary_frequency drop not null/i)
+    expect(flexibleOnboardingMigration).toMatch(/app_private\.employee_import_staging_validate/i)
+    expect(flexibleOnboardingMigration).toMatch(/basic salary is required/i)
+    expect(flexibleOnboardingMigration).toMatch(/v_basic::numeric<=0/i)
+    expect(flexibleOnboardingMigration).toMatch(/employee\.create/i)
+    expect(flexibleOnboardingMigration).toMatch(/create or replace function public\.employee_update_draft/i)
+    expect(flexibleOnboardingMigration).toMatch(/grant execute on function public\.employee_update_draft\(uuid,jsonb,jsonb,jsonb\) to authenticated/i)
+    expect(flexibleOnboardingMigration).toMatch(/employee_allocate_number\(v_record\.company_id\)/i)
+    expect(flexibleOnboardingMigration).toMatch(/app_private\.has_permission\('employee\.submit'/i)
+    expect(flexibleOnboardingMigration).toMatch(/d\.company_id=p_company_id and d\.status='ACTIVE'/i)
+    expect(flexibleOnboardingMigration).toMatch(/employees_onboarding_approval_guard/i)
+    expect(flexibleOnboardingMigration).toMatch(/employee_profile_completeness/i)
+    expect(flexibleOnboardingMigration).toMatch(/revoke all on function public\.employee_profile_completeness\(uuid\[\]\) from public,anon/i)
+    expect(flexibleOnboardingMigration).not.toMatch(/\b(drop|truncate)\s+(table|schema)\b/i)
+  })
+
   it('is additive and retains the existing portfolio/company/branch and employee approval model', () => {
     expect(migration).toMatch(/create table public\.employee_import_batches/i)
     expect(migration).toMatch(/create table public\.employee_import_staging_records/i)

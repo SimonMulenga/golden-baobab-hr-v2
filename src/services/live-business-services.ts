@@ -10,11 +10,11 @@ export type EmployeeDirectoryRecord = {
   first_name: string;
   middle_name: string | null;
   last_name: string;
-  job_title: string;
+  job_title: string | null;
   department: string;
-  employment_type: string;
-  contract_type: string;
-  contract_start_date: string;
+  employment_type: string | null;
+  contract_type: string | null;
+  contract_start_date: string | null;
   contract_end_date: string | null;
   retirement_age: number;
   retirement_status: 'NOT_RETIRED' | 'RETIRED';
@@ -28,6 +28,7 @@ export type EmployeeDirectoryRecord = {
   reviewed_at: string | null;
   created_at: string;
 };
+export type EmployeeProfileCompleteness = { employee_id: string; profile_status: 'COMPLETE' | 'INCOMPLETE'; missing_fields: string[] };
 
 export type PayrollRunRecord = {
   id: string;
@@ -390,6 +391,7 @@ export type DeductionRequestInput = {
 export interface LiveBusinessServices {
   employees: {
     list(request?: PageRequest & { approvalStatus?: EmployeeApprovalFilter; departmentId?: string; companyId?: string; lifecycleStatus?: string }): Promise<PageResult<EmployeeDirectoryRecord>>;
+    profileCompleteness(employeeIds: string[]): Promise<EmployeeProfileCompleteness[]>;
     byIds(ids: string[]): Promise<EmployeeDirectoryRecord[]>;
     byId(employeeId: string): Promise<EmployeeDirectoryRecord>;
     history(employeeId: string): Promise<EmployeeHistoryRecord[]>;
@@ -561,6 +563,12 @@ export function createLiveBusinessServices(client: SupabaseClient): LiveBusiness
         if (result.error) throw result.error;
         const rows = (result.data ?? []) as (EmployeeDirectoryRecord & { lifecycle_status: EmployeeDirectoryRecord['employment_status']; contract_expired: boolean; can_manage_lifecycle: boolean; can_approve_lifecycle: boolean; total_count: number })[];
         return { items: rows.map(({ lifecycle_status, contract_expired, can_manage_lifecycle, can_approve_lifecycle, ...row }) => ({ ...row, lifecycle_status, contract_expired, can_manage_lifecycle, can_approve_lifecycle })), total: Number(rows[0]?.total_count ?? 0) };
+      },
+      async profileCompleteness(employeeIds) {
+        if (!employeeIds.length) return [];
+        const result = await client.rpc('employee_profile_completeness', { p_employee_ids: [...new Set(employeeIds)].slice(0, 100) });
+        if (result.error) throw result.error;
+        return (result.data ?? []) as EmployeeProfileCompleteness[];
       },
       async byIds(ids) {
         if (ids.length === 0) return [];

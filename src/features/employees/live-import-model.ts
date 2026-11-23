@@ -10,7 +10,7 @@ export type LiveImportField = {
 }
 
 export const liveImportFields: LiveImportField[] = [
-  { key: 'employee_number', label: 'Employee number', required: true, aliases: ['employee number', 'employee no', 'emp id', 'staff number', 'staff id', 'employee id'] },
+  { key: 'employee_number', label: 'Employee number', required: false, aliases: ['employee number', 'employee no', 'emp id', 'staff number', 'staff id', 'employee id'] },
   { key: 'first_name', label: 'First name', required: true, aliases: ['first name', 'firstname', 'given name', 'forename'] },
   { key: 'middle_name', label: 'Middle name', required: false, aliases: ['middle name', 'middlename', 'other names'] },
   { key: 'last_name', label: 'Last name', required: true, aliases: ['last name', 'lastname', 'surname', 'family name'] },
@@ -30,7 +30,7 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'napsa_number', label: 'NAPSA number', required: false, aliases: ['napsa', 'napsa number', 'napsa reference'] },
   { key: 'nhima_number', label: 'NHIMA number', required: false, aliases: ['nhima', 'nhima number', 'nhima reference'] },
   { key: 'job_title', label: 'Job title', required: false, aliases: ['job title', 'job role', 'position', 'position title', 'role', 'title'] },
-  { key: 'department', label: 'Department', required: false, aliases: ['department', 'department name', 'team', 'division'] },
+  { key: 'department', label: 'Department', required: true, aliases: ['department', 'department name', 'team', 'division'] },
   { key: 'employment_type', label: 'Employment type', required: false, aliases: ['employment type', 'employee type', 'type of employment'] },
   { key: 'contract_type', label: 'Contract type', required: false, aliases: ['contract type', 'contract category', 'contract classification'] },
   { key: 'contract_start_date', label: 'Employment start date', required: false, aliases: ['employment start date', 'start date', 'date joined', 'joining date', 'hire date', 'contract start date'], type: 'date' },
@@ -57,8 +57,8 @@ export const liveImportFields: LiveImportField[] = [
   { key: 'mobile_money_provider', label: 'Mobile money provider or wallet', required: false, aliases: ['mobile money provider', 'mobile money network', 'wallet name'] },
   { key: 'mobile_money_number', label: 'Mobile money number', required: false, aliases: ['mobile money number'] },
   { key: 'employment_status', label: 'Employment status', required: false, aliases: ['status', 'employment status'] },
-  { key: 'company_name', label: 'Company', required: false, aliases: ['company', 'company name', 'employing company', 'location'] },
-  { key: 'branch_name', label: 'Workplace branch', required: false, aliases: ['branch', 'work location', 'workplace branch', 'work location branch'] },
+  { key: 'company_name', label: 'Company', required: true, aliases: ['company', 'company name', 'employing company', 'location'] },
+  { key: 'branch_name', label: 'Workplace branch', required: true, aliases: ['branch', 'work location', 'workplace branch', 'work location branch'] },
   { key: 'full_name', label: 'Full name', required: false, aliases: ['name', 'employee name', 'full name', 'staff name', 'name of employee'] },
 ]
 

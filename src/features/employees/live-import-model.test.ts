@@ -47,7 +47,7 @@ describe('LIVE employee import mapping', () => {
       loan_or_other_deduction: 'Loan or Other Deduction', deduction_label: 'Deduction Label', sort_code: 'Sort Code',
       mobile_money_provider: 'Wallet Name', bank_branch_name: '',
     })
-    expect(liveImportFields.filter((field) => field.required).map((field) => field.key)).toEqual(['employee_number', 'first_name', 'last_name', 'basic_pay'])
+    expect(liveImportFields.filter((field) => field.required).map((field) => field.key)).toEqual(['first_name', 'last_name', 'department', 'basic_pay', 'company_name', 'branch_name'])
   })
 
   it('preserves formatted identifier text and reports populated fields the current endpoint cannot store', () => {
@@ -85,14 +85,14 @@ describe('LIVE employee import mapping', () => {
 
   it('keeps the approved template headings exact and in their required order', () => {
     expect(employeeTemplateColumns.map((column) => column.heading)).toEqual([
-      'Employee Number','First Name','Middle Name','Last Name','Date of Birth','Gender','Nationality','NRC / ID Number',
-      'Residential Address','Phone Number','Email','Email Unavailable Reason','Company','Branch','Department','Job Title',
-      'Employment Type','Contract Type','Date Joined','Salary Frequency','Basic Salary','Housing allowance 30% of basic pay',
-      'Lunch Allwance','Transport Alwance','Other allowances','Groce Pay (Sum of all the earnings)','Payment Method','Bank Name',
-      'Bank Account Name','Bank Account Number','Mobile Money Provider','Mobile Money Number','TPIN','NAPSA Number','NHIMA Number','Emergency Contact Name',
+      'First Name *','Middle Name','Last Name *','Employee Number (optional)','Company *','Branch *','Department *','Basic Salary (ZMW) *',
+      'Housing allowance 30% of basic pay','Meal Allowance','Transport Allowance','Medical Allowance','Other Allowances','Gross Pay (earnings preview)',
+      'Salary Frequency','Employment Type','Contract Type','Date Joined','Contract End Date','Job Title','Date of Birth','Gender','Nationality',
+      'NRC / ID Number','Residential Address','Phone Number','Email','Email Unavailable Reason','TPIN','NAPSA Number','NHIMA Number','Payment Method',
+      'Bank Name','Bank Branch','Bank Account Name','Bank Account Number','Mobile Money Provider','Mobile Money Number','Emergency Contact Name',
       'Emergency Contact Relationship','Emergency Contact Phone Number',
     ])
-    expect(employeeTemplateColumns).toHaveLength(38)
+    expect(employeeTemplateColumns).toHaveLength(41)
   })
 
   it('maps workbook aliases without assigning one source column to multiple targets silently', () => {

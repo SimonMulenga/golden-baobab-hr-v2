@@ -47,17 +47,21 @@ for (let row = 2; row <= preparedInputRows + 1; row++) {
 const instructions = workbook.addWorksheet('Instructions')
 instructions.columns = [{ header: 'Topic', width: 28 }, { header: 'Guidance', width: 110 }]
 instructions.addRows([
-  ['Employee workbook', 'Enter one employee per row on the Employees worksheet. Keep the approved column headings unchanged.'],
-  ['Incomplete information', 'Blank mandatory details are accepted into secure HR staging. HR will request or enter corrections before approval. Do not invent personal or employment details.'],
-  ['Company and branch', 'Use the registered company name. Branch may be blank during upload. HR must assign an active branch before approval.'],
-  ['Department', 'Enter the department name if known. HR will map it to an active department in the selected company. Do not create departments by editing this workbook.'],
+  ['Employee workbook', 'Enter one employee per row on the Employees worksheet. Keep the column headings unchanged. Columns marked * are mandatory. Employee Number is optional and is generated securely when blank.'],
+  ['Required onboarding fields', 'First Name, Last Name, Company, Branch, Department, and a positive Basic Salary are required. A blank or zero Basic Salary is not valid. Optional allowance cells can be blank or zero.'],
+  ['Multiple companies', 'Rows in one upload may belong to different registered companies, branches, and departments. Enter the organization for every row. The application checks every row against your authorized registered structure.'],
+  ['Company', 'Enter the exact registered company name. Spaces and letter casing are normalized. Unknown, inactive, ambiguous, or unauthorized companies must be corrected; no company is created automatically.'],
+  ['Branch', 'Enter an active branch that belongs to the selected company. A branch from another company is rejected. Do not rely on spreadsheet dropdowns; the application database is authoritative.'],
+  ['Department', 'Enter an active department registered for the selected company. Departments are company-scoped in this system. Do not create departments by editing this workbook.'],
+  ['Import review', 'Each row is checked separately. Valid rows may continue while invalid rows remain available for correction. Review the accepted/rejected preview and fix every required organization or earnings error before submitting.'],
+  ['Optional information', 'DOB, gender, NRC, nationality, address, phone, email, emergency contact, bank/payment, tax identifiers, employment type, contract dates, job title, and salary frequency may be added later. Leave unknown values blank; never invent them.'],
+  ['Accepted dates', 'Use a real date in Excel or enter an unambiguous YYYY-MM-DD date. Dates are checked again by the server.'],
+  ['Accepted amounts', 'Use ZMW numbers with up to two decimal places; commas and a leading K are accepted by the import review. Negative values and nonnumeric text are rejected.'],
   ['Contract Type', 'Enter the type shown in the signed employment contract. This field is text in the current database, not a fixed enum.'],
-  ['Salary Frequency', 'Select Monthly, Fortnightly, Weekly, or Daily. These are the values supported by the compensation database.'],
+  ['Salary Frequency', 'Optional at onboarding. If provided, use Monthly, Fortnightly, Weekly, or Daily. Payroll setup requires the appropriate frequency before payroll processing.'],
   ['Housing allowance', 'The default proposal is 30% of Basic Salary. The workbook formula recalculates when opened in Excel. HR reviews differences from an approved contractual amount.'],
   ['Gross pay', 'Gross Pay is a compensation preview equal to Basic Salary plus the listed allowances. It is not the statutory taxable or pensionable base.'],
-  ['Bank transfer', 'Bank name, account name, and account number are required before final approval. Account numbers are text; preserve leading zeros.'],
-  ['Mobile money', 'Choose Airtel Money, MTN MoMo, or Zamtel Kwacha and provide the mobile money number before final approval.'],
-  ['Cash', 'Bank and mobile money fields are not required for cash payment unless company policy says otherwise.'],
+  ['Payment information', 'Bank and mobile money details are optional for onboarding. Payment processing requires valid payment details for the selected payment method. Account numbers are text; preserve leading zeros.'],
   ['Sensitive information', 'Upload only through the authenticated Golden Baobab HR application. Never send the workbook through public links or email.'],
 ])
 instructions.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
@@ -88,20 +92,30 @@ validSheet.views = [{ state: 'frozen', ySplit: 1, activeCell: 'A2', topLeftCell:
 validSheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(...lists.map((list) => list.values.length)) + 1, column: lists.length } }
 
 const validationRows = [
-  ['F2:F501', 'GenderValues'],
-  ['Q2:Q501', 'EmploymentTypeValues'],
-  ['T2:T501', 'SalaryFrequencyValues'],
-  ['AA2:AA501', 'PaymentMethodValues'],
-  ['AB2:AB501', 'BankNameValues'],
-  ['AE2:AE501', 'MobileMoneyProviderValues'],
+  ['gender', 'GenderValues'],
+  ['employment_type', 'EmploymentTypeValues'],
+  ['salary_frequency', 'SalaryFrequencyValues'],
+  ['payment_method', 'PaymentMethodValues'],
+  ['bank_name', 'BankNameValues'],
+  ['mobile_money_provider', 'MobileMoneyProviderValues'],
 ]
-for (const [range, name] of validationRows) {
-  const [start, end] = range.split(':')
+for (const [key, name] of validationRows) {
+  const column = fieldDefinition.findIndex((field) => field.key === key) + 1
+  if (column <= 0) continue
+  const start = worksheet.getCell(2, column).address
+  const end = worksheet.getCell(preparedInputRows + 1, column).address
   worksheet.dataValidations.add(`${start}:${end}`, {
     type: 'list', allowBlank: true, formulae: [`=${name}`], showErrorMessage: true,
     errorStyle: 'warning', errorTitle: 'Review this value', error: 'Choose a listed value or leave it for HR review.',
   })
 }
+const salaryStart = worksheet.getCell(2, basicSalaryColumn).address
+const salaryEnd = worksheet.getCell(preparedInputRows + 1, basicSalaryColumn).address
+worksheet.dataValidations.add(`${salaryStart}:${salaryEnd}`, {
+  type: 'decimal', operator: 'greaterThan', formulae: [0], allowBlank: false,
+  showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Positive basic salary required',
+  error: 'Enter a positive amount with no more than two decimal places.',
+})
 // Keep formula cells intact, but leave sheet navigation and all input cells
 // available in Excel. Sheet protection caused Tab from column Y to wrap to A.
 worksheet.protection = undefined

@@ -75,7 +75,7 @@ export function buildPayslipView(input: {
     companyName: company.name, companyMark: company.logo || 'GB',
     companyAddress: [company.address, company.town, company.province].filter(Boolean).join(', '),
     employeeName: [employee.first_name, employee.middle_name, employee.last_name].filter(Boolean).join(' '),
-    employeeNumber: employee.employee_number, jobTitle: employee.job_title, department: employee.department,
+    employeeNumber: employee.employee_number, jobTitle: employee.job_title ?? '', department: employee.department,
     branchName: branch?.name ?? 'Assigned branch', periodLabel: monthLabel(run.payroll_periods.period_start),
     leavePolicies: (statementDetails?.leave?.policies ?? []).map((policy) => ({
       leaveType: label(policy.leave_type) || 'Paid leave',

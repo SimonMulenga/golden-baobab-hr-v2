@@ -22,27 +22,27 @@ export type WorkbookExtraction = {
 
 const normalizeEnum = (value: string) => normalizeImportHeader(value).replaceAll(' ', '_').toUpperCase()
 const summaryRow = (values: unknown[]) => values.some((value) => /^(grand\s+total|sub\s*total|subtotal|total\s+employees|employee\s+count)$/i.test(String(value ?? '').trim()))
-const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay'])
+const employeeSignals = new Set(['employee_number','first_name','middle_name','last_name','full_name','identity_document_number','phone','email','tpin','napsa_number','nhima_number','job_title','department','employment_type','basic_pay','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay','company_name','branch_name'])
 
 export type ImportBranch = { id: string; name: string; status: string; code?: string }
 
+const normalizeOrgLabel = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+
 /** Resolve only an exact normalized name or company-scoped branch code. Fuzzy matches are never assigned. */
 export function matchAuthorizedImportBranch(value: unknown, branches: ImportBranch[]): ImportBranch | null {
-  const normalized = normalizeImportHeader(value)
+  const normalized = normalizeOrgLabel(value)
   if (!normalized) return null
   const active = branches.filter((branch) => branch.status.trim().toLowerCase() === 'active')
-  const comparable = (value: unknown) => normalizeImportHeader(value).replace(/\s+/g, '')
-  const normalizedComparable = comparable(value)
-  const matches = active.filter((branch) => comparable(branch.name) === normalizedComparable
-    || Boolean(branch.code && comparable(branch.code) === normalizedComparable))
+  const matches = active.filter((branch) => normalizeOrgLabel(branch.name) === normalized
+    || Boolean(branch.code && normalizeOrgLabel(branch.code) === normalized))
   return matches.length === 1 ? matches[0] : null
 }
 
 export function matchingInactiveImportBranch(value: unknown, branches: ImportBranch[]): ImportBranch | null {
-  const normalized = normalizeImportHeader(value)
+  const normalized = normalizeOrgLabel(value)
   if (!normalized) return null
   const matches = branches.filter((branch) => branch.status.trim().toLowerCase() !== 'active'
-    && normalizeImportHeader(branch.name) === normalized)
+    && normalizeOrgLabel(branch.name) === normalized)
   return matches.length === 1 ? matches[0] : null
 }
 
@@ -112,7 +112,7 @@ function amountValue(value: unknown): number | null {
 
 const payrollHeader = /allowance|lunch|meal|transport|medical|overtime|o\/t|earning|income|loan|advance|deduction|napsa|nhima|paye|levy|net pay|gross pay|bonus|commission|gratuity|arrears|reimburse|benefit|cash|bank|mobile|salary/i
 
-export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; branches: { id: string; name: string; status: string }[] }[], mappingOverrides: Record<string, EmployeeFieldMapping> = {}, defaultCompanyId?: string): WorkbookExtraction {
+export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: string; name: string; status?: string; branches: { id: string; name: string; status: string; code?: string }[] }[], mappingOverrides: Record<string, EmployeeFieldMapping> = {}, _defaultCompanyId?: string): WorkbookExtraction {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellNF: true, dense: false })
   const records: StagedWorkbookRow[] = []
   const exclusions: WorkbookExtraction['exclusions'] = []
@@ -199,8 +199,9 @@ export function extractEmployeeWorkbook(buffer: ArrayBuffer, companies: { id: st
       }
       const location = current.company_name
       const normalizedLocation = normalizeImportHeader(location)
-      const matchedCompany = normalizedLocation ? companies.find((item) => normalizeImportHeader(item.name) === normalizedLocation) : undefined
-      const company = matchedCompany ?? (!normalizedLocation ? companies.find((item) => item.id === defaultCompanyId) : undefined)
+      const companyMatches = normalizedLocation ? companies.filter((item) => (item.status ?? 'ACTIVE').trim().toLowerCase() === 'active'
+        && normalizeOrgLabel(item.name) === normalizeOrgLabel(location)) : []
+      const company = companyMatches.length === 1 ? companyMatches[0] : undefined
       if (company) current.company_name = company.name
       const branch = company ? matchAuthorizedImportBranch(current.branch_name, company.branches) : null
       if (branch) current.branch_name = branch.name
@@ -299,7 +300,7 @@ function splitFullName(data: Record<string, string>): void {
   const commaName = value.match(/^\s*([^,]+),\s*([^,]+)\s*$/)
   if (commaName) { data.last_name ||= commaName[1].trim(); data.first_name ||= commaName[2].trim(); return }
   const parts = value.split(/\s+/).filter(Boolean)
-  if (parts.length === 2) { data.first_name ||= parts[0]; data.last_name ||= parts[1] }
+  if (parts.length >= 2) { data.first_name ||= parts[0]; data.last_name ||= parts.slice(1).join(' ') }
 }
 
 function originalKey(headers: string[], column: number): string {
@@ -309,18 +310,16 @@ function originalKey(headers: string[], column: number): string {
 }
 
 export const requiredStagingFields = [
-  'employee_number','first_name','last_name','date_of_birth','nationality','job_title','department',
-  'employment_type','contract_type','contract_start_date','residential_address','phone','payment_method',
-  'emergency_contact_name','emergency_contact_relationship','emergency_contact_phone','salary_frequency','basic_pay',
+  'first_name','last_name','department','basic_pay',
 ] as const
 
 export function validateStagedEmployee(data: Record<string, string>, companyId: string, branchId: string): string[] {
   const errors = requiredStagingFields.filter((key) => !String(data[key] ?? '').trim()).map((key) => `${key} is required`)
   if (!companyId) errors.push('Company assignment is required')
   if (!branchId) errors.push('Branch assignment is required')
-  if (!data.email?.trim() && !data.email_unavailable_reason?.trim()) errors.push('Email or email unavailable reason is required')
   if (data.email?.trim() && !/^\S+@\S+\.\S+$/.test(data.email)) errors.push('Email is invalid')
-  if (data.basic_pay && (!/^\d{1,12}(?:\.\d{1,2})?$/.test(data.basic_pay) || Number(data.basic_pay) <= 0)) errors.push('Basic salary must be a positive amount with at most two decimal places')
+  if (!data.basic_pay?.trim()) errors.push('Basic salary is required')
+  else if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(data.basic_pay) || !Number.isFinite(Number(data.basic_pay)) || Number(data.basic_pay) <= 0) errors.push('Basic salary must be a valid positive amount with at most two decimal places')
   for (const key of ['housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances']) {
     if (data[key] && (!/^\d{1,12}(?:\.\d{1,2})?$/.test(data[key]) || Number(data[key]) < 0)) errors.push(`${key} must be a non-negative amount with at most two decimal places`)
   }
@@ -328,9 +327,7 @@ export function validateStagedEmployee(data: Record<string, string>, companyId: 
   if (data.employment_type && !['PERMANENT','FIXED_TERM','PART_TIME','CASUAL','DAILY_RATED'].includes(data.employment_type)) errors.push('Employment type is not supported')
   if (data.salary_frequency && !['MONTHLY','FORTNIGHTLY','WEEKLY','DAILY'].includes(data.salary_frequency)) errors.push('Salary frequency is not supported')
   if (data.payment_method && !['BANK_TRANSFER','MOBILE_MONEY','CASH'].includes(data.payment_method)) errors.push('Payment method is not supported')
-  if (data.payment_method === 'BANK_TRANSFER' && (!data.bank_name || !data.bank_account_name || !data.bank_account_number)) errors.push('Bank details are required for bank transfer')
   if (data.payment_method === 'BANK_TRANSFER' && data.bank_name && !normalizeTemplateBank(data.bank_name)) errors.push('Select a supported bank from the HR bank directory')
-  if (data.payment_method === 'MOBILE_MONEY' && (!data.mobile_money_provider || !data.mobile_money_number)) errors.push('Mobile wallet details are required for mobile money')
   if (data.retirement_age?.trim() && (!/^\d{1,3}$/.test(data.retirement_age) || Number(data.retirement_age) < 18 || Number(data.retirement_age) > 100)) errors.push('Retirement age must be a whole number from 18 to 100')
   if (data.overtime_eligible?.trim() && !['true','false','yes','no','1','0','eligible','not eligible'].includes(data.overtime_eligible.trim().toLowerCase())) errors.push('Overtime eligibility must be yes or no')
   if (data.date_of_birth && !isValidImportDate(data.date_of_birth)) errors.push('Date of birth must be an unambiguous date')
@@ -338,6 +335,22 @@ export function validateStagedEmployee(data: Record<string, string>, companyId: 
   if (data.contract_end_date && !isValidImportDate(data.contract_end_date)) errors.push('Contract end date must be an unambiguous date')
   if (data.contract_start_date && data.contract_end_date && data.contract_end_date < data.contract_start_date) errors.push('Contract end date cannot precede the start date')
   return errors
+}
+
+export function missingOptionalEmployeeFields(data: Record<string, string>): string[] {
+  const missing: string[] = []
+  const fields: [string, string][] = [
+    ['date_of_birth','Date of birth'],['gender','Gender'],['identity_document_number','NRC / identification number'],['nationality','Nationality'],
+    ['residential_address','Residential address'],['phone','Phone number'],['email','Email address'],
+    ['tpin','TPIN'],['napsa_number','NAPSA number'],['nhima_number','NHIMA number'],['job_title','Job title'],
+    ['employment_type','Employment type'],['contract_type','Contract type'],['contract_start_date','Employment start date'],
+    ['contract_end_date','Contract end date'],['salary_frequency','Salary frequency'],['payment_method','Payment method'],
+  ]
+  for (const [key,label] of fields) if (!String(data[key] ?? '').trim()) missing.push(label)
+  if (data.payment_method === 'BANK_TRANSFER' && !['bank_name','bank_account_name','bank_account_number'].every((key) => String(data[key] ?? '').trim())) missing.push('Bank details')
+  if (data.payment_method === 'MOBILE_MONEY' && !['mobile_money_provider','mobile_money_number'].every((key) => String(data[key] ?? '').trim())) missing.push('Mobile money details')
+  if (!['emergency_contact_name','emergency_contact_relationship','emergency_contact_phone'].every((key) => String(data[key] ?? '').trim())) missing.push('Emergency contact')
+  return missing
 }
 
 export function recalculateStagedHousingAllowance(data: Record<string, string>, key: string, value: string): Record<string, string> {
@@ -362,10 +375,11 @@ export function recalculateStagedHousingAllowance(data: Record<string, string>, 
 }
 
 export function duplicateWarningsForRow(row: StagedWorkbookRow, prior: StagedWorkbookRow[]): string[] {
+  if (!row.company_id) return []
   const number = row.current_data.employee_number.trim().toLocaleLowerCase()
   const identity = row.current_data.identity_document_number.trim().toLocaleLowerCase()
   const name = `${row.current_data.first_name} ${row.current_data.last_name}`.trim().toLocaleLowerCase()
-  return prior.filter((item) => item.company_id === row.company_id && item.branch_id === row.branch_id).flatMap((item) => {
+  return prior.filter((item) => item.company_id === row.company_id).flatMap((item) => {
     if (number && item.current_data.employee_number.trim().toLocaleLowerCase() === number) return ['Employee number is repeated in this workbook']
     if (identity && item.current_data.identity_document_number.trim().toLocaleLowerCase() === identity) return ['Identity reference is repeated in this workbook']
     if (name && `${item.current_data.first_name} ${item.current_data.last_name}`.trim().toLocaleLowerCase() === name) return ['Name is repeated in this workbook; confirm whether this is the same person']

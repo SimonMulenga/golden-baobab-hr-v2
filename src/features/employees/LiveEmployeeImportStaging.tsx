@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { getSupabaseClient } from '../../lib/supabase/client'
 import { useCompanySelection, useWorkspace } from '../companies/WorkspaceContext'
 import { createEmployeeImportStagingService, sha256File, type StagingRecord } from './employee-import-staging-service'
-import { detectEmployeeUploadFormat, extractEmployeeWorkbook, matchingInactiveImportBranch, recalculateStagedHousingAllowance, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
+import { detectEmployeeUploadFormat, duplicateWarningsForRow, extractEmployeeWorkbook, matchingInactiveImportBranch, missingOptionalEmployeeFields, recalculateStagedHousingAllowance, validateStagedEmployee, type StagedWorkbookRow } from './employee-import-staging'
 import { allowedTemplateBanks, employeeTemplateValues, liveImportFields, type EmployeeFieldMapping } from './live-import-model'
 import { createLiveHrServices, type DepartmentRecord } from '../../services/live-hr-services'
 import { calculateGrossEarningsPreview, downloadEmployeeTemplate } from './employee-import-template'
@@ -24,7 +24,11 @@ const reviewSelectOptions: Record<string, { value: string; label: string }[]> = 
     value: label.startsWith('Airtel') ? 'AIRTEL' : label.startsWith('MTN') ? 'MTN' : 'ZAMTEL', label,
   })),
 }
-const batchKey = (portfolioId: string, digest: string) => `gbhr-staging:${portfolioId}:${digest}`
+async function batchKey(portfolioId: string, digest: string, rows: StagedWorkbookRow[]) {
+  const rowDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(rows.map((row) => [row.source_sheet, row.source_row]))))
+  const rowKey = Array.from(new Uint8Array(rowDigest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `gbhr-staging:${portfolioId}:${digest}:${rowKey}`.slice(0, 160)
+}
 function excelColumnLabel(index: number) {
   let value = index + 1
   let label = ''
@@ -70,6 +74,7 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
   const [busy, setBusy] = useState(false)
   const [excludedDetails, setExcludedDetails] = useState(false)
   const [departments, setDepartments] = useState<DepartmentRecord[]>([])
+  const [companyDepartments, setCompanyDepartments] = useState<Record<string, DepartmentRecord[]>>({})
   const [departmentLoading, setDepartmentLoading] = useState(false)
   const [departmentError, setDepartmentError] = useState('')
   const [approvalDialogLoading, setApprovalDialogLoading] = useState(false)
@@ -97,8 +102,20 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
   }, [draft, draftCompanyId, draftBranchId, departments, departmentLoading, departmentError, selectedRecord])
   const grossPreview = useMemo(() => calculateGrossEarningsPreview(draft, false), [draft])
   const mappingConflicts = worksheetMappings.flatMap((sheet) => sheet.conflicts.map((issue) => `${sheet.sheet}: ${issue}`))
-  const previewNeedsAttention = records.filter((row) => validateStagedEmployee(row.current_data, row.company_id ?? '', row.branch_id ?? '').length > 0).length
+  function previewIssues(row: StagedWorkbookRow, index: number) {
+    const issues = validateStagedEmployee(row.current_data, row.company_id ?? '', row.branch_id ?? '')
+    issues.push(...duplicateWarningsForRow(row, records.filter((_, otherIndex) => otherIndex !== index)))
+    if (row.company_id && row.current_data.department.trim()) {
+      const dept = companyDepartments[row.company_id] ?? []
+      if (!dept.some((item) => item.name.trim().toLowerCase() === row.current_data.department.trim().toLowerCase() && item.status.toLowerCase() === 'active')) {
+        issues.push('Department is not registered and active for the selected company')
+      }
+    }
+    return [...new Set(issues)]
+  }
+  const previewNeedsAttention = records.filter((row,index) => previewIssues(row,index).length > 0).length
   const previewReadyForReview = records.length - previewNeedsAttention
+  const previewIncomplete = records.filter((row,index) => previewIssues(row,index).length===0&&missingOptionalEmployeeFields(row.current_data).length>0).length
   useEffect(() => {
     if (approvalRecordId) return
     if (currentCompany?.portfolioId && !portfolioId) setPortfolioId(currentCompany.portfolioId)
@@ -163,6 +180,12 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
       detectEmployeeUploadFormat(file.name, buffer)
       const extracted = extractEmployeeWorkbook(buffer, companies.filter((item) => item.portfolioId === chosenPortfolio), {}, currentCompany?.portfolioId === chosenPortfolio ? currentCompany.id : undefined)
       if (extracted.records.length === 0) throw new Error('No employee rows were found in the workbook worksheets.')
+      const companyRows = companies.filter((item) => item.portfolioId === chosenPortfolio)
+      const loadedDepartments = await Promise.all(companyRows.map(async (company) => {
+        try { return [company.id, await createLiveHrServices(getSupabaseClient()).catalog.departments(company.id, true)] as const }
+        catch { return [company.id, [] as DepartmentRecord[]] as const }
+      }))
+      setCompanyDepartments(Object.fromEntries(loadedDepartments))
       setPortfolioId(chosenPortfolio); setFileName(file.name); setSourceBuffer(buffer); setRecords(extracted.records); setExclusions(extracted.exclusions)
       setWorksheetMappings(extracted.worksheetMappings); setSelectedMappingSheet(extracted.worksheetMappings[0]?.sheet ?? '')
       setSheetSummary(extracted.sheetSummary); setReconciliation(extracted.reconciliation)
@@ -183,10 +206,22 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
   }
 
   function assignCompany(index: number, targetCompanyId: string) {
-    setRecords((items) => items.map((row, rowIndex) => rowIndex === index ? { ...row, company_id: targetCompanyId || null, branch_id: null } : row))
+    const target = companies.find((item) => item.id === targetCompanyId)
+    setRecords((items) => items.map((row, rowIndex) => rowIndex === index ? {
+      ...row, company_id: targetCompanyId || null, branch_id: null,
+      current_data: { ...row.current_data, company_name: target?.name ?? row.current_data.company_name, branch_name: '', department: '' },
+    } : row))
   }
   function assignBranch(index: number, branchId: string) {
-    setRecords((items) => items.map((row, rowIndex) => rowIndex === index ? { ...row, branch_id: branchId || null } : row))
+    setRecords((items) => items.map((row, rowIndex) => {
+      if (rowIndex !== index) return row
+      const company = companies.find((item) => item.id === row.company_id)
+      const branch = company?.branches.find((item) => item.id === branchId)
+      return { ...row, branch_id: branchId || null, current_data: { ...row.current_data, branch_name: branch?.name ?? '' } }
+    }))
+  }
+  function assignDepartment(index: number, departmentName: string) {
+    setRecords((items) => items.map((row, rowIndex) => rowIndex === index ? { ...row, current_data: { ...row.current_data, department: departmentName } } : row))
   }
 
   async function stageWorkbook() {
@@ -195,22 +230,52 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
     if (!fileName || records.length === 0) { setError('Choose and review a workbook first.'); return }
     if (mappingConflicts.length) { setError(`Resolve ambiguous column mappings before staging: ${mappingConflicts.join('; ')}`); return }
     if (records.length > 5000) { setError('A single staging batch is limited to 5,000 employee rows.'); return }
+    const duplicateRowKeys = new Set(records.flatMap((row,index) => duplicateWarningsForRow(row,records.filter((_,otherIndex)=>otherIndex!==index)).length ? [`${row.source_sheet}:${row.source_row}`] : []))
+    const assignedRows = records.filter((row) => Boolean(row.company_id) && !duplicateRowKeys.has(`${row.source_sheet}:${row.source_row}`))
+    const unresolvedRows = records.filter((row) => !row.company_id || duplicateRowKeys.has(`${row.source_sheet}:${row.source_row}`))
+    if (!assignedRows.length) { setError(records.some((row) => row.company_id) ? 'Resolve the duplicate employee number, identity or name conflicts shown in the preview before staging.' : 'Select a registered company for at least one row before staging. Rows with unknown or ambiguous companies remain available to correct in this preview.'); return }
     setBusy(true)
     try {
       const fileInput = document.querySelector<HTMLInputElement>('#employee-staging-file')?.files?.[0]
       if (!fileInput) throw new Error('Select the workbook again to stage it.')
       const digest = await sha256File(await fileInput.arrayBuffer())
-      const result = await createEmployeeImportStagingService(getSupabaseClient()).createBatch({
-        portfolioId, filename: fileName, sourceSha256: digest,
-        idempotencyKey: batchKey(portfolioId, digest), records, sheetSummary,
-        reconciliation: { ...reconciliation, excluded: exclusions },
-      })
+      const groups = new Map<string, StagedWorkbookRow[]>()
+      for (const row of assignedRows) {
+        const key = `${row.company_id}:${row.branch_id ?? ''}`
+        groups.set(key, [...(groups.get(key) ?? []), row])
+      }
+      const failedRows: StagedWorkbookRow[] = []
+      const summaries: string[] = []
+      const replayedGroups: boolean[] = []
+      for (const groupRows of groups.values()) {
+        try {
+          const groupSheets = sheetSummary.map((sheet) => ({ ...sheet, extracted: groupRows.filter((row) => row.source_sheet === sheet.sheet).length }))
+          const groupReconciliation = { ...reconciliation, row_count: groupRows.length,
+            basic_salary_total: groupRows.reduce((sum,row)=>sum+(Number(row.current_data.basic_pay)||0),0) }
+          const result = await createEmployeeImportStagingService(getSupabaseClient()).createBatch({
+            portfolioId, filename: fileName, sourceSha256: digest,
+            idempotencyKey: await batchKey(portfolioId, digest, groupRows), records: groupRows, sheetSummary: groupSheets,
+            reconciliation: { ...groupReconciliation, excluded: exclusions },
+          })
+          summaries.push(`${result.total_records} employee row${result.total_records === 1 ? '' : 's'} staged`)
+          replayedGroups.push(result.replayed)
+        } catch {
+          failedRows.push(...groupRows)
+        }
+      }
       window.dispatchEvent(new CustomEvent('gbhr-employee-approvals-changed'))
-      const savedNotice = `${result.total_records} employee${result.total_records === 1 ? '' : 's'} submitted for final HR approval.`
-      setRecords([]); setFileName('')
+      const savedNotice = summaries.length ? `${summaries.join('; ')} for secure HR review.` : ''
+      const remainingRows = [...unresolvedRows, ...failedRows]
+      setRecords(remainingRows)
+      if (remainingRows.length) {
+        setNotice(`${savedNotice} ${remainingRows.length} row${remainingRows.length === 1 ? '' : 's'} remain in the preview. Correct missing or ambiguous organization details and duplicate values. Rows that could not be staged may require an authorized import permission for their selected company and branch.`.trim())
+        if (failedRows.length) setError(`${failedRows.length} row${failedRows.length === 1 ? '' : 's'} could not be staged. Check company and branch access; no success was reported for those rows.`)
+        return
+      }
+      setFileName('')
       const inputElement = document.querySelector<HTMLInputElement>('#employee-staging-file')
       if (inputElement) inputElement.value = ''
-      navigate('/employee-approvals', { state: { employeeImportNotice: result.replayed ? `This workbook was already submitted. ${savedNotice}` : savedNotice } })
+      navigate('/employee-approvals', { state: { employeeImportNotice: replayedGroups.some(Boolean) ? `Previously staged workbook rows were confirmed. ${savedNotice}` : savedNotice } })
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Batch could not be staged. No success was reported; verify the batch list before retrying.') }
     finally { setBusy(false) }
   }
@@ -367,10 +432,10 @@ export function LiveEmployeeImportStaging({ approvalRecordId, canApprove = false
 
     {records.length > 0 && <section className="panel live-import-preview"><header><div><div className="section-eyebrow">LOCAL WORKBOOK PREVIEW</div><h2>{records.length.toLocaleString()} employee candidates across {sheetSummary.length} worksheets</h2><p>Basic salary subtotal in detected rows: ZMW {totalSalary.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. These are workbook values, not recalculated statutory payroll.</p></div></header>
       <details className="employee-import-mapping" open><summary>Review automatic field mapping ({worksheetMappings.length} worksheet{worksheetMappings.length===1?'':'s'})</summary><label>Worksheet<select aria-label="Worksheet mapping" value={selectedMappingSheet} onChange={(event)=>setSelectedMappingSheet(event.target.value)}>{worksheetMappings.map((sheet)=><option value={sheet.sheet} key={sheet.sheet}>{sheet.sheet} Â· row {sheet.headerRow} headings</option>)}</select></label>{(() => {const sheet=worksheetMappings.find((item)=>item.sheet===selectedMappingSheet);if(!sheet)return null;const templateKeys=new Set(['employee_number','first_name','middle_name','last_name','date_of_birth','gender','nationality','identity_document_number','residential_address','phone','email','email_unavailable_reason','company_name','branch_name','department','job_title','employment_type','contract_start_date','basic_pay','payment_method','bank_name','bank_account_number','mobile_money_provider','mobile_money_number','tpin','napsa_number','nhima_number','emergency_contact_name','emergency_contact_relationship','emergency_contact_phone','housing_allowance','meal_allowance','transport_allowance','medical_allowance','other_allowances','gross_pay']);const fields=liveImportFields.filter((field)=>templateKeys.has(field.key)||['contract_type','salary_frequency','bank_account_name'].includes(field.key));return <><div className="staging-fields">{fields.map((field)=><label key={field.key}><span>{field.label}</span><select aria-label={`Map ${field.label}`} value={sheet.mapping[field.key]===null||sheet.mapping[field.key]===undefined?'':String(sheet.mapping[field.key])} onChange={(event)=>changeMapping(sheet.sheet,field.key,event.target.value)}><option value="">Not mapped</option>{sheet.headers.map((header,index)=><option value={index} key={`${index}:${header}`}>{excelColumnLabel(index)}: {header||`Column ${index+1}`}{sheet.headers.slice(0,index).includes(header)?` (${index+1})`:''}</option>)}</select></label>)}</div>{mappingConflicts.length>0&&<div className="auth-shell-error" role="alert"><strong>Resolve ambiguous column mappings before staging:</strong> {mappingConflicts.join('; ')}</div>}</>})()}</details>
-      <div className="live-import-summary"><strong>Rows examined: {sheetSummary.reduce((sum, sheet) => sum + sheet.extracted + sheet.excluded, 0).toLocaleString()}</strong><strong>Employee candidates: {records.length.toLocaleString()}</strong><span>No local required fields missing: {previewReadyForReview.toLocaleString()}</span><span>Needs HR information: {previewNeedsAttention.toLocaleString()}</span><span>Excluded rows: {exclusions.length.toLocaleString()}</span><button type="button" className="button-secondary" onClick={downloadReconciliation}>Export validation report</button></div>
+      <div className="live-import-summary"><strong>Rows examined: {sheetSummary.reduce((sum, sheet) => sum + sheet.extracted + sheet.excluded, 0).toLocaleString()}</strong><strong>Employee candidates: {records.length.toLocaleString()}</strong><span>Valid: {previewReadyForReview.toLocaleString()}</span><span>Invalid: {previewNeedsAttention.toLocaleString()}</span><span>Valid but incomplete: {previewIncomplete.toLocaleString()}</span><span>Excluded rows: {exclusions.length.toLocaleString()}</span><button type="button" className="button-secondary" onClick={downloadReconciliation}>Export validation report</button></div>
       {reportSummary&&<div className="auth-shell-error" role="status"><strong>{reportSummary.worksheet} comparison:</strong> consolidated sheet reports {reportSummary.employee_count??'an unreadable count'} employees and ZMW {reportSummary.basic_subtotal?.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})??'an unreadable subtotal'}; source candidate count and basic salary subtotal are {Number(reconciliation.row_count??records.length)} and ZMW {Number(reconciliation.basic_salary_total??totalSalary).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. Difference: {reportSummary.employee_count==null?'count unavailable':Number(reconciliation.row_count??records.length)-reportSummary.employee_count} employee rows and {reportSummary.basic_subtotal==null?'subtotal unavailable':`ZMW ${(Number(reconciliation.basic_salary_total??totalSalary)-reportSummary.basic_subtotal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}. Review this variance before any payroll transaction.</div>}
       {reportSummary?.broken_formulas?.length? <div className="auth-shell-error" role="alert"><strong>Broken workbook formulas:</strong> {reportSummary.broken_formulas.map((formula)=>`${formula.cell} (row ${formula.row}): ${formula.error}`).join('; ')}. Payroll review remains separate from employee staging.</div>:null}
-      <div className="table-scroll import-candidate-table-wrap"><table className="employee-table import-candidate-table"><thead><tr><th>Source Row</th><th>Employee Number</th><th>Employee Name</th><th>Company</th><th>Workplace Branch</th><th>Department</th><th>Validation Status</th><th>Actions</th></tr></thead><tbody>{records.map((row,index) => {const company=companies.find((item)=>item.id===row.company_id);const inactiveBranch=company?matchingInactiveImportBranch(row.current_data.branch_name,company.branches):null;const rowIssues=validateStagedEmployee(row.current_data,row.company_id??'',row.branch_id??'');return <tr key={`${row.source_sheet}:${row.source_row}`}><td className="import-nowrap">{row.source_sheet} Â· {row.source_row}</td><td className="import-nowrap">{row.current_data.employee_number||'Not provided'}</td><td>{[row.current_data.first_name,row.current_data.middle_name,row.current_data.last_name].filter(Boolean).join(' ')||row.current_data.full_name||'Name needs review'}</td><td><select aria-label={`Company for ${row.source_sheet} row ${row.source_row}`} value={row.company_id ?? ''} onChange={(event)=>assignCompany(index,event.target.value)}><option value="">Select company</option>{portfolioCompanies.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></td><td><select aria-label={`Workplace branch for ${row.source_sheet} row ${row.source_row}`} value={row.branch_id ?? ''} disabled={!company} onChange={(event)=>assignBranch(index,event.target.value)}><option value="">Select active branch during approval review</option>{company?.branches.filter((item)=>item.status.toLowerCase()==='active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>{inactiveBranch?<small role="status">Workbook value â€œ{row.current_data.branch_name}â€ matches inactive branch â€œ{inactiveBranch.name}â€; it cannot be used for approval.</small>:!row.branch_id&&row.current_data.branch_name?<small role="status">Branch not recognized. Select the correct workplace branch. Workbook value: â€œ{row.current_data.branch_name}â€.</small>:null}</td><td>{row.current_data.department||'Not provided'}</td><td><span className={`approval-status ${rowIssues.length?'status-needs-information':'status-ready'}`}>{rowIssues.length?'Needs information':'No local field issues'}</span></td><td><details><summary>{rowIssues.length?`${rowIssues.length} items`:'Details'}</summary>{rowIssues.length?<ul>{rowIssues.map((issue)=><li key={issue}>{issue}</li>)}</ul>:<p>Duplicate and authorized company validation is repeated at the secure database boundary.</p>}</details></td></tr>})}</tbody></table></div>
+      <div className="table-scroll import-candidate-table-wrap"><table className="employee-table import-candidate-table"><thead><tr><th>Source Row</th><th>Employee Number</th><th>Employee Name</th><th>Company</th><th>Workplace Branch</th><th>Department</th><th>Basic Salary</th><th>Missing Optional Information</th><th>Validation Status</th><th>Actions</th></tr></thead><tbody>{records.map((row,index) => {const company=companies.find((item)=>item.id===row.company_id);const inactiveBranch=company?matchingInactiveImportBranch(row.current_data.branch_name,company.branches):null;const rowIssues=previewIssues(row,index);const allowedDepartments=companyDepartments[row.company_id??'']??[];return <tr key={`${row.source_sheet}:${row.source_row}`}><td className="import-nowrap">{row.source_sheet} Â· {row.source_row}</td><td className="import-nowrap">{row.current_data.employee_number||'Generated on import'}</td><td>{[row.current_data.first_name,row.current_data.middle_name,row.current_data.last_name].filter(Boolean).join(' ')||row.current_data.full_name||'Name needs review'}</td><td><select aria-label={`Company for ${row.source_sheet} row ${row.source_row}`} value={row.company_id ?? ''} onChange={(event)=>assignCompany(index,event.target.value)}><option value="">Select company</option>{portfolioCompanies.filter((item)=>item.status.toLowerCase()==='active').map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></td><td><select aria-label={`Workplace branch for ${row.source_sheet} row ${row.source_row}`} value={row.branch_id ?? ''} disabled={!company} onChange={(event)=>assignBranch(index,event.target.value)}><option value="">Select an active branch</option>{company?.branches.filter((item)=>item.status.toLowerCase()==='active').map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>{inactiveBranch?<small role="status">Workbook value â€œ{row.current_data.branch_name}â€ matches inactive branch â€œ{inactiveBranch.name}â€; it cannot be used for approval.</small>:!row.branch_id&&row.current_data.branch_name?<small role="status">Branch not recognized. Select the correct branch. Workbook value: â€œ{row.current_data.branch_name}â€.</small>:null}</td><td><select aria-label={`Department for ${row.source_sheet} row ${row.source_row}`} value={row.current_data.department} disabled={!company} onChange={(event)=>assignDepartment(index,event.target.value)}><option value="">Select active department</option>{row.current_data.department&&!allowedDepartments.some((item)=>item.name===row.current_data.department&&item.status.toLowerCase()==='active')&&<option value={row.current_data.department}>Needs review: {row.current_data.department}</option>}{allowedDepartments.filter((item)=>item.status.toLowerCase()==='active').map((item)=><option key={item.id} value={item.name}>{item.name}</option>)}</select></td><td>{row.current_data.basic_pay||'Missing'}</td><td>{missingOptionalEmployeeFields(row.current_data).join(', ') || 'None'}</td><td><span className={`approval-status ${rowIssues.length?'status-needs-information':'status-ready'}`}>{rowIssues.length?'Needs information':'Valid for review'}</span></td><td><details><summary>{rowIssues.length?`${rowIssues.length} items`:'Details'}</summary>{rowIssues.length?<ul>{rowIssues.map((issue)=><li key={issue}>{issue}</li>)}</ul>:<p>The database revalidates the company, branch, department, permissions, earnings, and duplicates before import.</p>}</details></td></tr>})}</tbody></table></div>
       <div className="employee-form-actions import-stage-action"><button type="button" className="button-primary" disabled={busy || !portfolioId || mappingConflicts.length > 0 || records.length === 0} onClick={() => void stageWorkbook()}>{busy ? 'Submittingâ€¦' : `Submit ${records.length.toLocaleString()} ${records.length === 1 ? 'Employee' : 'Employees'}`}</button>{!portfolioId && <span role="status">Waiting for authorized portfolio contextâ€¦</span>}{mappingConflicts.length > 0 && <span role="alert">Resolve the column mapping conflicts above before submission.</span>}</div>
       {sheetSummary.map((sheet)=><span className="live-form-hint" key={sheet.sheet}>{sheet.sheet}: {sheet.extracted} staged candidates, {sheet.excluded} excluded rows</span>)}
       {exclusions.length>0&&<details open={excludedDetails} onToggle={(event)=>setExcludedDetails((event.target as HTMLDetailsElement).open)}><summary>Rows excluded from employee staging ({exclusions.length})</summary><ul>{exclusions.map((item,index)=><li key={`${item.sheet}:${item.row}:${index}`}>{item.sheet} row {item.row}: {item.reason}</li>)}</ul></details>}

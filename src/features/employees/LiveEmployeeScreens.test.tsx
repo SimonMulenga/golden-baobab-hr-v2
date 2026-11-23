@@ -217,37 +217,35 @@ describe('LIVE employee screens', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Another reviewer changed this submission.')
   })
 
-  it('offers only Male and Female and keeps job title editable text', () => {
+  it('offers the supported gender values and keeps optional job title editable text', () => {
     renderRoute(<LiveEmployeeForm />)
     const gender = screen.getByLabelText('Gender')
-    expect(within(gender).getAllByRole('option').map((option) => option.textContent)).toEqual(['Select if applicable', 'Male', 'Female'])
-    const jobTitle = screen.getByLabelText('Job title *')
+    expect(within(gender).getAllByRole('option').map((option) => option.textContent)).toEqual(['Select if applicable', 'Male', 'Female', 'Non-binary', 'Undisclosed'])
+    const jobTitle = screen.getByLabelText('Job title')
     expect(jobTitle.tagName).toBe('INPUT')
     expect(jobTitle).toHaveAttribute('type', 'text')
   })
 
-  it('creates a company and branch bound employee draft and submits it to HR', async () => {
+  it('creates an incomplete but valid company and branch bound employee draft and submits it to HR', async () => {
     renderRoute(<LiveEmployeeForm />)
-    const values: Record<string, string> = {
-      'Employee number *': 'SYN-2001', 'First name *': 'Synthetic', 'Last name *': 'Person',
-      'Date of birth *': '1992-04-03', 'Nationality *': 'Zambian', 'Identity document number *': 'SYN-NRC-2001',
-      'Residential address *': 'Synthetic address', 'Phone number *': '+260000000000', Email: 'synthetic@example.invalid',
-      'Emergency contact *': 'Synthetic Contact', 'Relationship *': 'Colleague', 'Emergency phone *': '+260000000001',
-      'Job title *': 'Analyst', 'Department *': 'Finance', 'Contract type *': 'PERMANENT', 'Employment start *': '2026-10-01',
-      'Basic pay (ZMW) *': '6000', 'Bank name *': 'Synthetic Bank', 'Account name *': 'Synthetic Person', 'Account number *': 'SYN-ACCT-2001',
-    }
-    for (const [label, value] of Object.entries(values)) fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    await screen.findByRole('option', { name: 'Finance' })
     fireEvent.change(screen.getByLabelText('Company *'), { target: { value: 'company-synthetic' } })
     fireEvent.change(screen.getByLabelText('Workplace branch *'), { target: { value: 'branch-synthetic' } })
+    const values: Record<string, string> = {
+      'First name *': 'Synthetic', 'Last name *': 'Person','Department *': 'Finance','Basic pay (ZMW) *': '6000',
+    }
+    for (const [label, value] of Object.entries(values)) fireEvent.change(screen.getByLabelText(label), { target: { value } })
     fireEvent.click(screen.getByLabelText('Prorate housing allowance by scheduled days'))
     fireEvent.submit(screen.getByRole('button', { name: 'Save and submit for review' }).closest('form')!)
     await waitFor(() => expect(serviceMocks.createDraft).toHaveBeenCalledTimes(1))
     const input = serviceMocks.createDraft.mock.calls[0][0]
     expect(input.companyId).toBe('company-synthetic')
     expect(input.branchId).toBe('branch-synthetic')
-    expect(input.employee.employee_number).toBe('SYN-2001')
-    expect(input.privateDetails.identity_document_type).toBe('NRC')
-    expect(input.privateDetails.bank_account_number).toBe('SYN-ACCT-2001')
+    expect(input.employee.employee_number).toBe('')
+    expect(input.employee.date_of_birth).toBe('')
+    expect(input.privateDetails.email).toBe('')
+    expect(input.privateDetails.payment_method).toBeNull()
+    expect(input.privateDetails.bank_account_number).toBe('')
     expect(input.compensation.basic_pay).toBe(6000)
     expect(input.compensation.allowance_proration_rules).toEqual({ housing_allowance: 'SCHEDULED_DAYS' })
     expect(serviceMocks.submitForHrApproval).toHaveBeenCalledWith('employee-created-synthetic')
@@ -257,7 +255,8 @@ describe('LIVE employee screens', () => {
   it('loads creator-authorized correction details, saves edits and resubmits through trusted RPCs', async () => {
     renderCorrectionRoute()
     expect(await screen.findByRole('heading', { name: 'Correct employee record' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Account number *')).toHaveValue('SYN-ACCT-1001')
+    await screen.findByRole('option', { name: 'Finance' })
+    expect(screen.getByLabelText('Account number')).toHaveValue('SYN-ACCT-1001')
     fireEvent.change(screen.getByLabelText('Basic pay (ZMW) *'), { target: { value: '6500' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Save corrections and resubmit' }).closest('form')!)
     await waitFor(() => expect(serviceMocks.updateDraft).toHaveBeenCalledTimes(1))
@@ -274,7 +273,7 @@ describe('LIVE employee screens', () => {
     serviceMocks.correctionDetails.mockRejectedValue(new Error('permission denied'))
     renderCorrectionRoute()
     expect(await screen.findByRole('alert')).toHaveTextContent('unavailable for correction under your current access')
-    expect(screen.queryByLabelText('Account number *')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Account number')).not.toBeInTheDocument()
   })
 
   it('loads the authorized profile and approval timeline without rendering private or compensation fields', async () => {
